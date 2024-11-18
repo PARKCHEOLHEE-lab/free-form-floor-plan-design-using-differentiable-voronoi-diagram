@@ -24,11 +24,12 @@ class SvgPathParser:
             coordinates.append(coordinates[0])
 
         self.coordinates = np.array(coordinates)
-        self.boundary_polygon = geometry.Polygon(self.coordinates)
 
         if self.normalize:
             self.coordinates -= self.coordinates.mean(axis=0)
             self.coordinates /= np.linalg.norm(self.coordinates, axis=1).max()
+
+        self.boundary_polygon = geometry.Polygon(self.coordinates)
 
     def show(self):
         x, y = zip(*self.coordinates)
