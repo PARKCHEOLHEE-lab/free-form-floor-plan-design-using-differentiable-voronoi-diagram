@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+from shapely import geometry
 from svgpathtools import parse_path
 
 
@@ -23,6 +24,7 @@ class SvgPathParser:
             coordinates.append(coordinates[0])
 
         self.coordinates = np.array(coordinates)
+        self.boundary_polygon = geometry.Polygon(self.coordinates)
 
         if self.normalize:
             self.coordinates -= self.coordinates.mean(axis=0)
