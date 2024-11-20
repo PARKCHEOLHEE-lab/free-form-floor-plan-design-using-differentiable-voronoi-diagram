@@ -58,3 +58,88 @@ class Duck(SvgPathParser):
         """
 
         super().__init__(duck_path, normalize)
+
+
+class ShapePathParser:
+    def __init__(self, path, normalize):
+        self.path = path
+        self.normalize = normalize
+
+        self._parse()
+
+    def _parse(self):
+        self.coordinates = np.array(self.path)
+
+        if self.normalize:
+            self.coordinates -= self.coordinates.mean(axis=0)
+            self.coordinates /= np.linalg.norm(self.coordinates, axis=1).max()
+
+        self.boundary_polygon = geometry.Polygon(self.coordinates)
+
+    def show(self):
+        x, y = zip(*self.coordinates)
+        plt.plot(x, y, marker="o")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.show()
+
+
+class ShapeA(ShapePathParser):
+    def __init__(self, normalize=True):
+        path = [
+            [-51.2, -26.2],
+            [276.8, -26.2],
+            [276.8, 94.2],
+            [218.0, 94.2],
+            [218.0, 188.5],
+            [197.8, 188.5],
+            [197.8, 254.4],
+            [100.8, 254.4],
+            [100.8, 234.8],
+            [0.0, 234.8],
+            [0.0, 65.9],
+            [-51.2, 65.9],
+            [-51.2, -26.2],
+        ]
+
+        super().__init__(path, normalize)
+
+
+class ShapeB(ShapePathParser):
+    def __init__(self, normalize=True):
+        path = [
+            [36.1, 42.4],
+            [109.9, 42.4],
+            [109.9, 57.4],
+            [136.3, 57.4],
+            [136.3, 76.2],
+            [183.8, 76.2],
+            [183.8, 139.2],
+            [210.2, 139.2],
+            [210.2, 191.5],
+            [89.5, 191.5],
+            [89.5, 178.9],
+            [36.1, 178.9],
+            [36.1, 43.8],
+        ]
+
+        super().__init__(path, normalize)
+
+
+class ShapeC(ShapePathParser):
+    def __init__(self, normalize=True):
+        path = [
+            [48.5, 59.4],
+            [88.5, 59.4],
+            [88.5, 88.0],
+            [126.6, 88.0],
+            [126.6, 59.4],
+            [178.4, 59.4],
+            [178.4, 113.4],
+            [197.7, 113.4],
+            [197.7, 172.5],
+            [48.5, 172.5],
+            [48.5, 59.4],
+        ]
+
+        super().__init__(path, normalize)
