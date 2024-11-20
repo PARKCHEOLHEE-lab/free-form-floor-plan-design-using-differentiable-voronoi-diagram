@@ -1,14 +1,22 @@
+import os
+import sys
 import time
 import torch
+import random
 import shapely
 import numpy as np
 import multiprocessing
+import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 
 from typing import List, Callable
 from shapely import geometry, ops
 from torch.autograd.function import FunctionCtx
 
-from examples.examples import Duck
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from debugvisualizer.debugvisualizer import Plotter  # noqa: F401
+
+from examples import examples
 
 
 def runtime_calculator(func: Callable) -> Callable:
@@ -24,99 +32,94 @@ def runtime_calculator(func: Callable) -> Callable:
 
 
 class FloorPlanLoss(torch.autograd.Function):
-    A = "a"
-    B = "b"
-    C = "c"
-    BC = B + C
-    CC = C + C
-
     @staticmethod
-    def compute_combination(
-        point_1: geometry.Point,
-        point_2: geometry.Point,
-        boundary_exterior_buffered: geometry.Polygon,
-        boundary_vertices_buffered: geometry.MultiPolygon,
-    ):
-        point_1_type = FloorPlanLoss.A
-        if point_1.within(boundary_vertices_buffered):
-            point_1_type = FloorPlanLoss.C
-        elif point_1.within(boundary_exterior_buffered):
-            point_1_type = FloorPlanLoss.B
+    def compute_wall_loss(walls: torch.Tensor, w_wall: float = 1.1):
+        loss_wall = torch.abs(walls).sum()
+        loss_wall *= w_wall
 
-        point_2_type = FloorPlanLoss.A
-        if point_2.within(boundary_vertices_buffered):
-            point_2_type = FloorPlanLoss.C
-        elif point_2.within(boundary_exterior_buffered):
-            point_2_type = FloorPlanLoss.B
-
-        return "".join(sorted(point_1_type + point_2_type))
-
-    @staticmethod
-    def compute_wall_loss(wall_vectors: torch.Tensor, w_wall: float = 0.015):
-        return torch.abs(wall_vectors).sum() * w_wall
+        return loss_wall
 
     @staticmethod
     def compute_area_loss(
         cells: List[geometry.Polygon],
-        sites: torch.Tensor,
         target_areas: List[float],
         room_indices: List[int],
-        w_area: float = 1.0,
+        w_area: float = 1.5,
     ):
         current_areas = [0] * len(target_areas)
-        for site, room_index in zip(sites, room_indices):
-            site_point = geometry.Point(site.detach().numpy())
 
-            for cell in cells:
-                if cell.contains(site_point):
-                    current_areas[room_index] += cell.area
-                    break
+        for cell, room_index in zip(cells, room_indices):
+            current_areas[room_index] += cell.area
 
         current_areas = torch.tensor(current_areas)
         target_areas = torch.tensor(target_areas)
 
         area_difference = current_areas - target_areas
-        loss_area = torch.sum(area_difference**2) * w_area
+
+        loss_area = torch.sum(area_difference)
+        loss_area **= 2
+        loss_area *= w_area
 
         return loss_area
 
     @staticmethod
-    def compute_lloyd_loss(cells: List[geometry.Polygon], sites: torch.Tensor, w_lloyd: float = 0.1):
+    def compute_lloyd_loss(cells: List[geometry.Polygon], sites: torch.Tensor, w_lloyd: float = 0.8):
         loss_lloyd = 0
-        for site in sites:
+        for site, cell in zip(sites, cells):
+            if cell.is_empty:
+                continue
             site_point = geometry.Point(site.detach().numpy())
+            loss_lloyd += site_point.distance(cell.centroid)
 
-            for cell in cells:
-                if cell.contains(site_point):
-                    loss_lloyd += site_point.distance(cell.centroid)
-                    break
-
-        loss_lloyd = torch.tensor(loss_lloyd**2) * w_lloyd
+        loss_lloyd = torch.tensor(loss_lloyd)
+        loss_lloyd **= 2
+        loss_lloyd *= w_lloyd
 
         return loss_lloyd
 
+    @runtime_calculator
     @staticmethod
     def compute_topology_loss(
-        cells: List[geometry.Polygon], sites: torch.Tensor, room_indices: List[int], w_topo: float = 1.0
+        cells: List[geometry.Polygon],
+        raw_cells: List[geometry.Polygon],
+        sites_multipoint: geometry.MultiPoint,
+        room_indices: List[int],
+        w_topo: float = 2.0,
     ):
         rooms = [[] for _ in torch.tensor(room_indices).unique()]
         for cell, room_index in zip(cells, room_indices):
             rooms[room_index].append(cell)
 
+        raw_rooms = [[] for _ in rooms]
+        for raw_cell in raw_cells:
+            for ri, room in enumerate(rooms):
+                for r in room:
+                    if raw_cell.buffer(1e-12).contains(r):
+                        raw_rooms[ri].append(raw_cell)
+
         loss_topo = 0
-        for room in rooms:
+        for room, raw_room in zip(rooms, raw_rooms):
             room_union = ops.unary_union(room)
             room_union = room_union.buffer(1e-12, join_style=geometry.JOIN_STYLE.mitre)
             room_union = room_union.buffer(-1e-12, join_style=geometry.JOIN_STYLE.mitre)
 
             if isinstance(room_union, geometry.MultiPolygon):
-                sorted_room = sorted(room_union.geoms, key=lambda r: r.area, reverse=True)
+                raw_room_union = ops.unary_union(raw_room)
+                raw_room_union = raw_room_union.buffer(1e-12, join_style=geometry.JOIN_STYLE.mitre)
+                raw_room_union = raw_room_union.buffer(-1e-12, join_style=geometry.JOIN_STYLE.mitre)
 
-                for r in sorted_room[1:]:
-                    s, t = ops.nearest_points(sorted_room[0], r)
+                _, *other_raw_rooms = sorted(raw_room_union.geoms, key=lambda r: r.area, reverse=True)
+                largest_room, *_ = sorted(room_union.geoms, key=lambda r: r.area, reverse=True)
+                largest_room_sites = largest_room.intersection(sites_multipoint)
+
+                for other_raw_room in other_raw_rooms:
+                    other_room_site = other_raw_room.intersection(sites_multipoint)
+                    s, t = ops.nearest_points(largest_room_sites, other_room_site)
                     loss_topo += s.distance(t)
 
-        loss_topo = torch.tensor(loss_topo**2) * w_topo
+        loss_topo = torch.tensor(loss_topo)
+        loss_topo **= 2
+        loss_topo *= w_topo
 
         return loss_topo
 
@@ -129,64 +132,41 @@ class FloorPlanLoss(torch.autograd.Function):
         room_indices: List[int],
         save: bool = True,
     ) -> torch.Tensor:
-        boundary_exterior_buffered = boundary_polygon.exterior.buffer(1e-12)
-        boundary_vertices_buffered = geometry.MultiPoint(boundary_polygon.exterior.coords).buffer(1e-12)
-
         cells = []
-        wall_vectors = torch.tensor([])
-        vertices = torch.tensor([])
+        walls = []
 
-        points = geometry.MultiPoint([tuple(point) for point in sites.detach().numpy()])
-        for cell in shapely.voronoi_polygons(points, extend_to=boundary_polygon).geoms:
+        sites_multipoint = geometry.MultiPoint([tuple(point) for point in sites.detach().numpy()])
+        raw_cells = list(shapely.voronoi_polygons(sites_multipoint, extend_to=boundary_polygon).geoms)
+        for cell in raw_cells:
             intersected_cell = cell.intersection(boundary_polygon)
 
             intersected_cell_iter = [intersected_cell]
             if isinstance(intersected_cell, geometry.MultiPolygon):
                 intersected_cell_iter = list(intersected_cell.geoms)
 
-            for ic in intersected_cell_iter:
-                ic_exterior_coords = torch.tensor(ic.exterior.coords[:-1])
-                ic_exterior_coords_shifted = torch.cat([ic_exterior_coords[1:], ic_exterior_coords[0].unsqueeze(0)])
-
-                for iec, iecs in zip(ic_exterior_coords, ic_exterior_coords_shifted):
-                    points_combination = FloorPlanLoss.compute_combination(
-                        point_1=geometry.Point(iec),
-                        point_2=geometry.Point(iecs),
-                        boundary_exterior_buffered=boundary_exterior_buffered,
-                        boundary_vertices_buffered=boundary_vertices_buffered,
-                    )
-
-                    if points_combination in (FloorPlanLoss.BC, FloorPlanLoss.CC):
-                        continue
-
-                    wall_vector = iec - iecs
-                    wall_vector = wall_vector.unsqueeze(0)
-                    if len(wall_vectors) == 0:
-                        wall_vectors = torch.cat([wall_vectors, wall_vector])
-                        continue
-
-                    if 2 in torch.isclose(wall_vector, wall_vectors).sum(dim=1):
-                        continue
-
-                    wall_vectors = torch.cat([wall_vectors, wall_vector])
-
-                vertices = torch.cat([vertices, torch.tensor(ic.boundary.coords)])
-                cells.append(ic)
+            for intersected_cell in intersected_cell_iter:
+                exterior_coords = torch.tensor(intersected_cell.exterior.coords[:-1])
+                exterior_coords_shifted = torch.roll(exterior_coords, shifts=-1, dims=0)
+                walls.extend((exterior_coords - exterior_coords_shifted).tolist())
+                cells.append(intersected_cell)
 
         cells_sorted = []
+        raw_cells_sorted = []
         for site in sites:
             site_point = geometry.Point(site.detach().numpy())
 
-            for ci, cell in enumerate(cells):
-                if cell.contains(site_point):
+            for ci, (cell, raw_cell) in enumerate(zip(cells, raw_cells)):
+                if raw_cell.contains(site_point):
                     cells_sorted.append(cell)
+                    raw_cells_sorted.append(raw_cell)
                     cells.pop(ci)
+                    raw_cells.pop(ci)
                     break
 
-        loss_wall = FloorPlanLoss.compute_wall_loss(wall_vectors)
-        loss_area = FloorPlanLoss.compute_area_loss(cells_sorted, sites, target_areas, room_indices)
+        loss_wall = FloorPlanLoss.compute_wall_loss(torch.tensor(walls))
+        loss_area = FloorPlanLoss.compute_area_loss(cells_sorted, target_areas, room_indices)
         loss_lloyd = FloorPlanLoss.compute_lloyd_loss(cells_sorted, sites)
-        loss_topo = FloorPlanLoss.compute_topology_loss(cells_sorted, sites, room_indices)
+        loss_topo = FloorPlanLoss.compute_topology_loss(cells_sorted, raw_cells_sorted, sites_multipoint, room_indices)
 
         if save:
             ctx.save_for_backward(sites)
@@ -281,48 +261,86 @@ class FloorPlanGenerator(torch.nn.Module):
         return geometry.MultiPoint(self.sites.detach().numpy())
 
     def voronoi_geom(self):
-        voronoi = shapely.voronoi_polygons(self.sites_geom(), extend_to=self.boundary_polygon)
-        voronoi = [vor.intersection(self.boundary_polygon) for vor in voronoi.geoms]
-        voronoi = [vor for vor in voronoi if not vor.is_empty]
-        return voronoi
+        raw_cells = list(shapely.voronoi_polygons(self.sites_geom(), extend_to=self.boundary_polygon).geoms)
+        cells = [vor.intersection(self.boundary_polygon) for vor in raw_cells]
+        return cells, raw_cells
 
     def rooms_geom(self):
         rooms = [[] for _ in range(len(self.target_areas))]
-        for cell in self.voronoi_geom():
+
+        cells, raw_cells = self.voronoi_geom()
+
+        for cell, raw_cell in zip(cells, raw_cells):
+            if cell.is_empty:
+                continue
+
             for room_index, site in zip(self.room_indices, self.sites_geom().geoms):
-                if cell.contains(site):
+                if raw_cell.contains(site):
                     rooms[room_index].append(cell)
                     break
 
         return [ops.unary_union(r) for r in rooms]
 
+    def visualize(self):
+        plt.figure(figsize=(10, 10))
+
+        rooms = self.rooms_geom()
+        unique_indices = np.unique(self.room_indices)
+        colors = plt.cm.Set3(np.linspace(0, 1, len(unique_indices)))
+        color_map = {idx: color for idx, color in zip(unique_indices, colors)}
+
+        for room, idx in zip(rooms, self.room_indices):
+            color = color_map[idx]
+            if isinstance(room, geometry.MultiPolygon):
+                for polygon in room.geoms:
+                    plt.plot(*polygon.exterior.xy, color="black", linewidth=1.5)
+                    plt.gca().add_patch(Polygon(polygon.exterior.coords, facecolor=color, alpha=0.5))
+            else:
+                plt.plot(*room.exterior.xy, color="black", linewidth=1.5)
+                plt.gca().add_patch(Polygon(room.exterior.coords, facecolor=color, alpha=0.5))
+
+        cells, _ = self.voronoi_geom()
+        for cell in cells:
+            if isinstance(cell, geometry.MultiPolygon):
+                for polygon in cell.geoms:
+                    plt.plot(*polygon.exterior.xy, color="gray", linewidth=0.5)
+            else:
+                plt.plot(*cell.exterior.xy, color="gray", linewidth=0.5)
+
+        sites = self.sites.detach().numpy()
+        plt.scatter(sites[:, 0], sites[:, 1], c="black", s=10)
+
+        bounds = self.boundary_polygon.bounds
+        plt.xlim(bounds[0], bounds[2])
+        plt.ylim(bounds[1], bounds[3])
+
+        plt.axis("equal")
+        plt.title(f"Iteration {iteration}")
+        plt.savefig(f"iteration_{iteration}.png")
+        plt.close()
+
 
 if __name__ == "__main__":
-    import os
-    import sys
-    import random
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Polygon
-
     seed = 777
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    shape = examples.ShapeA()
 
-    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-    from debugvisualizer.debugvisualizer import Plotter  # noqa: F401
+    area_ratio = [0.5, 0.2, 0.2, 0.1]
+    target_areas = [shape.boundary_polygon.area * ratio for ratio in area_ratio]
 
-    duck = Duck()
-
-    # Example usage
-    area_ratio = [0.4, 0.3, 0.1, 0.1, 0.1]
-    target_areas = [duck.boundary_polygon.area * ratio for ratio in area_ratio]
     model = FloorPlanGenerator(
-        num_sites=40, boundary=duck.coordinates, boundary_polygon=duck.boundary_polygon, target_areas=target_areas
+        num_sites=40, boundary=shape.coordinates, boundary_polygon=shape.boundary_polygon, target_areas=target_areas
     )
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-    for iteration in range(100):
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+    for iteration in range(501):
+        if iteration == 250:
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = 1e-3
+
         optimizer.zero_grad()
         loss = FloorPlanLoss.apply(model.sites, model.boundary_polygon, model.target_areas, model.room_indices)
         loss.backward()
@@ -330,36 +348,4 @@ if __name__ == "__main__":
 
         if iteration % 10 == 0:
             print(f"Iteration {iteration}, Loss: {loss.item()}")
-
-            # Create plot
-            plt.figure(figsize=(10, 10))
-
-            # Plot rooms with colors based on room_indices
-            rooms = model.rooms_geom()
-            unique_indices = np.unique(model.room_indices)  # Using numpy instead of torch
-            colors = plt.cm.Set3(np.linspace(0, 1, len(unique_indices)))
-            # Create color mapping dictionary
-            color_map = {idx: color for idx, color in zip(unique_indices, colors)}
-
-            for room, idx in zip(rooms, model.room_indices):
-                color = color_map[idx]  # No need for .item() since we're using numpy
-                # Handle both Polygon and MultiPolygon cases
-                if isinstance(room, geometry.MultiPolygon):
-                    for polygon in room.geoms:
-                        plt.gca().add_patch(Polygon(polygon.exterior.coords, facecolor=color, alpha=0.5))
-                else:
-                    plt.gca().add_patch(Polygon(room.exterior.coords, facecolor=color, alpha=0.5))
-
-            # Plot sites
-            sites = model.sites.detach().numpy()
-            plt.scatter(sites[:, 0], sites[:, 1], c="black", s=10)
-
-            # Set plot limits based on boundary
-            bounds = model.boundary_polygon.bounds
-            plt.xlim(bounds[0], bounds[2])
-            plt.ylim(bounds[1], bounds[3])
-
-            plt.axis("equal")
-            plt.title(f"Iteration {iteration}")
-            plt.savefig(f"iteration_{iteration}.png")
-            plt.close()
+            model.visualize()
