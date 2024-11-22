@@ -1,2 +1,4 @@
 debugvisualizer/
 __pycache__
+
+*.png

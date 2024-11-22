@@ -32,10 +32,15 @@ def runtime_calculator(func: Callable) -> Callable:
 
 
 class FloorPlanLoss(torch.autograd.Function):
+    w_wall = 1.5
+    w_area = 0.8
+    w_lloyd = 1.2
+    w_topo = 2.0
+
     @staticmethod
-    def compute_wall_loss(walls: torch.Tensor, w_wall: float = 1.1):
+    def compute_wall_loss(walls: torch.Tensor):
         loss_wall = torch.abs(walls).sum()
-        loss_wall *= w_wall
+        loss_wall *= FloorPlanLoss.w_wall
 
         return loss_wall
 
@@ -44,7 +49,6 @@ class FloorPlanLoss(torch.autograd.Function):
         cells: List[geometry.Polygon],
         target_areas: List[float],
         room_indices: List[int],
-        w_area: float = 1.5,
     ):
         current_areas = [0] * len(target_areas)
 
@@ -58,12 +62,12 @@ class FloorPlanLoss(torch.autograd.Function):
 
         loss_area = torch.sum(area_difference)
         loss_area **= 2
-        loss_area *= w_area
+        loss_area *= FloorPlanLoss.w_area
 
         return loss_area
 
     @staticmethod
-    def compute_lloyd_loss(cells: List[geometry.Polygon], sites: torch.Tensor, w_lloyd: float = 0.8):
+    def compute_lloyd_loss(cells: List[geometry.Polygon], sites: torch.Tensor):
         loss_lloyd = 0
         for site, cell in zip(sites, cells):
             if cell.is_empty:
@@ -73,18 +77,16 @@ class FloorPlanLoss(torch.autograd.Function):
 
         loss_lloyd = torch.tensor(loss_lloyd)
         loss_lloyd **= 2
-        loss_lloyd *= w_lloyd
+        loss_lloyd *= FloorPlanLoss.w_lloyd
 
         return loss_lloyd
 
-    @runtime_calculator
     @staticmethod
     def compute_topology_loss(
         cells: List[geometry.Polygon],
         raw_cells: List[geometry.Polygon],
         sites_multipoint: geometry.MultiPoint,
         room_indices: List[int],
-        w_topo: float = 2.0,
     ):
         rooms = [[] for _ in torch.tensor(room_indices).unique()]
         for cell, room_index in zip(cells, room_indices):
@@ -92,10 +94,16 @@ class FloorPlanLoss(torch.autograd.Function):
 
         raw_rooms = [[] for _ in rooms]
         for raw_cell in raw_cells:
+            buffered_raw_cell = raw_cell.buffer(1e-12)
             for ri, room in enumerate(rooms):
+                found = False
                 for r in room:
-                    if raw_cell.buffer(1e-12).contains(r):
+                    if buffered_raw_cell.contains(r):
                         raw_rooms[ri].append(raw_cell)
+                        found = True
+                        break
+                if found:
+                    break
 
         loss_topo = 0
         for room, raw_room in zip(rooms, raw_rooms):
@@ -104,22 +112,27 @@ class FloorPlanLoss(torch.autograd.Function):
             room_union = room_union.buffer(-1e-12, join_style=geometry.JOIN_STYLE.mitre)
 
             if isinstance(room_union, geometry.MultiPolygon):
+                largest_room, *other_rooms = sorted(room_union.geoms, key=lambda r: r.area, reverse=True)
+                largest_room_sites = largest_room.intersection(sites_multipoint)
+
                 raw_room_union = ops.unary_union(raw_room)
                 raw_room_union = raw_room_union.buffer(1e-12, join_style=geometry.JOIN_STYLE.mitre)
                 raw_room_union = raw_room_union.buffer(-1e-12, join_style=geometry.JOIN_STYLE.mitre)
 
-                _, *other_raw_rooms = sorted(raw_room_union.geoms, key=lambda r: r.area, reverse=True)
-                largest_room, *_ = sorted(room_union.geoms, key=lambda r: r.area, reverse=True)
-                largest_room_sites = largest_room.intersection(sites_multipoint)
+                if isinstance(raw_room_union, geometry.MultiPolygon):
+                    _, *other_raw_rooms = sorted(raw_room_union.geoms, key=lambda r: r.area, reverse=True)
 
-                for other_raw_room in other_raw_rooms:
-                    other_room_site = other_raw_room.intersection(sites_multipoint)
-                    s, t = ops.nearest_points(largest_room_sites, other_room_site)
-                    loss_topo += s.distance(t)
+                    for other_raw_room in other_raw_rooms:
+                        other_room_site = other_raw_room.intersection(sites_multipoint)
+                        s, t = ops.nearest_points(largest_room_sites, other_room_site)
+                        loss_topo += s.distance(t)
+
+                else:
+                    print("fixing wip")
 
         loss_topo = torch.tensor(loss_topo)
         loss_topo **= 2
-        loss_topo *= w_topo
+        loss_topo *= FloorPlanLoss.w_topo
 
         return loss_topo
 
