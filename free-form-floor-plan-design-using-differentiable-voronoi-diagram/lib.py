@@ -38,8 +38,12 @@ class FloorPlanLoss(torch.autograd.Function):
     w_topo = 2.0
 
     @staticmethod
-    def compute_wall_loss(walls: torch.Tensor):
-        loss_wall = torch.abs(walls).sum()
+    def compute_wall_loss(walls: torch.Tensor, normalize=False):
+        if normalize:
+            loss_wall = torch.abs(walls / torch.norm(walls, dim=1).unsqueeze(1)).sum()
+        else:
+            loss_wall = torch.abs(walls).sum()
+
         loss_wall *= FloorPlanLoss.w_wall
 
         return loss_wall
