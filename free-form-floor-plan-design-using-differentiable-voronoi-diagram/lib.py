@@ -38,13 +38,14 @@ def runtime_calculator(func: Callable) -> Callable:
 
 class FloorPlanLoss(torch.autograd.Function):
     w_wall = 1.5
-    w_area = 0.8
-    w_lloyd = 1.2
-    w_topo = 2.0
+    w_area = 5.0
+    w_lloyd = 1.0
+    w_topo = 1.8
+    w_bb = 0.0
 
     @staticmethod
-    def compute_wall_loss(walls: torch.Tensor, normalize=False):
-        if normalize:
+    def compute_wall_loss(walls: torch.Tensor, unitize=False):
+        if unitize:
             loss_wall = torch.abs(walls / torch.norm(walls, dim=1).unsqueeze(1)).sum()
         else:
             loss_wall = torch.abs(walls).sum()
@@ -91,11 +92,7 @@ class FloorPlanLoss(torch.autograd.Function):
         return loss_lloyd
 
     @staticmethod
-    def compute_topology_loss(cells: List[geometry.Polygon], room_indices: List[int]):
-        rooms_group = [[] for _ in torch.tensor(room_indices).unique()]
-        for cell, room_index in zip(cells, room_indices):
-            rooms_group[room_index].append(cell)
-
+    def compute_topology_loss(rooms_group: List[List[geometry.Polygon]]):
         loss_topo = 0
 
         for room_group in rooms_group:
@@ -112,6 +109,19 @@ class FloorPlanLoss(torch.autograd.Function):
         loss_topo *= FloorPlanLoss.w_topo
 
         return loss_topo
+
+    @staticmethod
+    def compute_bb_loss(rooms_group: List[List[geometry.Polygon]]):
+        loss_bb = 0
+        for room_group in rooms_group:
+            room_union = ops.unary_union(room_group)
+            loss_bb += room_union.area / room_union.envelope.area
+
+        loss_bb = torch.tensor(loss_bb)
+        loss_bb **= 2
+        loss_bb *= FloorPlanLoss.w_bb
+
+        return loss_bb
 
     @staticmethod
     def forward(
@@ -151,10 +161,15 @@ class FloorPlanLoss(torch.autograd.Function):
                     raw_cells.pop(ci)
                     break
 
+        rooms_group = [[] for _ in torch.tensor(room_indices).unique()]
+        for cell, room_index in zip(cells_sorted, room_indices):
+            rooms_group[room_index].append(cell)
+
         loss_wall = FloorPlanLoss.compute_wall_loss(torch.tensor(walls))
         loss_area = FloorPlanLoss.compute_area_loss(cells_sorted, target_areas, room_indices)
         loss_lloyd = FloorPlanLoss.compute_lloyd_loss(cells_sorted, sites)
-        loss_topo = FloorPlanLoss.compute_topology_loss(cells_sorted, room_indices)
+        loss_topo = FloorPlanLoss.compute_topology_loss(rooms_group)
+        loss_bb = FloorPlanLoss.compute_bb_loss(rooms_group)
 
         if save:
             ctx.save_for_backward(sites)
@@ -162,7 +177,7 @@ class FloorPlanLoss(torch.autograd.Function):
             ctx.target_areas = target_areas
             ctx.boundary_polygon = boundary_polygon
 
-        return loss_wall + loss_area + loss_lloyd + loss_topo
+        return loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb
 
     @staticmethod
     def _backward_one(args):
