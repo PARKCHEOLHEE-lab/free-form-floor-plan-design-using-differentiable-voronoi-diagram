@@ -90,53 +90,21 @@ class FloorPlanLoss(torch.autograd.Function):
         return loss_lloyd
 
     @staticmethod
-    def compute_topology_loss(
-        cells: List[geometry.Polygon],
-        raw_cells: List[geometry.Polygon],
-        sites_multipoint: geometry.MultiPoint,
-        room_indices: List[int],
-    ):
-        rooms = [[] for _ in torch.tensor(room_indices).unique()]
+    def compute_topology_loss(cells: List[geometry.Polygon], room_indices: List[int]):
+        rooms_group = [[] for _ in torch.tensor(room_indices).unique()]
         for cell, room_index in zip(cells, room_indices):
-            rooms[room_index].append(cell)
-
-        raw_rooms = [[] for _ in rooms]
-        for raw_cell in raw_cells:
-            buffered_raw_cell = raw_cell.buffer(1e-12)
-            for ri, room in enumerate(rooms):
-                found = False
-                for r in room:
-                    if buffered_raw_cell.contains(r):
-                        raw_rooms[ri].append(raw_cell)
-                        found = True
-                        break
-                if found:
-                    break
+            rooms_group[room_index].append(cell)
 
         loss_topo = 0
-        for room, raw_room in zip(rooms, raw_rooms):
-            room_union = ops.unary_union(room)
-            room_union = room_union.buffer(1e-12, join_style=geometry.JOIN_STYLE.mitre)
-            room_union = room_union.buffer(-1e-12, join_style=geometry.JOIN_STYLE.mitre)
 
+        for room_group in rooms_group:
+            room_union = ops.unary_union(room_group)
             if isinstance(room_union, geometry.MultiPolygon):
-                largest_room, *other_rooms = sorted(room_union.geoms, key=lambda r: r.area, reverse=True)
-                largest_room_sites = largest_room.intersection(sites_multipoint)
+                largest_room, *_ = sorted(room_union.geoms, key=lambda r: r.area, reverse=True)
 
-                raw_room_union = ops.unary_union(raw_room)
-                raw_room_union = raw_room_union.buffer(1e-12, join_style=geometry.JOIN_STYLE.mitre)
-                raw_room_union = raw_room_union.buffer(-1e-12, join_style=geometry.JOIN_STYLE.mitre)
-
-                if isinstance(raw_room_union, geometry.MultiPolygon):
-                    _, *other_raw_rooms = sorted(raw_room_union.geoms, key=lambda r: r.area, reverse=True)
-
-                    for other_raw_room in other_raw_rooms:
-                        other_room_site = other_raw_room.intersection(sites_multipoint)
-                        s, t = ops.nearest_points(largest_room_sites, other_room_site)
-                        loss_topo += s.distance(t)
-
-                else:
-                    print("fixing wip")
+                for room in room_group:
+                    if not room.intersects(largest_room):
+                        loss_topo += largest_room.centroid.distance(room)
 
         loss_topo = torch.tensor(loss_topo)
         loss_topo **= 2
@@ -187,7 +155,7 @@ class FloorPlanLoss(torch.autograd.Function):
         loss_wall = FloorPlanLoss.compute_wall_loss(torch.tensor(walls))
         loss_area = FloorPlanLoss.compute_area_loss(cells_sorted, target_areas, room_indices)
         loss_lloyd = FloorPlanLoss.compute_lloyd_loss(cells_sorted, sites)
-        loss_topo = FloorPlanLoss.compute_topology_loss(cells_sorted, raw_cells_sorted, sites_multipoint, room_indices)
+        loss_topo = FloorPlanLoss.compute_topology_loss(cells_sorted, room_indices)
 
         if save:
             ctx.save_for_backward(sites)
