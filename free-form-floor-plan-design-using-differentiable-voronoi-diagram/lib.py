@@ -141,14 +141,12 @@ class FloorPlanLoss(torch.autograd.Function):
 
         cells_sorted = []
         raw_cells_sorted = []
-        for site in sites:
-            site_point = geometry.Point(site.detach().numpy())
-
+        for site_point in sites_multipoint.geoms:
             for ci, (cell, raw_cell) in enumerate(zip(cells, raw_cells)):
                 if raw_cell.contains(site_point):
                     cells_sorted.append(cell)
-                    raw_cells_sorted.append(raw_cell)
                     cells.pop(ci)
+                    raw_cells_sorted.append(raw_cell)
                     raw_cells.pop(ci)
                     break
 
