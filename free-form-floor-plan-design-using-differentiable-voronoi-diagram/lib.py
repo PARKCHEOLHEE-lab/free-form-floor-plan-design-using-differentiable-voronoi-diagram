@@ -7,8 +7,9 @@ import shapely
 import numpy as np
 import multiprocessing
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon
 
+from matplotlib.path import Path
+from matplotlib.patches import PathPatch
 from typing import List, Callable
 from shapely import geometry, ops
 from torch.autograd.function import FunctionCtx
@@ -288,11 +289,30 @@ class FloorPlanGenerator(torch.nn.Module):
             color = color_map[ri]
             if isinstance(room, geometry.MultiPolygon):
                 for polygon in room.geoms:
+                    path = Path.make_compound_path(
+                        Path(np.asarray(polygon.exterior.coords)[:, :2]),
+                        *[Path(np.asarray(ring.coords)[:, :2]) for ring in polygon.interiors],
+                    )
+
+                    patch = PathPatch(path, edgecolor=color, linewidth=1.5, facecolor=color, alpha=0.5)
+
+                    plt.gca().add_patch(patch)
                     plt.plot(*polygon.exterior.xy, color="black", linewidth=1.5)
-                    plt.gca().add_patch(Polygon(polygon.exterior.coords, facecolor=color, alpha=0.5))
+                    for interior in polygon.interiors:
+                        plt.plot(*interior.xy, color="black", linewidth=1.5)
+
             else:
+                path = Path.make_compound_path(
+                    Path(np.asarray(room.exterior.coords)[:, :2]),
+                    *[Path(np.asarray(ring.coords)[:, :2]) for ring in room.interiors],
+                )
+
+                patch = PathPatch(path, edgecolor=color, linewidth=1.5, facecolor=color, alpha=0.5)
+
+                plt.gca().add_patch(patch)
                 plt.plot(*room.exterior.xy, color="black", linewidth=1.5)
-                plt.gca().add_patch(Polygon(room.exterior.coords, facecolor=color, alpha=0.5))
+                for interior in room.interiors:
+                    plt.plot(*interior.xy, color="black", linewidth=1.5)
 
         cells, _ = self.voronoi_geom()
         for cell in cells:
