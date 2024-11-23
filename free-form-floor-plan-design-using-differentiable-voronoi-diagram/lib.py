@@ -242,7 +242,12 @@ class FloorPlanLoss(torch.autograd.Function):
 
 class FloorPlanGenerator(torch.nn.Module):
     def __init__(
-        self, num_sites: int, boundary: np.ndarray, boundary_polygon: geometry.Polygon, target_areas: List[float]
+        self,
+        num_sites: int,
+        boundary: np.ndarray,
+        boundary_polygon: geometry.Polygon,
+        target_areas: List[float],
+        area_ratio: List[float],
     ):
         super().__init__()
 
@@ -250,9 +255,12 @@ class FloorPlanGenerator(torch.nn.Module):
         self.boundary = boundary
         self.boundary_polygon = boundary_polygon
         self.target_areas = target_areas
+        self.area_ratio = area_ratio
 
         self.sites = self._initialize_parameters()
-        self.room_indices = torch.randint(low=0, high=len(target_areas), size=(len(self.sites),)).tolist()
+        self.room_indices = random.choices(
+            population=range(len(self.area_ratio)), weights=self.area_ratio, k=len(self.sites)
+        )
 
     def _initialize_parameters(self):
         centroid = self.boundary_polygon.representative_point()
@@ -348,7 +356,11 @@ if __name__ == "__main__":
     target_areas = [shape.boundary_polygon.area * ratio for ratio in area_ratio]
 
     model = FloorPlanGenerator(
-        num_sites=40, boundary=shape.coordinates, boundary_polygon=shape.boundary_polygon, target_areas=target_areas
+        num_sites=40,
+        boundary=shape.coordinates,
+        boundary_polygon=shape.boundary_polygon,
+        target_areas=target_areas,
+        area_ratio=area_ratio,
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
