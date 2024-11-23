@@ -315,11 +315,11 @@ class FloorPlanGenerator(torch.nn.Module):
 
         rooms = self.rooms_geom()
         unique_indices = np.unique(self.room_indices)
-        colors = plt.cm.Set3(np.linspace(0, 1, len(unique_indices)))
-        color_map = {idx: color for idx, color in zip(unique_indices, colors)}
+        colors = [plt.cm.Accent(i) for i in range(len(unique_indices))]
+        color_map = {ci: color for ci, color in zip(unique_indices, colors)}
 
-        for room, idx in zip(rooms, self.room_indices):
-            color = color_map[idx]
+        for ri, room in enumerate(rooms):
+            color = color_map[ri]
             if isinstance(room, geometry.MultiPolygon):
                 for polygon in room.geoms:
                     plt.plot(*polygon.exterior.xy, color="black", linewidth=1.5)
@@ -332,9 +332,9 @@ class FloorPlanGenerator(torch.nn.Module):
         for cell in cells:
             if isinstance(cell, geometry.MultiPolygon):
                 for polygon in cell.geoms:
-                    plt.plot(*polygon.exterior.xy, color="gray", linewidth=0.5)
+                    plt.plot(*polygon.exterior.xy, color="gray", linewidth=0.3)
             else:
-                plt.plot(*cell.exterior.xy, color="gray", linewidth=0.5)
+                plt.plot(*cell.exterior.xy, color="gray", linewidth=0.3)
 
         sites = self.sites.detach().numpy()
         plt.scatter(sites[:, 0], sites[:, 1], c="black", s=10)
