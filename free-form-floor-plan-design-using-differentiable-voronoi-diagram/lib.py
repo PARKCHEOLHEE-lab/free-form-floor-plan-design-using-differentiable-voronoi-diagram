@@ -14,7 +14,11 @@ from shapely import geometry, ops
 from torch.autograd.function import FunctionCtx
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from debugvisualizer.debugvisualizer import Plotter  # noqa: F401
+
+try:
+    from debugvisualizer.debugvisualizer import Plotter  # noqa: F401
+except ImportError:
+    pass
 
 from examples import examples
 
