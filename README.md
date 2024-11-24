@@ -40,15 +40,14 @@ This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.1
 - `shape_duck.py`: Duck-shaped plan boundary.
 
 ### runs
-- `shape_a/11-25-2024__00-20-42`
+- `shape_<a>/11-25-2024__00-20-42`
     - `configs.json`: Used configs for shape_a
+    - `events.*`: Tensorboard logs
     - `optimization.gif`: Animation for optimizing shape_a
 - `shape_b/11-25-2024__00-48-49`
     - `configs.json`: Used configs for shape_b
+    - `events.*`: Tensorboard logs
     - `optimization.gif`: Animation for optimizing shape_b
-- `shape_c/ `
-    - `configs.json`: Used configs for shape_c
-    - `optimization.gif`: Animation for optimizing shape_c
 
 ### src
 - `generator.py`: Voronoi diagram's sites generator.
