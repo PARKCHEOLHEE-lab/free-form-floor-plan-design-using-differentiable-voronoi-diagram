@@ -57,14 +57,11 @@ class FloorPlanLoss(torch.autograd.Function):
 
     @staticmethod
     def compute_lloyd_loss(cells: List[geometry.Polygon], sites: torch.Tensor, w_lloyd: float = 1.0):
-        loss_lloyd = 0.0
-        for site, cell in zip(sites, cells):
-            if cell.is_empty:
-                continue
-            site_point = geometry.Point(site.detach().numpy())
-            loss_lloyd += site_point.distance(cell.centroid)
+        valids = [(site.tolist(), cell) for site, cell in zip(sites, cells) if not cell.is_empty]
+        valid_centroids = torch.tensor([cell.centroid.coords[0] for _, cell in valids])
+        valid_sites = torch.tensor([site for site, _ in valids])
 
-        loss_lloyd = torch.tensor(loss_lloyd)
+        loss_lloyd = torch.norm(valid_centroids - valid_sites, dim=1).sum()
         loss_lloyd **= 2
         loss_lloyd *= w_lloyd
 
