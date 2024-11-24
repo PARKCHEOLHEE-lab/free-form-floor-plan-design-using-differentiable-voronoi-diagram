@@ -166,6 +166,8 @@ class FloorPlanGenerator(torch.nn.Module):
         print(f"Iteration {iteration}, Loss: {loss.item()}")
 
     def gif(self):
+        print("creating .gif")
+
         images = []
         for fig in self.figs:
             buf = io.BytesIO()
@@ -178,6 +180,6 @@ class FloorPlanGenerator(torch.nn.Module):
             gif_path,
             save_all=True,
             append_images=images[1:],
-            duration=50,
+            duration=20,
             loop=1,
         )

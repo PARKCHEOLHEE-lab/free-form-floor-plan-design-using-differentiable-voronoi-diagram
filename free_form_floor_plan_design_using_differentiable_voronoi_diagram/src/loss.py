@@ -21,12 +21,6 @@ def runtime_calculator(func: Callable) -> Callable:
 
 
 class FloorPlanLoss(torch.autograd.Function):
-    w_wall = 1.5
-    w_area = 5.0
-    w_lloyd = 1.0
-    w_topo = 1.8
-    w_bb = 0.5
-
     @staticmethod
     def compute_wall_loss(walls: torch.Tensor, w_wall: float = 1.0, unitize=False):
         if unitize:
