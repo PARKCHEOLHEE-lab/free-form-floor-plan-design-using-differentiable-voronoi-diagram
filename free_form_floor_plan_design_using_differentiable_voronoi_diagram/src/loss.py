@@ -23,7 +23,6 @@ def runtime_calculator(func: Callable) -> Callable:
 class FloorPlanLoss(torch.autograd.Function):
     @staticmethod
     def compute_wall_loss(rooms_group: List[List[geometry.Polygon]], w_wall: float = 1.0):
-
         loss_wall = 0.0
         for room_group in rooms_group:
             room_union = ops.unary_union(room_group)
@@ -31,20 +30,20 @@ class FloorPlanLoss(torch.autograd.Function):
                 room_union = list(room_union.geoms)
             else:
                 room_union = [room_union]
-                
+
             for room in room_union:
                 t1 = torch.tensor(room.exterior.coords[:-1])
                 t2 = torch.roll(t1, shifts=-1, dims=0)
                 loss_wall += torch.abs(t1 - t2).sum().item()
-                
+
                 for interior in room.interiors:
                     t1 = torch.tensor(interior.coords[:-1])
                     t2 = torch.roll(t1, shifts=-1, dims=0)
                     loss_wall += torch.abs(t1 - t2).sum().item()
-        
+
         loss_wall = torch.tensor(loss_wall)
         loss_wall *= w_wall
-                    
+
         return loss_wall
 
     @staticmethod
