@@ -2,8 +2,18 @@
 
 This project is a naive implementation of the paper [Free-form Floor Plan Design using Differentiable Voronoi Diagram](https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&e=3&dl=0). The paper is based on the differentiable Voronoi diagram, but this repository uses `Shapely` and `Pytorch`. Specifically, PyTorch's autograd functionality for numerical differentiation is combined with Shapely's geometric operations to compute gradients.
 
-<br>
 
+<div style="display: flex">
+    <p align="center">
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_a/11-25-2024__00-20-42/optimization.gif" width=40%>
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_b/11-25-2024__00-48-49/optimization.gif" width=40%>
+    </p>
+</div>
+<p align="center">
+  <i>Optimization processes</i>
+</p>
+
+<br>
 
 # Installation
 
@@ -32,7 +42,15 @@ This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.1
 - `shape_duck.py`: Duck-shaped plan boundary.
 
 ### runs
--
+- `shape_a/11-25-2024__00-20-42`
+    - `configs.json`: Used configs for shape_a
+    - `optimization.gif`: Animation for optimizing shape_a
+- `shape_b/11-25-2024__00-48-49`
+    - `configs.json`: Used configs for shape_b
+    - `optimization.gif`: Animation for optimizing shape_b
+- `shape_c/ `
+    - `configs.json`: Used configs for shape_c
+    - `optimization.gif`: Animation for optimizing shape_c
 
 ### src
 - `generator.py`: Voronoi diagram's sites generator.
