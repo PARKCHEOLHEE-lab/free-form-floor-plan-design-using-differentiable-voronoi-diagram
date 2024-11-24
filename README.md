@@ -13,8 +13,6 @@ This project is a naive implementation of the paper [Free-form Floor Plan Design
   <i>Optimization processes</i>
 </p>
 
-<br>
-
 # Installation
 
 This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.12-slim` for running devcontainer.
