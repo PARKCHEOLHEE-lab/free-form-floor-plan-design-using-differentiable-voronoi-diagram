@@ -1,6 +1,56 @@
 # Free-form-Floor-Plan-Design-using-Differentiable-Voronoi-Diagram
 
-https://parkcheolhee-lab.github.io/free-form-floor-plan-design-using-differentiable-voronoi-diagram/
+This project is a naive implementation of the paper [Free-form Floor Plan Design using Differentiable Voronoi Diagram](https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&e=3&dl=0). The paper is based on the differentiable Voronoi diagram, but this repository uses `Shapely` and `Pytorch`. Specifically, PyTorch's autograd functionality for numerical differentiation is combined with Shapely's geometric operations to compute gradients.
+
+<br>
 
 
-naive implementation with numerical differentation WIP...
+# Installation
+
+This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.12-slim` for running devcontainer.
+
+
+1. Ensure you have Docker and Visual Studio Code with the Remote - Containers extension installed.
+2. Clone the repository.
+
+    ```
+        git clone https://github.com/PARKCHEOLHEE-lab/Free-form-Floor-Plan-Design-using-Differentiable-Voronoi-Diagram.git
+    ```
+
+3. Open the project with VSCode.
+4. When prompted at the bottom left on the VSCode, click `Reopen in Container` or use the command palette (F1) and select `Remote-Containers: Reopen in Container`.
+5. VS Code will build the Docker container and set up the environment.
+6. Once the container is built and running, you're ready to start working with the project.
+
+<br>
+
+# File Details
+### examples
+- `duck.py`: Duck-shaped plan boundary.
+- `shape_a.py`: Orthogonal plan bounary a.
+- `shape_b.py`: Orthogonal plan bounary b.
+- `shape_c.py`: Orthogonal plan bounary c.
+
+### runs
+-
+
+### src
+- `generator.py`: Voronoi diagram's sites generator.
+- `loss.py`: Loss functions based on the numerical differentiation to optimize the floor plans.
+- `shape.py`: Example shapes to test.
+
+<br>
+
+# How to run
+After installation, you can run any of the example files using the following commands:
+
+```bash
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/duck.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_a.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_b.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_c.py
+```
+
+<br>
+
+Each example will generate a floor plan based on different boundary shapes using the Voronoi diagram approach with the numerical differentiation and the geometric operations.

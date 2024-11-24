@@ -31,10 +31,6 @@
 			]
 		}
 	},
-    "runArgs": [
-        "--gpus",
-        "all"
-    ],
     "postCreateCommand": "./post-create-command.sh",
     "remoteUser": "root"
 }

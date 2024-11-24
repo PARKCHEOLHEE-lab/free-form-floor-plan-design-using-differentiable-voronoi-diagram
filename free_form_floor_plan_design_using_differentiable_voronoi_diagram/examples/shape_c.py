@@ -20,7 +20,7 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 
 configs = {
-    "shape": shape.ShapeA(),
+    "shape": shape.ShapeC(),
     "num_sites": 25,
     "area_ratio": [0.5, 0.2, 0.2, 0.1],
     "w_wall": 2.5,
