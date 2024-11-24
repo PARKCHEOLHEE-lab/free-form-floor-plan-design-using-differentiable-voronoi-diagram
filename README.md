@@ -26,10 +26,10 @@ This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.1
 
 # File Details
 ### examples
-- `duck.py`: Duck-shaped plan boundary.
 - `shape_a.py`: Orthogonal plan bounary a.
 - `shape_b.py`: Orthogonal plan bounary b.
 - `shape_c.py`: Orthogonal plan bounary c.
+- `shape_duck.py`: Duck-shaped plan boundary.
 
 ### runs
 -
@@ -45,7 +45,7 @@ This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.1
 After installation, you can run any of the example files using the following commands:
 
 ```bash
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/duck.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_duck.py
     python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_a.py
     python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_b.py
     python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_c.py
