@@ -21,20 +21,23 @@ torch.manual_seed(seed)
 
 configs = {
     "shape": shape.ShapeA(),
-    "num_sites": 25,
+    "num_sites": 30,
     "area_ratio": [0.5, 0.2, 0.2, 0.1],
     "w_wall": 2.5,
-    "w_area": 6.0,
+    "w_area": 10.0,
     "w_lloyd": 2.3,
-    "w_topo": 1.3,
+    "w_topo": 1.5,
     "w_bb": 0.55,
-    "iterations": 700,
+    "iterations": 800,
     "iteration_to_modify_lr": 300,
     "lr_initial": 1e-2,
-    "lr_modified": 5e-3,
+    "lr_modified": 8e-3,
     "log_dir": os.path.abspath(
         os.path.join(
-            __file__, "../../runs", datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m-%d-%Y__%H-%M-%S")
+            __file__,
+            "../../runs",
+            "shape_a",
+            datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m-%d-%Y__%H-%M-%S"),
         )
     ),
 }
