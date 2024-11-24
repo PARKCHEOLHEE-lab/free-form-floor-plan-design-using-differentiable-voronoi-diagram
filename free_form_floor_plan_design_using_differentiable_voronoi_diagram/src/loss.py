@@ -1,0 +1,248 @@
+import time
+import torch
+import shapely
+import multiprocessing
+
+from typing import List, Callable
+from shapely import geometry, ops
+from torch.autograd.function import FunctionCtx
+
+
+def runtime_calculator(func: Callable) -> Callable:
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        runtime = end_time - start_time
+        print(f"The function {func.__name__} took {runtime} seconds to run.")
+        return result
+
+    return wrapper
+
+
+class FloorPlanLoss(torch.autograd.Function):
+    w_wall = 1.5
+    w_area = 5.0
+    w_lloyd = 1.0
+    w_topo = 1.8
+    w_bb = 0.5
+
+    @staticmethod
+    def compute_wall_loss(walls: torch.Tensor, w_wall: float = 1.0, unitize=False):
+        if unitize:
+            loss_wall = torch.abs(walls / torch.norm(walls, dim=1).unsqueeze(1)).sum()
+        else:
+            loss_wall = torch.abs(walls).sum()
+
+        loss_wall *= w_wall
+
+        return loss_wall
+
+    @staticmethod
+    def compute_area_loss(
+        cells: List[geometry.Polygon],
+        target_areas: List[float],
+        room_indices: List[int],
+        w_area: float = 1.0,
+    ):
+        current_areas = [0.0] * len(target_areas)
+
+        for cell, room_index in zip(cells, room_indices):
+            current_areas[room_index] += cell.area
+
+        current_areas = torch.tensor(current_areas)
+        target_areas = torch.tensor(target_areas)
+
+        area_difference = current_areas - target_areas
+
+        loss_area = torch.sum(area_difference)
+        loss_area **= 2
+        loss_area *= w_area
+
+        return loss_area
+
+    @staticmethod
+    def compute_lloyd_loss(cells: List[geometry.Polygon], sites: torch.Tensor, w_lloyd: float = 1.0):
+        loss_lloyd = 0.0
+        for site, cell in zip(sites, cells):
+            if cell.is_empty:
+                continue
+            site_point = geometry.Point(site.detach().numpy())
+            loss_lloyd += site_point.distance(cell.centroid)
+
+        loss_lloyd = torch.tensor(loss_lloyd)
+        loss_lloyd **= 2
+        loss_lloyd *= w_lloyd
+
+        return loss_lloyd
+
+    @staticmethod
+    def compute_topology_loss(rooms_group: List[List[geometry.Polygon]], w_topo: float = 1.0):
+        loss_topo = 0.0
+        for room_group in rooms_group:
+            room_union = ops.unary_union(room_group)
+            if isinstance(room_union, geometry.MultiPolygon):
+                largest_room, *_ = sorted(room_union.geoms, key=lambda r: r.area, reverse=True)
+
+                loss_topo += len(room_union.geoms)
+
+                for room in room_group:
+                    if not room.intersects(largest_room):
+                        loss_topo += largest_room.centroid.distance(room)
+
+        loss_topo = torch.tensor(loss_topo)
+        loss_topo **= 2
+        loss_topo *= w_topo
+
+        return loss_topo
+
+    @staticmethod
+    def compute_bb_loss(rooms_group: List[List[geometry.Polygon]], w_bb: float = 1.0):
+        loss_bb = 0.0
+        for room_group in rooms_group:
+            room_union = ops.unary_union(room_group)
+            loss_bb += room_union.area / room_union.envelope.area
+
+        loss_bb = torch.tensor(loss_bb)
+        loss_bb **= 2
+        loss_bb *= -w_bb
+
+        return loss_bb
+
+    @staticmethod
+    def forward(
+        ctx: FunctionCtx,
+        sites: torch.Tensor,
+        boundary_polygon: geometry.Polygon,
+        target_areas: List[float],
+        room_indices: List[int],
+        w_wall: float,
+        w_area: float,
+        w_lloyd: float,
+        w_topo: float,
+        w_bb: float,
+        save: bool = True,
+    ) -> torch.Tensor:
+        cells = []
+        walls = []
+
+        sites_multipoint = geometry.MultiPoint([tuple(point) for point in sites.detach().numpy()])
+        raw_cells = list(shapely.voronoi_polygons(sites_multipoint, extend_to=boundary_polygon).geoms)
+        for cell in raw_cells:
+            intersected_cell = cell.intersection(boundary_polygon)
+
+            intersected_cell_iter = [intersected_cell]
+            if isinstance(intersected_cell, geometry.MultiPolygon):
+                intersected_cell_iter = list(intersected_cell.geoms)
+
+            for intersected_cell in intersected_cell_iter:
+                exterior_coords = torch.tensor(intersected_cell.exterior.coords[:-1])
+                exterior_coords_shifted = torch.roll(exterior_coords, shifts=-1, dims=0)
+                walls.extend((exterior_coords - exterior_coords_shifted).tolist())
+                cells.append(intersected_cell)
+
+        cells_sorted = []
+        raw_cells_sorted = []
+        for site_point in sites_multipoint.geoms:
+            for ci, (cell, raw_cell) in enumerate(zip(cells, raw_cells)):
+                if raw_cell.contains(site_point):
+                    cells_sorted.append(cell)
+                    cells.pop(ci)
+                    raw_cells_sorted.append(raw_cell)
+                    raw_cells.pop(ci)
+                    break
+
+        rooms_group = [[] for _ in torch.tensor(room_indices).unique()]
+        for cell, room_index in zip(cells_sorted, room_indices):
+            rooms_group[room_index].append(cell)
+
+        loss_wall = FloorPlanLoss.compute_wall_loss(torch.tensor(walls), w_wall=w_wall)
+        loss_area = FloorPlanLoss.compute_area_loss(cells_sorted, target_areas, room_indices, w_area=w_area)
+        loss_lloyd = FloorPlanLoss.compute_lloyd_loss(cells_sorted, sites, w_lloyd=w_lloyd)
+        loss_topo = FloorPlanLoss.compute_topology_loss(rooms_group, w_topo=w_topo)
+        loss_bb = FloorPlanLoss.compute_bb_loss(rooms_group, w_bb=w_bb)
+
+        if save:
+            ctx.save_for_backward(sites)
+            ctx.room_indices = room_indices
+            ctx.target_areas = target_areas
+            ctx.boundary_polygon = boundary_polygon
+            ctx.w_wall = w_wall
+            ctx.w_area = w_area
+            ctx.w_lloyd = w_lloyd
+            ctx.w_topo = w_topo
+            ctx.w_bb = w_bb
+
+        loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb
+
+        return loss, [loss_wall, loss_area, loss_lloyd, loss_topo, loss_bb]
+
+    @staticmethod
+    def _backward_one(args):
+        sites, i, j, epsilon, boundary_polygon, target_areas, room_indices, w_wall, w_area, w_lloyd, w_topo, w_bb = args
+
+        perturbed_sites_pos = sites.clone()
+        perturbed_sites_neg = sites.clone()
+        perturbed_sites_pos[i, j] += epsilon
+        perturbed_sites_neg[i, j] -= epsilon
+
+        loss_pos, _ = FloorPlanLoss.forward(
+            None,
+            perturbed_sites_pos,
+            boundary_polygon,
+            target_areas,
+            room_indices,
+            w_wall,
+            w_area,
+            w_lloyd,
+            w_topo,
+            w_bb,
+            save=False,
+        )
+
+        loss_neg, _ = FloorPlanLoss.forward(
+            None,
+            perturbed_sites_neg,
+            boundary_polygon,
+            target_areas,
+            room_indices,
+            w_wall,
+            w_area,
+            w_lloyd,
+            w_topo,
+            w_bb,
+            save=False,
+        )
+
+        return i, j, (loss_pos - loss_neg) / (2 * epsilon)
+
+    @runtime_calculator
+    @staticmethod
+    def backward(ctx: FunctionCtx, grad_output: torch.Tensor, _):
+        (sites,) = ctx.saved_tensors
+        room_indices = ctx.room_indices
+        target_areas = ctx.target_areas
+        boundary_polygon = ctx.boundary_polygon
+        w_wall = ctx.w_wall
+        w_area = ctx.w_area
+        w_lloyd = ctx.w_lloyd
+        w_topo = ctx.w_topo
+        w_bb = ctx.w_bb
+
+        epsilon = 1e-6
+
+        grads = torch.zeros_like(sites)
+
+        multiprocessing_args = [
+            (sites, i, j, epsilon, boundary_polygon, target_areas, room_indices, w_wall, w_area, w_lloyd, w_topo, w_bb)
+            for i in range(sites.size(0))
+            for j in range(sites.size(1))
+        ]
+
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+            results = pool.map(FloorPlanLoss._backward_one, multiprocessing_args)
+
+        for i, j, grad in results:
+            grads[i, j] = grad
+
+        return grads * grad_output, None, None, None, None, None, None, None, None, None
