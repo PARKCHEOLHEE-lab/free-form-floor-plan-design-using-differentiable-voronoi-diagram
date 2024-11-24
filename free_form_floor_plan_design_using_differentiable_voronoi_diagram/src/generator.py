@@ -143,7 +143,6 @@ class FloorPlanGenerator(torch.nn.Module):
         ax.set_axis_off()
 
         ax.axis("equal")
-        ax.set_title(f"Iteration {iteration} \n")
 
         return fig
 
@@ -181,5 +180,4 @@ class FloorPlanGenerator(torch.nn.Module):
             save_all=True,
             append_images=images[1:],
             duration=20,
-            loop=1,
         )
