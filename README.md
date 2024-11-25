@@ -1,6 +1,6 @@
 # free-form-floor-plan-design-using-differentiable-voronoi-diagram
 
-This project is a naive implementation of the paper [Free-form Floor Plan Design using Differentiable Voronoi Diagram](https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&e=3&dl=0). The paper is based on the differentiable Voronoi diagram, but this repository uses `Shapely` and `Pytorch`. Specifically, PyTorch's autograd functionality for numerical differentiation is combined with Shapely's geometric operations to compute gradients.
+This project is a naive implementation of the paper [Free-form Floor Plan Design using Differentiable Voronoi Diagram](https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&e=3&dl=0). The paper is based on the <b>differentiable Voronoi diagram</b>, but this repository uses `Shapely` and `Pytorch`. Specifically, PyTorch's autograd functionality for <b>numerical differentiation</b> is combined with Shapely's geometric operations to compute gradients.
 
 
 <div style="display: flex">
@@ -40,7 +40,7 @@ This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.1
 - `shape_duck.py`: Duck-shaped plan boundary.
 
 ### runs
-- `shape_<a>/11-25-2024__00-20-42`
+- `shape_a/11-25-2024__00-20-42`
     - `configs.json`: Used configs for shape_a
     - `events.*`: Tensorboard logs
     - `optimization.gif`: Animation for optimizing shape_a
