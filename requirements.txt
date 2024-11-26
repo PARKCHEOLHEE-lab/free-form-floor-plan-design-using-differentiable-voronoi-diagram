@@ -6,3 +6,4 @@ svgpathtools==1.6.1
 torch==2.1.0
 pytz==2024.2
 tensorboard==2.18.0
+torch-kmeans==0.2.0
