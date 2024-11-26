@@ -152,13 +152,14 @@ class FloorPlanGenerator(torch.nn.Module):
 
         return fig
 
-    def log(self, iteration, loss, loss_wall, loss_area, loss_lloyd, loss_topo, loss_bb):
+    def log(self, iteration, loss, loss_wall, loss_area, loss_lloyd, loss_topo, loss_bb, loss_cell_area):
         self.summary_writer.add_scalar("loss", loss, iteration)
         self.summary_writer.add_scalar("loss_wall", loss_wall, iteration)
         self.summary_writer.add_scalar("loss_area", loss_area, iteration)
         self.summary_writer.add_scalar("loss_lloyd", loss_lloyd, iteration)
         self.summary_writer.add_scalar("loss_topo", loss_topo, iteration)
         self.summary_writer.add_scalar("loss_bb", loss_bb, iteration)
+        self.summary_writer.add_scalar("loss_cell_area", loss_cell_area, iteration)
 
         fig = self.plot(iteration)
         fig.canvas.draw()
