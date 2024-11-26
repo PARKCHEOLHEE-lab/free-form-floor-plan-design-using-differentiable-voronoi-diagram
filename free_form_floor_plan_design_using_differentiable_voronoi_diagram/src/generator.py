@@ -7,6 +7,7 @@ import shapely
 import numpy as np
 import matplotlib.pyplot as plt
 
+from torch_kmeans import KMeans
 from PIL import Image
 from shapely import ops
 from shapely import geometry
@@ -27,9 +28,14 @@ class FloorPlanGenerator(torch.nn.Module):
         self.target_areas = [self.boundary_polygon.area * ratio for ratio in self.area_ratio]
 
         self.sites = self._initialize_parameters()
-        self.room_indices = random.choices(
-            population=range(len(self.area_ratio)), weights=self.area_ratio, k=len(self.sites)
-        )
+        
+        if self.configs["init_with_kmeans"]:
+            kmeans = KMeans(n_clusters=len(self.area_ratio))
+            self.room_indices = kmeans(self.sites.unsqueeze(0)).labels.squeeze(0).tolist()
+        else:
+            self.room_indices = random.choices(
+                population=range(len(self.area_ratio)), weights=self.area_ratio, k=len(self.sites)
+            )
 
         self.figs = []
         self.summary_writer = SummaryWriter(log_dir=self.log_dir)
