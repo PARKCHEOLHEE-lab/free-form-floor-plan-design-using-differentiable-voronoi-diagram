@@ -92,13 +92,13 @@ class FloorPlanLoss(torch.autograd.Function):
                 loss_topo += len(room_union.geoms)
 
                 for room in room_group:
-                    if not room.intersects(largest_room):
+                    if not room.intersects(largest_room) and not room.is_empty:
                         loss_topo += largest_room.centroid.distance(room)
-
+                        
         loss_topo = torch.tensor(loss_topo)
         loss_topo **= 2
         loss_topo *= w_topo
-
+        
         return loss_topo
 
     @staticmethod
