@@ -6,10 +6,10 @@ This project is a naive implementation of the paper [Free-form Floor Plan Design
 
 <div style="display: flex">
     <p align="center">
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_a/11-26-2024__17-58-56/optimization.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_b/11-26-2024__13-39-24/optimization.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_c/11-26-2024__17-35-24/optimization.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_duck/11-26-2024__12-34-06/optimization.gif" width=20%>
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_a/11-26-2024__19-36-19/optimization.gif" width=20%>　　
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_b/11-26-2024__19-39-24/optimization.gif" width=20%>　　
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_c/11-26-2024__19-35-24/optimization.gif" width=20%>　　
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_duck/11-26-2024__19-34-06/optimization.gif" width=20%>
     </p>
 </div>
 <p align="center" color="gray">
