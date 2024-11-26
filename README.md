@@ -15,7 +15,7 @@ This project is a naive implementation of the paper [Free-form Floor Plan Design
 <p align="center" color="gray">
   <i>
   Optimization processes for <br>shape_a.py · shape_b.py · shape_c.py · shape_duck
-  </i> 
+  </i>
 </p>
 
 # Installation

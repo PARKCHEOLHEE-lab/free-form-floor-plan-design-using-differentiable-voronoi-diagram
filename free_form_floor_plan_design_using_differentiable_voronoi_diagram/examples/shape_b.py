@@ -65,14 +65,14 @@ for iteration in range(1, configs["iterations"] + 1):
         generator.configs["w_bb"],
         generator.configs["w_cell"],
     )
-    
+
     print(
         f"""loss status
-        loss_wall: {loss_wall} 
-        loss_area: {loss_area} 
-        loss_lloyd: {loss_lloyd} 
-        loss_topo: {loss_topo} 
-        loss_bb: {loss_bb} 
+        loss_wall: {loss_wall}
+        loss_area: {loss_area}
+        loss_lloyd: {loss_lloyd}
+        loss_topo: {loss_topo}
+        loss_bb: {loss_bb}
         loss_cell_area: {loss_cell_area} \n
         """
     )

@@ -94,11 +94,11 @@ class FloorPlanLoss(torch.autograd.Function):
                 for room in room_group:
                     if not room.intersects(largest_room) and not room.is_empty:
                         loss_topo += largest_room.centroid.distance(room)
-                        
+
         loss_topo = torch.tensor(loss_topo)
         loss_topo **= 2
         loss_topo *= w_topo
-        
+
         return loss_topo
 
     @staticmethod
@@ -113,7 +113,7 @@ class FloorPlanLoss(torch.autograd.Function):
         loss_bb *= -w_bb
 
         return loss_bb
-    
+
     @staticmethod
     def compute_cell_area_loss(cells: List[geometry.Polygon], w_cell: float = 1.0):
         sorted_cells = sorted(cells, key=lambda cell: cell.area)
@@ -121,7 +121,7 @@ class FloorPlanLoss(torch.autograd.Function):
 
         loss_cell_area = torch.tensor(sum(area_differences))
         loss_cell_area *= w_cell
-        
+
         return loss_cell_area
 
     @staticmethod
@@ -172,11 +172,10 @@ class FloorPlanLoss(torch.autograd.Function):
         for cell, room_index in zip(cells_sorted, room_indices):
             rooms_group[room_index].append(cell)
 
-
         loss_wall = torch.tensor(0.0)
         if w_wall > 0:
             loss_wall = FloorPlanLoss.compute_wall_loss(rooms_group, w_wall=w_wall)
-        
+
         loss_area = torch.tensor(0.0)
         if w_area > 0:
             loss_area = FloorPlanLoss.compute_area_loss(cells_sorted, target_areas, room_indices, w_area=w_area)
@@ -215,7 +214,21 @@ class FloorPlanLoss(torch.autograd.Function):
 
     @staticmethod
     def _backward_one(args):
-        sites, i, j, epsilon, boundary_polygon, target_areas, room_indices, w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell = args
+        (
+            sites,
+            i,
+            j,
+            epsilon,
+            boundary_polygon,
+            target_areas,
+            room_indices,
+            w_wall,
+            w_area,
+            w_lloyd,
+            w_topo,
+            w_bb,
+            w_cell,
+        ) = args
 
         perturbed_sites_pos = sites.clone()
         perturbed_sites_neg = sites.clone()
@@ -273,7 +286,21 @@ class FloorPlanLoss(torch.autograd.Function):
         grads = torch.zeros_like(sites)
 
         multiprocessing_args = [
-            (sites, i, j, epsilon, boundary_polygon, target_areas, room_indices, w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell)
+            (
+                sites,
+                i,
+                j,
+                epsilon,
+                boundary_polygon,
+                target_areas,
+                room_indices,
+                w_wall,
+                w_area,
+                w_lloyd,
+                w_topo,
+                w_bb,
+                w_cell,
+            )
             for i in range(sites.size(0))
             for j in range(sites.size(1))
         ]

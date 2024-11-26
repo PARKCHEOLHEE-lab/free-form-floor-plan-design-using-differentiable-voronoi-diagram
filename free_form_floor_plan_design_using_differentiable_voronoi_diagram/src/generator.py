@@ -28,7 +28,7 @@ class FloorPlanGenerator(torch.nn.Module):
         self.target_areas = [self.boundary_polygon.area * ratio for ratio in self.area_ratio]
 
         self.sites = self._initialize_parameters()
-        
+
         if self.configs["init_with_kmeans"]:
             kmeans = KMeans(n_clusters=len(self.area_ratio))
             self.room_indices = kmeans(self.sites.unsqueeze(0)).labels.squeeze(0).tolist()
