@@ -61,7 +61,7 @@ class FloorPlanLoss(torch.autograd.Function):
         current_areas = torch.tensor(current_areas)
         target_areas = torch.tensor(target_areas)
 
-        area_difference = current_areas - target_areas
+        area_difference = torch.abs(current_areas - target_areas)
 
         loss_area = torch.sum(area_difference)
         loss_area **= 2
