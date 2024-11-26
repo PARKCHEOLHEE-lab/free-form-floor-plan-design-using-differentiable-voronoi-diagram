@@ -21,14 +21,16 @@ torch.manual_seed(seed)
 
 configs = {
     "shape": shape.Duck(),
-    "num_sites": 30,
-    "area_ratio": [0.5, 0.2, 0.2, 0.1],
+    "num_sites": 40,
+    "area_ratio": [0.2, 0.2, 0.2, 0.2, 0.2],
     "w_wall": 2.5,
-    "w_area": 10.0,
-    "w_lloyd": 2.3,
+    "w_area": 20.0,
+    "w_lloyd": 2.1,
     "w_topo": 1.5,
-    "w_bb": 0.55,
+    "w_bb": 0.0,
+    "w_cell": 0.0,
     "iterations": 800,
+    "init_with_kmeans": True,
     "iteration_to_modify_lr": 300,
     "lr_initial": 1e-2,
     "lr_modified": 8e-3,
@@ -51,7 +53,7 @@ for iteration in range(1, configs["iterations"] + 1):
             param_group["lr"] = configs["lr_modified"]
 
     optimizer.zero_grad()
-    loss, (loss_wall, loss_area, loss_lloyd, loss_topo, loss_bb) = FloorPlanLoss.apply(
+    loss, (loss_wall, loss_area, loss_lloyd, loss_topo, loss_bb, loss_cell_area) = FloorPlanLoss.apply(
         generator.sites,
         generator.boundary_polygon,
         generator.target_areas,
@@ -61,10 +63,22 @@ for iteration in range(1, configs["iterations"] + 1):
         generator.configs["w_lloyd"],
         generator.configs["w_topo"],
         generator.configs["w_bb"],
+        generator.configs["w_cell"],
+    )
+    
+    print(
+        f"""loss status
+        loss_wall: {loss_wall} 
+        loss_area: {loss_area} 
+        loss_lloyd: {loss_lloyd} 
+        loss_topo: {loss_topo} 
+        loss_bb: {loss_bb} 
+        loss_cell_area: {loss_cell_area} \n
+        """
     )
 
     loss.backward()
     optimizer.step()
-    generator.log(iteration, loss, loss_wall, loss_area, loss_lloyd, loss_topo, loss_bb)
+    generator.log(iteration, loss, loss_wall, loss_area, loss_lloyd, loss_topo, loss_bb, loss_cell_area)
 
 generator.gif()
