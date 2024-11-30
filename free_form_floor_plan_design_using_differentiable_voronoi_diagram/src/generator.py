@@ -97,7 +97,7 @@ class FloorPlanGenerator(torch.nn.Module):
 
         return [ops.unary_union(r) for r in rooms]
 
-    def plot(self, iteration):
+    def plot(self):
         fig, ax = plt.subplots(figsize=(10, 10))
 
         rooms = self.rooms_geom()
@@ -161,7 +161,7 @@ class FloorPlanGenerator(torch.nn.Module):
         self.summary_writer.add_scalar("loss_bb", loss_bb, iteration)
         self.summary_writer.add_scalar("loss_cell_area", loss_cell_area, iteration)
 
-        fig = self.plot(iteration)
+        fig = self.plot()
         fig.canvas.draw()
         self.summary_writer.add_image(
             f"floor_plan_{iteration}", np.array(fig.canvas.renderer._renderer), iteration, dataformats="HWC"
