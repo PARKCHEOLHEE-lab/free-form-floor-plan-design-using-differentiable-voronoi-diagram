@@ -269,8 +269,8 @@ class FloorPlanLoss(torch.autograd.Function):
 
     @runtime_calculator
     @staticmethod
-    def backward(ctx: FunctionCtx, grad_output: torch.Tensor, _):
-        (sites,) = ctx.saved_tensors
+    def backward(ctx: FunctionCtx, _: torch.Tensor, __):
+        sites = ctx.saved_tensors[0]
         room_indices = ctx.room_indices
         target_areas = ctx.target_areas
         boundary_polygon = ctx.boundary_polygon
@@ -311,4 +311,4 @@ class FloorPlanLoss(torch.autograd.Function):
         for i, j, grad in results:
             grads[i, j] = grad
 
-        return grads * grad_output, None, None, None, None, None, None, None, None, None, None
+        return grads, None, None, None, None, None, None, None, None, None, None
