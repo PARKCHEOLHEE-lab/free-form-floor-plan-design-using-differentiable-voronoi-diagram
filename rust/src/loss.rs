@@ -100,3 +100,167 @@ pub fn compute_area_loss(
     // loss_area **= 2; loss_area *= w_area  (both f32)
     sum * sum * (w_area as f32)
 }
+
+/// `compute_lloyd_loss`: zip(sites, cells) truncates to the shorter list;
+/// empty cells are filtered; centroids and sites materialize as f32 tensors;
+/// per-row L2 norm and the sum run in f32.
+pub fn compute_lloyd_loss(
+    cells_sorted: &[Polygon<f64>],
+    sites: &[[f32; 2]],
+    w_lloyd: f64,
+) -> f32 {
+    use geo::Centroid;
+    let mut sum: f32 = 0.0;
+    for (site, cell) in sites.iter().zip(cells_sorted) {
+        if crate::voronoi::is_empty_cell(cell) {
+            continue;
+        }
+        let c = cell.centroid().expect("nonempty cell has a centroid");
+        let dx = (c.x() as f32) - site[0];
+        let dy = (c.y() as f32) - site[1];
+        sum += (dx * dx + dy * dy).sqrt();
+    }
+    // loss_lloyd **= 2; loss_lloyd *= w_lloyd  (both f32)
+    sum * sum * (w_lloyd as f32)
+}
+
+/// `compute_topology_loss`: rooms whose union is a MultiPolygon (>1 piece)
+/// add their piece count plus, for each member cell that does not intersect
+/// the largest piece, the f64 distance from the largest piece's centroid to
+/// that cell. Accumulation is a Python float (f64); the final value is cast
+/// to f32, squared and weighted in f32.
+pub fn compute_topology_loss(rooms_group: &[Vec<&Polygon<f64>>], w_topo: f64) -> f32 {
+    use geo::{Centroid, EuclideanDistance, Intersects};
+    let mut loss_topo: f64 = 0.0;
+    for group in rooms_group {
+        let room_union = union_group(group);
+        if room_union.0.len() > 1 {
+            // sorted(..., reverse=True)[0]: stable sort keeps the first of
+            // equal areas, i.e. strictly-greater replaces
+            let largest = room_union
+                .iter()
+                .max_by(|a, b| {
+                    a.unsigned_area()
+                        .partial_cmp(&b.unsigned_area())
+                        .unwrap()
+                })
+                .expect("nonempty multipolygon");
+
+            loss_topo += room_union.0.len() as f64;
+
+            let largest_centroid = largest.centroid().expect("nonempty piece");
+            for room in group {
+                if !room.intersects(largest) && !crate::voronoi::is_empty_cell(room) {
+                    loss_topo += largest_centroid.euclidean_distance(*room);
+                }
+            }
+        }
+    }
+    let t = loss_topo as f32;
+    t * t * (w_topo as f32)
+}
+
+/// `compute_bb_loss`: per room, union area over axis-aligned envelope area
+/// accumulated in f64, then cast, squared and NEGATIVELY weighted in f32.
+pub fn compute_bb_loss(rooms_group: &[Vec<&Polygon<f64>>], w_bb: f64) -> f32 {
+    use geo::BoundingRect;
+    let mut loss_bb: f64 = 0.0;
+    for group in rooms_group {
+        let room_union = union_group(group);
+        let rect = room_union
+            .bounding_rect()
+            .expect("bb loss on an empty room union (Python raises here too)");
+        loss_bb += room_union.unsigned_area() / (rect.width() * rect.height());
+    }
+    let b = loss_bb as f32;
+    b * b * (-(w_bb) as f32)
+}
+
+/// `compute_cell_area_loss`: cells sorted by area ascending (empties
+/// included), adjacent differences summed in f64, cast and weighted in f32.
+pub fn compute_cell_area_loss(cells_sorted: &[Polygon<f64>], w_cell: f64) -> f32 {
+    let mut areas: Vec<f64> = cells_sorted.iter().map(|c| c.unsigned_area()).collect();
+    areas.sort_by(|a, b| a.total_cmp(b));
+    let mut sum: f64 = 0.0;
+    for pair in areas.windows(2) {
+        sum += pair[1] - pair[0];
+    }
+    (sum as f32) * (w_cell as f32)
+}
+
+pub struct LossWeights {
+    pub w_wall: f64,
+    pub w_area: f64,
+    pub w_lloyd: f64,
+    pub w_topo: f64,
+    pub w_bb: f64,
+    pub w_cell: f64,
+}
+
+pub struct LossBreakdown {
+    pub total: f32,
+    pub wall: f32,
+    pub area: f32,
+    pub lloyd: f32,
+    pub topo: f32,
+    pub bb: f32,
+    pub cell: f32,
+}
+
+/// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
+/// each component only when its weight is positive (Python's `if w > 0`
+/// guards), and sums the six f32 scalars left to right.
+pub fn floor_plan_loss(
+    sites: &[[f32; 2]],
+    boundary: &Polygon<f64>,
+    target_areas: &[f64],
+    room_indices: &[usize],
+    w: &LossWeights,
+    hint: Option<&crate::voronoi::GeosOrderHint>,
+) -> LossBreakdown {
+    let geom = crate::voronoi::compute_cells(sites, boundary, hint);
+    let groups = rooms_group(&geom.cells_sorted, room_indices);
+
+    let wall = if w.w_wall > 0.0 {
+        compute_wall_loss(&groups, w.w_wall)
+    } else {
+        0.0
+    };
+    let area = if w.w_area > 0.0 {
+        compute_area_loss(&geom.cells_sorted, target_areas, room_indices, w.w_area)
+    } else {
+        0.0
+    };
+    let lloyd = if w.w_lloyd > 0.0 {
+        compute_lloyd_loss(&geom.cells_sorted, sites, w.w_lloyd)
+    } else {
+        0.0
+    };
+    let topo = if w.w_topo > 0.0 {
+        compute_topology_loss(&groups, w.w_topo)
+    } else {
+        0.0
+    };
+    let bb = if w.w_bb > 0.0 {
+        compute_bb_loss(&groups, w.w_bb)
+    } else {
+        0.0
+    };
+    let cell = if w.w_cell > 0.0 {
+        compute_cell_area_loss(&geom.cells_sorted, w.w_cell)
+    } else {
+        0.0
+    };
+
+    // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
+    let total = wall + area + lloyd + topo + bb + cell;
+    LossBreakdown {
+        total,
+        wall,
+        area,
+        lloyd,
+        topo,
+        bb,
+        cell,
+    }
+}

@@ -11,6 +11,16 @@ pub struct CheckpointFixture {
     pub initial_sites: Vec<[f32; 2]>,
     pub room_indices: Vec<usize>,
     pub iter0: Iter0Fixture,
+    pub trace: Vec<TraceFixture>,
+}
+
+#[derive(Deserialize)]
+pub struct TraceFixture {
+    pub iteration: usize,
+    pub loss: f64,
+    pub geos_cell_order: Vec<usize>,
+    #[serde(default)]
+    pub split_pieces: Vec<(usize, Vec<f64>)>,
 }
 
 #[derive(Deserialize)]
@@ -23,6 +33,14 @@ pub struct Iter0Fixture {
     pub split_pieces: Vec<(usize, Vec<f64>)>,
     pub cells_sorted: Vec<CellFixture>,
     pub losses: LossesFixture,
+    pub losses_bbcell_w1: BbCellFixture,
+    pub grads: Vec<[f64; 2]>,
+}
+
+#[derive(Deserialize)]
+pub struct BbCellFixture {
+    pub bb: f64,
+    pub cell: f64,
 }
 
 #[derive(Deserialize)]
@@ -70,4 +88,9 @@ pub fn rel_err(actual: f64, expected: f64) -> f64 {
     } else {
         ((actual - expected) / expected).abs()
     }
+}
+
+pub fn ulp_f32(x: f32) -> f64 {
+    let up = f32::from_bits(x.abs().to_bits() + 1);
+    (up - x.abs()) as f64
 }
