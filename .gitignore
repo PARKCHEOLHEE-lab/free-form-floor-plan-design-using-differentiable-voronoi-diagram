@@ -3,3 +3,12 @@ __pycache__
 
 *.png
 runs/
+
+# agent session state
+.agents/
+
+# fixture-generation venv
+.venv-fixtures/
+
+# rust build artifacts
+rust/target/
