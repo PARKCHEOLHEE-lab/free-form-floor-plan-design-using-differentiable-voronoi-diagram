@@ -13,8 +13,10 @@ pub struct TfEventsWriter {
 }
 
 fn masked_crc(data: &[u8]) -> u32 {
+    // TFRecord's masked CRC: rotate_right(15) then offset, per the TensorFlow
+    // record format.
     let c = crc32c::crc32c(data);
-    ((c >> 15) | (c << 17)).wrapping_add(0xa282ead8)
+    c.rotate_right(15).wrapping_add(0xa282ead8)
 }
 
 fn put_varint(buf: &mut Vec<u8>, mut v: u64) {

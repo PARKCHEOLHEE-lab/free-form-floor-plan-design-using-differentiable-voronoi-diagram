@@ -102,12 +102,16 @@ pub fn render_frame(
     pixmap.fill(Color::WHITE);
 
     let groups = rooms_group(cells_sorted, room_indices);
-    let mut paint = Paint::default();
-    paint.anti_alias = true;
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Default::default()
+    };
 
     // room fills (alpha 0.5) + black outlines
-    let mut stroke = Stroke::default();
-    stroke.width = 2.0;
+    let stroke = Stroke {
+        width: 2.0,
+        ..Default::default()
+    };
     for (gi, group) in groups.iter().enumerate().take(n_rooms.max(groups.len())) {
         let union = union_group(group);
         let rgb = ACCENT[gi % ACCENT.len()];
@@ -122,8 +126,10 @@ pub fn render_frame(
     }
 
     // voronoi cell edges, thin gray
-    let mut thin = Stroke::default();
-    thin.width = 0.8;
+    let thin = Stroke {
+        width: 0.8,
+        ..Default::default()
+    };
     paint.set_color(Color::from_rgba8(128, 128, 128, 255));
     for cell in cells_sorted {
         if let Some(path) = ring_path(cell.exterior(), &t) {
@@ -163,10 +169,10 @@ impl GifWriter {
         let file = File::create(path)?;
         let size = FRAME_SIZE as u16;
         let mut encoder = gif::Encoder::new(file, size, size, &[])
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         encoder
             .set_repeat(gif::Repeat::Infinite)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(GifWriter { encoder })
     }
 
@@ -177,7 +183,7 @@ impl GifWriter {
         frame.delay = 2; // 20ms in 1/100s units
         self.encoder
             .write_frame(&frame)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            .map_err(io::Error::other)
     }
 }
 

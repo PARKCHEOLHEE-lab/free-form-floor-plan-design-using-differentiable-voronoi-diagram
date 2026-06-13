@@ -130,7 +130,13 @@ pub fn compute_lloyd_loss(
 /// that cell. Accumulation is a Python float (f64); the final value is cast
 /// to f32, squared and weighted in f32.
 pub fn compute_topology_loss(rooms_group: &[Vec<&Polygon<f64>>], w_topo: f64) -> f32 {
-    use geo::{Centroid, EuclideanDistance, Intersects};
+    // `EuclideanDistance` is deprecated in geo 0.30 in favor of the `Distance`
+    // trait, but that replacement only covers point-to-point in this version —
+    // point-to-polygon distance (what `largest_centroid.distance(room)` needs)
+    // still lives only on the deprecated trait here.
+    #[allow(deprecated)]
+    use geo::EuclideanDistance;
+    use geo::{Centroid, Intersects};
     let mut loss_topo: f64 = 0.0;
     for group in rooms_group {
         let room_union = union_group(group);
@@ -151,7 +157,9 @@ pub fn compute_topology_loss(rooms_group: &[Vec<&Polygon<f64>>], w_topo: f64) ->
             let largest_centroid = largest.centroid().expect("nonempty piece");
             for room in group {
                 if !room.intersects(largest) && !crate::voronoi::is_empty_cell(room) {
-                    loss_topo += largest_centroid.euclidean_distance(*room);
+                    #[allow(deprecated)]
+                    let d = largest_centroid.euclidean_distance(*room);
+                    loss_topo += d;
                 }
             }
         }

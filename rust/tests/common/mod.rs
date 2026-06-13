@@ -1,5 +1,10 @@
 //! Fixture loading shared by the checkpoint tests. Fields are added as the
 //! KRs that consume them land.
+//!
+//! Each integration-test binary compiles this module independently and uses a
+//! different subset of its fields/helpers, so per-binary "never read" warnings
+//! are an artifact of the shared-module layout, not genuine dead code.
+#![allow(dead_code)]
 
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -93,4 +98,20 @@ pub fn rel_err(actual: f64, expected: f64) -> f64 {
 pub fn ulp_f32(x: f32) -> f64 {
     let up = f32::from_bits(x.abs().to_bits() + 1);
     (up - x.abs()) as f64
+}
+
+#[derive(Deserialize)]
+pub struct FinalFixture {
+    pub iterations: usize,
+    pub final_loss: f64,
+    pub room_area_shares: Vec<f64>,
+    pub room_component_counts: Vec<usize>,
+}
+
+pub fn load_final(name: &str) -> FinalFixture {
+    let path = fixture_path(&format!("{name}.final.json"));
+    let data = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read fixture {}: {e}", path.display()));
+    serde_json::from_str(&data)
+        .unwrap_or_else(|e| panic!("cannot parse fixture {}: {e}", path.display()))
 }

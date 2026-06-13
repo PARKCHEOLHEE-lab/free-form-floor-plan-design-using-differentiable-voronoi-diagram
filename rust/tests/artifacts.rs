@@ -5,8 +5,8 @@
 use voronoi_floorplan::{render, shapes, tfevents::TfEventsWriter, voronoi};
 
 fn unmask_crc(masked: u32) -> u32 {
-    let rot = masked.wrapping_sub(0xa282ead8);
-    (rot >> 17) | (rot << 15)
+    // inverse of masked_crc: subtract the offset, then rotate_left(15)
+    masked.wrapping_sub(0xa282ead8).rotate_left(15)
 }
 
 /// Minimal TFRecord + Event parser: returns (file_version_seen, scalars).
