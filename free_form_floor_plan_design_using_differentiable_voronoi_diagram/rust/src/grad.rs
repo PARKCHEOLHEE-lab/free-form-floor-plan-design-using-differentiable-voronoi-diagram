@@ -28,17 +28,22 @@ pub fn finite_difference_grads(
         .into_par_iter()
         .map(|idx| {
             let (i, j) = (idx / 2, idx % 2);
+            let orig = sites[i][j];
 
-            let mut pos = sites.to_vec();
-            pos[i][j] += EPS;
+            // One scratch copy reused for both perturbations. Each coordinate is
+            // written from the *original* value (not the +EPS result), so the
+            // f32 perturbations are bitwise identical to perturbing two fresh
+            // clones — this only removes the second per-task allocation.
+            let mut buf = sites.to_vec();
+
+            buf[i][j] = orig + EPS;
             let loss_pos =
-                crate::loss::floor_plan_loss(&pos, boundary, target_areas, room_indices, w, hint)
+                crate::loss::floor_plan_loss(&buf, boundary, target_areas, room_indices, w, hint)
                     .total;
 
-            let mut neg = sites.to_vec();
-            neg[i][j] -= EPS;
+            buf[i][j] = orig - EPS;
             let loss_neg =
-                crate::loss::floor_plan_loss(&neg, boundary, target_areas, room_indices, w, hint)
+                crate::loss::floor_plan_loss(&buf, boundary, target_areas, room_indices, w, hint)
                     .total;
 
             // (loss_pos - loss_neg) / (2 * epsilon): f32 subtraction, then

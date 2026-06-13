@@ -132,8 +132,9 @@ fn wall_and_area_losses_match_python() {
         };
         let geom = voronoi::compute_cells(&fx.initial_sites, &boundary, Some(&hint));
         let groups = loss::rooms_group(&geom.cells_sorted, &fx.room_indices);
+        let unions: Vec<_> = groups.iter().map(|g| loss::union_group(g)).collect();
 
-        let wall = loss::compute_wall_loss(&groups, W_WALL) as f64;
+        let wall = loss::compute_wall_loss(&unions, W_WALL) as f64;
         assert!(
             rel_err(wall, fx.iter0.losses.wall) <= 1e-6,
             "{name}: loss_wall {wall} vs Python {} (rel err {})",
@@ -171,6 +172,7 @@ fn remaining_losses_and_total_match_python() {
         };
         let geom = voronoi::compute_cells(&fx.initial_sites, &boundary, Some(&hint));
         let groups = loss::rooms_group(&geom.cells_sorted, &fx.room_indices);
+        let unions: Vec<_> = groups.iter().map(|g| loss::union_group(g)).collect();
 
         let lloyd = loss::compute_lloyd_loss(&geom.cells_sorted, &fx.initial_sites, 2.1) as f64;
         assert!(
@@ -180,7 +182,7 @@ fn remaining_losses_and_total_match_python() {
             rel_err(lloyd, fx.iter0.losses.lloyd)
         );
 
-        let topo = loss::compute_topology_loss(&groups, 1.5) as f64;
+        let topo = loss::compute_topology_loss(&groups, &unions, 1.5) as f64;
         assert!(
             rel_err(topo, fx.iter0.losses.topo) <= 1e-6,
             "{name}: loss_topo {topo} vs Python {} (rel err {})",
@@ -188,7 +190,7 @@ fn remaining_losses_and_total_match_python() {
             rel_err(topo, fx.iter0.losses.topo)
         );
 
-        let bb = loss::compute_bb_loss(&groups, 1.0) as f64;
+        let bb = loss::compute_bb_loss(&unions, 1.0) as f64;
         assert!(
             rel_err(bb, fx.iter0.losses_bbcell_w1.bb) <= 1e-6,
             "{name}: loss_bb {bb} vs Python {} (rel err {})",

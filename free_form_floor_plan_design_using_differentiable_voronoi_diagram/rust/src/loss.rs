@@ -65,12 +65,11 @@ fn ring_wall_sum(ring: &LineString<f64>) -> f32 {
     s
 }
 
-pub fn compute_wall_loss(rooms_group: &[Vec<&Polygon<f64>>], w_wall: f64) -> f32 {
+pub fn compute_wall_loss(room_unions: &[MultiPolygon<f64>], w_wall: f64) -> f32 {
     // Python accumulates the per-ring f32 sums into a Python float (f64) ...
     let mut loss_wall: f64 = 0.0;
-    for group in rooms_group {
-        let room_union = union_group(group);
-        for room in &room_union {
+    for room_union in room_unions {
+        for room in room_union {
             loss_wall += ring_wall_sum(room.exterior()) as f64;
             for interior in room.interiors() {
                 loss_wall += ring_wall_sum(interior) as f64;
@@ -129,7 +128,11 @@ pub fn compute_lloyd_loss(
 /// the largest piece, the f64 distance from the largest piece's centroid to
 /// that cell. Accumulation is a Python float (f64); the final value is cast
 /// to f32, squared and weighted in f32.
-pub fn compute_topology_loss(rooms_group: &[Vec<&Polygon<f64>>], w_topo: f64) -> f32 {
+pub fn compute_topology_loss(
+    rooms_group: &[Vec<&Polygon<f64>>],
+    room_unions: &[MultiPolygon<f64>],
+    w_topo: f64,
+) -> f32 {
     // `EuclideanDistance` is deprecated in geo 0.30 in favor of the `Distance`
     // trait, but that replacement only covers point-to-point in this version —
     // point-to-polygon distance (what `largest_centroid.distance(room)` needs)
@@ -138,8 +141,7 @@ pub fn compute_topology_loss(rooms_group: &[Vec<&Polygon<f64>>], w_topo: f64) ->
     use geo::EuclideanDistance;
     use geo::{Centroid, Intersects};
     let mut loss_topo: f64 = 0.0;
-    for group in rooms_group {
-        let room_union = union_group(group);
+    for (group, room_union) in rooms_group.iter().zip(room_unions) {
         if room_union.0.len() > 1 {
             // sorted(..., reverse=True)[0]: stable sort keeps the first of
             // equal areas, i.e. strictly-greater replaces
@@ -170,11 +172,10 @@ pub fn compute_topology_loss(rooms_group: &[Vec<&Polygon<f64>>], w_topo: f64) ->
 
 /// `compute_bb_loss`: per room, union area over axis-aligned envelope area
 /// accumulated in f64, then cast, squared and NEGATIVELY weighted in f32.
-pub fn compute_bb_loss(rooms_group: &[Vec<&Polygon<f64>>], w_bb: f64) -> f32 {
+pub fn compute_bb_loss(room_unions: &[MultiPolygon<f64>], w_bb: f64) -> f32 {
     use geo::BoundingRect;
     let mut loss_bb: f64 = 0.0;
-    for group in rooms_group {
-        let room_union = union_group(group);
+    for room_union in room_unions {
         let rect = room_union
             .bounding_rect()
             .expect("bb loss on an empty room union (Python raises here too)");
@@ -229,8 +230,19 @@ pub fn floor_plan_loss(
     let geom = crate::voronoi::compute_cells(sites, boundary, hint);
     let groups = rooms_group(&geom.cells_sorted, room_indices);
 
+    // The per-room union (Martinez-Rueda) is the heaviest geometry in the loss
+    // after the Voronoi build, and wall/topo/bb each consume the *same* union.
+    // Compute it once per group here and share it (it used to be recomputed
+    // inside each component). The result is identical, so the f32 losses are
+    // bitwise unchanged; this only removes the duplicate boolean ops.
+    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 {
+        groups.iter().map(|g| union_group(g)).collect()
+    } else {
+        Vec::new()
+    };
+
     let wall = if w.w_wall > 0.0 {
-        compute_wall_loss(&groups, w.w_wall)
+        compute_wall_loss(&unions, w.w_wall)
     } else {
         0.0
     };
@@ -245,12 +257,12 @@ pub fn floor_plan_loss(
         0.0
     };
     let topo = if w.w_topo > 0.0 {
-        compute_topology_loss(&groups, w.w_topo)
+        compute_topology_loss(&groups, &unions, w.w_topo)
     } else {
         0.0
     };
     let bb = if w.w_bb > 0.0 {
-        compute_bb_loss(&groups, w.w_bb)
+        compute_bb_loss(&unions, w.w_bb)
     } else {
         0.0
     };
