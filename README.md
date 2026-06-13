@@ -19,6 +19,14 @@ This project is a naive implementation of the paper [Free-form Floor Plan Design
   </i>
 </p>
 
+# Implementations
+
+| Directory | What it is |
+|---|---|
+| [`python/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/README.md) | The original implementation — PyTorch autograd over numerical differentiation + Shapely. |
+| [`rust/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/README.md) | A pure-Rust port — same algorithm, no GEOS/autograd, verified equivalent and ~11× faster. |
+| [`comparison/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/README.md) | Side-by-side timing and evolution-GIF comparison of the two. |
+
 # Installation
 
 This repository ships **two** dev containers, selectable from the same "Reopen in Container" picker:
@@ -39,45 +47,7 @@ This repository ships **two** dev containers, selectable from the same "Reopen i
 5. VS Code will build the Docker container and set up the environment.
 6. Once the container is built and running, you're ready to start working with the project.
 
-<br>
-
-# File Details
-### examples
-- `shape_a.py`: Orthogonal plan bounary a.
-- `shape_b.py`: Orthogonal plan bounary b.
-- `shape_c.py`: Orthogonal plan bounary c.
-- `shape_duck.py`: Duck-shaped plan boundary.
-
-### runs
-- `shape_<name>/<datetime>`
-    - `configs.json`: Used configs
-    - `events.*`: Tensorboard logs
-    - `optimization.gif`: Animation for optimizing the shape
-
-### src
-- `generator.py`: Voronoi diagram's sites generator.
-- `loss.py`: Loss functions based on the numerical differentiation to optimize the floor plans.
-- `shape.py`: Example shapes to test.
-
-<br>
-
-# How to run
-After installation, you can run any of the example files using the following commands:
-
-```bash
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_duck.py
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_a.py
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_b.py
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_c.py
-```
-
-<br>
-
-Each example will generate a floor plan based on different boundary shapes using the Voronoi diagram approach with the numerical differentiation and the geometric operations.
-
-
-<br>
-
-# Future works
-- Set entrances of the plan
-- Set a graph-based constraint for the connectivity between rooms
+See each implementation's own README for usage:
+[`python/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/README.md) ·
+[`rust/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/README.md) ·
+[`comparison/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/README.md)
