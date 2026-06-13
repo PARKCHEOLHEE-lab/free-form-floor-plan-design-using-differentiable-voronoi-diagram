@@ -1,15 +1,21 @@
-//! Forward geometry: Voronoi diagram of the sites, clipped to the boundary,
-//! with clipped pieces paired to sites by the literal `loss.py` algorithm
-//! (positional zip + pop-on-containment). The pairing is order-sensitive:
-//! when a clipped cell splits into a MultiPolygon, every later position
-//! shifts by one and the final piece drops out of the pairing — exactly as
-//! in Python.
+//! Forward geometry: Voronoi diagram of the sites, clipped to the boundary.
+//! Two cell→site pairings live here, picked by whether a `GeosOrderHint` is
+//! supplied:
 //!
-//! `GeosOrderHint` carries the two GEOS-internal orderings that the Python
-//! pairing depends on but that no reimplementation can recompute: the raw
-//! cell iteration order and, at MultiPolygon splits, the piece iteration
-//! order (given as piece areas). It is injected by the checkpoint tests;
-//! standalone runs pass `None` and get natural site order.
+//! - Checkpoint path (hint present): the literal `loss.py` algorithm —
+//!   positional zip + pop-on-containment. It is order-sensitive: when a clipped
+//!   cell splits into a MultiPolygon, every later position shifts by one and the
+//!   final piece drops out of the pairing — exactly as in Python. Used only by
+//!   the fixture checkpoint tests.
+//! - Standalone path (`hint` is `None` — the CLI / GIF / outcome runs): the
+//!   direct voronoice site→cell mapping (each site keeps the cell it generated),
+//!   which is order-independent and robust around splits. See
+//!   `compute_cells_direct`.
+//!
+//! `GeosOrderHint` carries the two GEOS-internal orderings the Python pairing
+//! depends on but that no reimplementation can recompute: the raw cell
+//! iteration order and, at MultiPolygon splits, the piece iteration order
+//! (given as piece areas). It is injected by the checkpoint tests only.
 
 use geo::{Contains, LineString, MultiPolygon, Point, Polygon};
 use geo_booleanop::boolean::BooleanOp;

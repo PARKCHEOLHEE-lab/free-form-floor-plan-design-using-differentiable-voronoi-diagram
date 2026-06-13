@@ -6,8 +6,9 @@ central finite-difference gradients and AdamW.
 
 - Geometry: [`voronoice`] (Voronoi) + [`geo`] + Martinez–Rueda boolean ops
   ([`geo-booleanop`]) — no GEOS, no C dependencies, no autograd framework.
-- Strictly faithful algorithm: identical loss formulas (including the
-  positional zip pairing quirk at MultiPolygon splits), `ε = 1e-6` central
+- Strictly faithful algorithm: identical loss formulas (the positional zip
+  pairing quirk at MultiPolygon splits is reproduced on the fixture-checkpoint
+  path; standalone runs use a direct site→cell mapping), `ε = 1e-6` central
   finite differences applied in f32, PyTorch-semantics AdamW, and torch's
   exact f32/f64 casting boundaries (torch's default dtype is float32; every
   tensor materialization is an f64 → f32 cast).

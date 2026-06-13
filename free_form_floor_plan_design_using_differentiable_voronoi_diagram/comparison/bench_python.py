@@ -12,7 +12,7 @@ macOS as it would on the author's Linux devcontainer) — that overhead is part
 of the algorithm as written and is therefore timed.
 
 Usage (from repo root, in the fixture venv):
-  .venv-fixtures/bin/python comparison/bench_python.py <example> <iters> <out_dir>
+  .venv-fixtures/bin/python free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/bench_python.py <example> <iters> <out_dir>
 """
 
 import io

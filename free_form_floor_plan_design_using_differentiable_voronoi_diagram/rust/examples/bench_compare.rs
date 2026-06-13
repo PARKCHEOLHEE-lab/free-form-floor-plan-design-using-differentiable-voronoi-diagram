@@ -2,7 +2,8 @@
 //! start, run N optimization iterations timing only the compute (forward loss +
 //! finite-difference backward + AdamW step, excluding rendering/IO), render one
 //! frame per iteration, and emit `rust_<name>.gif` + `rust_timing_<name>.json`.
-//! Pair with `comparison/bench_python.py` and `comparison/make_html.py`.
+//! Pair with `bench_python.py` and `make_html.py` in the sibling `comparison/`
+//! dir (`free_form_.../comparison`).
 //!
 //!   cargo run --release --example bench_compare -- <example> <iters> <out_dir>
 

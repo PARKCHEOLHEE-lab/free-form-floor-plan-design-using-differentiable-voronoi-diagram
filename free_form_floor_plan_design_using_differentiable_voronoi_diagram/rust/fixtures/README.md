@@ -14,7 +14,7 @@ shortest-round-trip decimals, so every value reloads bit-identically.
 `geos_cell_order` / `split_pieces` record GEOS-internal orderings that
 `loss.py`'s positional zip pairing depends on but that no reimplementation
 can recompute; the Rust forward accepts them as an optional hint (checkpoint
-tests only — standalone runs use natural site order).
+tests only — standalone runs use the direct voronoice site→cell mapping).
 
 ## Regeneration
 

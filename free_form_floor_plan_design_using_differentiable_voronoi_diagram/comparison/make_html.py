@@ -5,7 +5,9 @@ python_<name>.gif / rust_<name>.gif files (relative paths) to produce a
 single self-contained report: a timing table, per-example speedup bars, and
 side-by-side evolution GIFs.
 
-Usage:  python comparison/make_html.py [out_dir]   (default: comparison/output)
+Usage (from repo root):
+  python free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/make_html.py [out_dir]
+(out_dir default: the `output/` dir next to this script)
 """
 
 import os
