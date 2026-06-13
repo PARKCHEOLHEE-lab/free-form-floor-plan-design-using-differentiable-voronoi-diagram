@@ -189,6 +189,16 @@ pub fn compute_cells(
 
     let cell_of_site = raw_cells_per_site(&sites_f64, boundary);
 
+    // Standalone runs (GIF/CLI/outcome loop) use the direct voronoice
+    // site->cell mapping, which is robust and order-independent. The
+    // order-dependent zip-pop pairing below exists ONLY to bit-replicate
+    // loss.py's GEOS-order-dependent piece dropping for the fixture checkpoint
+    // (where the hint is injected); without the hint that re-pairing could
+    // mis-assign cells around a MultiPolygon split (shape_b: 10/40 sites).
+    if hint.is_none() {
+        return compute_cells_direct(&sites_f64, boundary, &cell_of_site);
+    }
+
     let identity: Vec<usize> = (0..n).collect();
     let order: &[usize] = hint.map(|h| h.cell_order).unwrap_or(&identity);
 
@@ -238,6 +248,60 @@ pub fn compute_cells(
             rem_raws.remove(ci);
         }
     }
+
+    CellGeometry {
+        cells_sorted,
+        n_raw_cells: cell_of_site.len(),
+        n_pieces,
+        split_positions,
+    }
+}
+
+/// Direct voronoice site->cell pairing (no hint): each site i is the generator
+/// of `cell_of_site[i]`, so we clip that cell and keep it for site i. At a
+/// MultiPolygon split we keep the piece that geometrically contains the site;
+/// if the site has drifted OUTSIDE the boundary (so no clipped piece contains
+/// it — legitimate mid-optimization) we keep the LARGEST piece instead, so the
+/// cell still covers its boundary region. Dropping it to empty there would
+/// leave a hole at a concave boundary notch (shape_duck ~iter 11). No
+/// containment re-search, so the assignment cannot drift around a split.
+fn compute_cells_direct(
+    sites_f64: &[[f64; 2]],
+    boundary: &Polygon<f64>,
+    cell_of_site: &[Polygon<f64>],
+) -> CellGeometry {
+    use geo::Area;
+    let n = sites_f64.len();
+    let mut cells_sorted: Vec<Polygon<f64>> = Vec::with_capacity(n);
+    let mut n_pieces = 0usize;
+    let mut split_positions = Vec::new();
+    for (i, &[x, y]) in sites_f64.iter().enumerate() {
+        let raw = &cell_of_site[i];
+        let inter: MultiPolygon<f64> = raw.intersection(boundary);
+        let pieces: Vec<Polygon<f64>> = inter.0;
+        n_pieces += pieces.len().max(1);
+        let cell = match pieces.len() {
+            0 => empty_cell(),
+            1 => pieces.into_iter().next().unwrap(),
+            _ => {
+                split_positions.push((i, pieces.len()));
+                let site = Point::new(x, y);
+                // prefer the piece containing the site; else (site outside
+                // boundary) the largest piece. Tuple key (contains, area)
+                // sorts a containing piece above all, then by area.
+                pieces
+                    .into_iter()
+                    .max_by(|a, b| {
+                        let key = |p: &Polygon<f64>| (p.contains(&site), p.unsigned_area());
+                        key(a).partial_cmp(&key(b)).unwrap()
+                    })
+                    .unwrap_or_else(empty_cell)
+            }
+        };
+        cells_sorted.push(cell);
+    }
+
+    snap_cells(&mut cells_sorted);
 
     CellGeometry {
         cells_sorted,
