@@ -1,0 +1,5 @@
+# This dir doubles as the Docker build context for ../../.devcontainer/python.
+# The image only needs requirements.txt; everything else (src/, examples/, the
+# ~270 MB runs/ gallery) must stay out of the build context.
+*
+!requirements.txt

@@ -1,0 +1,40 @@
+// Python dev container — original config, now one of two selectable
+// configurations under .devcontainer/ (VS Code shows a picker on
+// "Dev Containers: Reopen in Container"). Sibling: ../rust/devcontainer.json
+//
+// `context` points at the python package dir so the Dockerfile can COPY
+// requirements.txt; `dockerfile` is resolved relative to this folder.
+{
+    "name": "voronoi-floorplan-python",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "../../free_form_floor_plan_design_using_differentiable_voronoi_diagram/python"
+    },
+    "mounts": [
+        "source=${localEnv:USERPROFILE}/.gitconfig,target=/root/.gitconfig,type=bind",
+        "source=${localEnv:USERPROFILE}/.ssh/id_rsa,target=/root/.ssh/id_rsa,type=bind",
+        "source=${localEnv:USERPROFILE}/.ssh/id_rsa.pub,target=/root/.ssh/id_rsa.pub,type=bind"
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "editor.wordWrap": "wordWrapColumn",
+                "editor.wordWrapColumn": 120,
+                "terminal.integrated.shell.linux": "/bin/zsh"
+            },
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "mhutchie.git-graph",
+                "ms-python.debugpy",
+                "hediet.debug-visualizer",
+                "Meezilla.json",
+                "njpwerner.autodocstring",
+                "ms-azuretools.vscode-docker",
+                "ms-toolsai.jupyter"
+            ]
+        }
+    },
+    "postCreateCommand": "bash .devcontainer/python/post-create-command.sh",
+    "remoteUser": "root"
+}

@@ -21,7 +21,10 @@ This project is a naive implementation of the paper [Free-form Floor Plan Design
 
 # Installation
 
-This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.12-slim` for running devcontainer.
+This repository ships **two** dev containers, selectable from the same "Reopen in Container" picker:
+
+- **voronoi-floorplan-python** — the original implementation, image `python:3.10.12-slim` ([`.devcontainer/python/Dockerfile`](/.devcontainer/python/Dockerfile)).
+- **voronoi-floorplan-rust** — the pure-Rust port, image `rust:1-slim-bookworm` ([`.devcontainer/rust/Dockerfile`](/.devcontainer/rust/Dockerfile)).
 
 
 1. Ensure you have Docker and Visual Studio Code with the Remote - Containers extension installed.
@@ -32,7 +35,7 @@ This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.1
     ```
 
 3. Open the project with VSCode.
-4. When prompted at the bottom left on the VSCode, click `Reopen in Container` or use the command palette (F1) and select `Remote-Containers: Reopen in Container`.
+4. When prompted at the bottom left on the VSCode, click `Reopen in Container` or use the command palette (F1) and select `Dev Containers: Reopen in Container`. VS Code lists both configurations — pick **voronoi-floorplan-python** or **voronoi-floorplan-rust**.
 5. VS Code will build the Docker container and set up the environment.
 6. Once the container is built and running, you're ready to start working with the project.
 

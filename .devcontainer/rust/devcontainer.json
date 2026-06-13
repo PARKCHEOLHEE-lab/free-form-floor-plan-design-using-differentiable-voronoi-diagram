@@ -1,0 +1,40 @@
+// Rust dev container — the second of two selectable configurations under
+// .devcontainer/ (VS Code shows a picker on "Dev Containers: Reopen in
+// Container"). Sibling: ../python/devcontainer.json
+//
+// The whole repo is bind-mounted (default workspace mount); the crate lives at
+// free_form_.../rust, pointed to via rust-analyzer.linkedProjects so the
+// extension loads it without re-rooting the workspace.
+{
+    "name": "voronoi-floorplan-rust",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "mounts": [
+        "source=${localEnv:USERPROFILE}/.gitconfig,target=/root/.gitconfig,type=bind",
+        "source=${localEnv:USERPROFILE}/.ssh/id_rsa,target=/root/.ssh/id_rsa,type=bind",
+        "source=${localEnv:USERPROFILE}/.ssh/id_rsa.pub,target=/root/.ssh/id_rsa.pub,type=bind"
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "editor.wordWrap": "wordWrapColumn",
+                "editor.wordWrapColumn": 120,
+                "terminal.integrated.shell.linux": "/bin/zsh",
+                "rust-analyzer.linkedProjects": [
+                    "free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/Cargo.toml"
+                ],
+                "rust-analyzer.check.command": "clippy"
+            },
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml",
+                "vadimcn.vscode-lldb",
+                "mhutchie.git-graph",
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    },
+    "postCreateCommand": "cargo fetch --manifest-path free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/Cargo.toml",
+    "remoteUser": "root"
+}
