@@ -33,11 +33,11 @@ from PIL import Image  # noqa: E402
 multiprocessing.set_start_method("fork", force=True)
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, REPO)
+sys.path.insert(0, os.path.dirname(REPO))  # repo root (PKG's parent)
 
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src import shape  # noqa: E402
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src.loss import FloorPlanLoss  # noqa: E402
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src.generator import FloorPlanGenerator  # noqa: E402
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src import shape  # noqa: E402
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src.loss import FloorPlanLoss  # noqa: E402
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src.generator import FloorPlanGenerator  # noqa: E402
 
 SHAPES = {
     "shape_a": shape.ShapeA,

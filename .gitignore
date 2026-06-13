@@ -11,7 +11,7 @@ runs/
 .venv-fixtures/
 
 # rust build artifacts
-rust/target/
+**/target/
 
 # generated comparison artifacts (regenerate via comparison/README.md)
-comparison/output/
+free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/output/

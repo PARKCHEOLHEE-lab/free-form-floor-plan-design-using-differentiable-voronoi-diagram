@@ -12,25 +12,28 @@ Generated artifacts (GIFs, HTML, timing JSON) are written to `output/` and are
 ## Regenerate
 
 From the repo root, with the fixture Python environment active (see
-`rust/fixtures/README.md` for the pinned deps):
+`free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/fixtures/README.md`
+for the pinned deps):
 
 ```bash
+PKG=free_form_floor_plan_design_using_differentiable_voronoi_diagram
+
 # Rust side — timing JSON + evolution GIF per example
-cd rust
+cd "$PKG/rust"
 for ex in shape_a shape_b shape_c shape_duck; do
   cargo run --release --example bench_compare -- "$ex" 50 ../comparison/output
 done
-cd ..
+cd ../..
 
 # Python side — run each sequentially (each uses the whole machine for a fair
 # multiprocessing-backward timing)
 for ex in shape_a shape_b shape_c shape_duck; do
-  .venv-fixtures/bin/python comparison/bench_python.py "$ex" 50 comparison/output
+  .venv-fixtures/bin/python "$PKG/comparison/bench_python.py" "$ex" 50 "$PKG/comparison/output"
 done
 
 # Build the report
-python3 comparison/make_html.py comparison/output
-open comparison/output/comparison.html
+python3 "$PKG/comparison/make_html.py" "$PKG/comparison/output"
+open "$PKG/comparison/output/comparison.html"
 ```
 
 ## Files
@@ -39,7 +42,7 @@ open comparison/output/comparison.html
   optimization loop, renders the matplotlib GIF, writes `python_timing_*.json`.
 - `make_html.py` — reads the timing JSONs and references the GIFs to build
   `comparison.html` (timing table, speedup bars, side-by-side GIFs).
-- the Rust benchmark lives at `rust/examples/bench_compare.rs`.
+- the Rust benchmark lives at `free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/examples/bench_compare.rs`.
 
 ## What the report shows
 

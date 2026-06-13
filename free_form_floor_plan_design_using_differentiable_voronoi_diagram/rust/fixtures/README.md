@@ -28,9 +28,9 @@ python3.11 -m venv .venv-fixtures
 # Pillow is relaxed from the repo's 9.2.0 pin (no python 3.11 wheels);
 # Pillow contributes to no exported number — it is image I/O only.
 
-.venv-fixtures/bin/python rust/fixtures/export_fixtures.py                     # all examples
-.venv-fixtures/bin/python rust/fixtures/export_fixtures.py shape_a --checkpoint-only
+.venv-fixtures/bin/python free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/fixtures/export_fixtures.py                     # all examples
+.venv-fixtures/bin/python free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/fixtures/export_fixtures.py shape_a --checkpoint-only
 
 # re-embed the shape constants after regenerating:
-.venv-fixtures/bin/python rust/fixtures/gen_shapes_rs.py
+.venv-fixtures/bin/python free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/fixtures/gen_shapes_rs.py
 ```

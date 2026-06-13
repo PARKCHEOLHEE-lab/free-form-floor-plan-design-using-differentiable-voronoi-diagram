@@ -7,10 +7,10 @@ This project is a naive implementation of the paper [Free-form Floor Plan Design
 
 <div style="display: flex">
     <p align="center">
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_a/11-26-2024__19-36-19/optimization-resized.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_b/11-26-2024__19-39-24/optimization-resized.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_c/11-26-2024__19-35-24/optimization-resized.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/runs/shape_duck/11-26-2024__19-34-06/optimization-resized.gif" width=20%>
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_a/11-26-2024__19-36-19/optimization-resized.gif" width=20%>　　
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_b/11-26-2024__19-39-24/optimization-resized.gif" width=20%>　　
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_c/11-26-2024__19-35-24/optimization-resized.gif" width=20%>　　
+        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_duck/11-26-2024__19-34-06/optimization-resized.gif" width=20%>
     </p>
 </div>
 <p align="center" color="gray">
@@ -62,10 +62,10 @@ This repository uses the [image](/.devcontainer/Dockerfile) named `python:3.10.1
 After installation, you can run any of the example files using the following commands:
 
 ```bash
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_duck.py
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_a.py
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_b.py
-    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/examples/shape_c.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_duck.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_a.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_b.py
+    python free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_c.py
 ```
 
 <br>

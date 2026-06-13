@@ -23,7 +23,7 @@ Environment: python 3.11 venv with the repo's pinned requirements
 (Pillow relaxed to >=9.3,<10 for python 3.11 wheels; Pillow contributes to no
 exported number - it is image I/O only).
 
-Usage:  .venv-fixtures/bin/python rust/fixtures/export_fixtures.py [example ...]
+Usage:  .venv-fixtures/bin/python free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/fixtures/export_fixtures.py [example ...]
 """
 
 import os
@@ -39,12 +39,12 @@ from shapely import geometry, ops
 
 multiprocessing.set_start_method("fork", force=True)
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, REPO)
 
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src import shape  # noqa: E402
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src.loss import FloorPlanLoss  # noqa: E402
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src.generator import FloorPlanGenerator  # noqa: E402
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src import shape  # noqa: E402
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src.loss import FloorPlanLoss  # noqa: E402
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src.generator import FloorPlanGenerator  # noqa: E402
 
 assert shapely.__version__ == "2.0.2", shapely.__version__
 assert torch.__version__.startswith("2.1.0"), torch.__version__

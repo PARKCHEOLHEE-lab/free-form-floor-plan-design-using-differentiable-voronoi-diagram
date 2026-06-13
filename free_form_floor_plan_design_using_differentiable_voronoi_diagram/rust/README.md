@@ -17,7 +17,7 @@ central finite-difference gradients and AdamW.
 ## Usage
 
 ```bash
-cd rust
+cd free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust
 cargo run --release -- shape_a            # or shape_b | shape_c | shape_duck
 cargo run --release -- shape_duck --iterations 200 --seed 42 --out-dir /tmp/duck
 ```
