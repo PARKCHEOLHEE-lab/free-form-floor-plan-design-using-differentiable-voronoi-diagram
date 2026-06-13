@@ -98,16 +98,6 @@ pub fn run_example(
         events.add_scalar("loss_bb", b.bb, step, t)?;
         events.add_scalar("loss_cell_area", b.cell, step, t)?;
 
-        let geom = voronoi::compute_cells(&sites, &boundary, None);
-        let frame = render::render_frame(
-            &boundary,
-            &geom.cells_sorted,
-            &room_indices,
-            config.area_ratio.len(),
-            &sites,
-        );
-        gif.add_frame(&frame)?;
-
         let grads = grad::finite_difference_grads(
             &sites,
             &boundary,
@@ -117,6 +107,19 @@ pub fn run_example(
             None,
         );
         optimizer.step(&mut sites, &grads);
+
+        // Capture the frame AFTER the optimizer step, mirroring the Python
+        // example (`optimizer.step()` then `generator.log(...)`, which captures
+        // the frame): optimization.gif frame i shows the post-step sites.
+        let geom = voronoi::compute_cells(&sites, &boundary, None);
+        let frame = render::render_frame(
+            &boundary,
+            &geom.cells_sorted,
+            &room_indices,
+            config.area_ratio.len(),
+            &sites,
+        );
+        gif.add_frame(&frame)?;
 
         println!("Iteration {iteration}, Loss: {}", b.total);
     }
