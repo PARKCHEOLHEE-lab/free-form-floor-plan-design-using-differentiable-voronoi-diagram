@@ -2,7 +2,8 @@
 //!
 //! The Python example steps the optimizer BEFORE capturing the frame:
 //!     loss.backward(); optimizer.step(); generator.log(... captures frame ...)
-//! (`python/examples/shape_a.py:79-81`), so `optimization.gif` frame i shows the
+//! (`free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/examples/shape_a.py:79-81`),
+//! so `optimization.gif` frame i shows the
 //! sites *after* the i-th step. `run_example` used to render the frame before the
 //! step, leaving the Rust GIF one iteration behind. This test pins the first GIF
 //! frame to the POST-step geometry through the public CLI entry point.

@@ -193,7 +193,7 @@ def main():
   {gifs}
 
   <div class="note fix">
-    <b>Standalone cell-pairing fix (all four GIFs regenerated).</b> The earlier standalone
+    <b>Standalone cell-pairing fix (the Rust GIFs above are regenerated).</b> The earlier standalone
     (hint-free) run re-paired clipped cells to sites with an order-dependent containment
     search. Whenever a Voronoi cell, clipped to the boundary, split into a MultiPolygon,
     that search mis-assigned cells and rooms shattered. shape_b has such a split at
@@ -204,7 +204,7 @@ def main():
     cell), which is order-independent. The checkpoint (hint) path that proves 1e-6
     equivalence was left untouched; two regression tests (<code>tests/pairing.rs</code>)
     now pin that every inside-boundary site lands in its assigned cell, at iteration&nbsp;0
-    and across the first 25 iterations. All four Rust GIFs above are the fixed runs.
+    and across the first 25 iterations. The Rust GIFs above are the fixed runs.
   </div>
 
   <div class="note">

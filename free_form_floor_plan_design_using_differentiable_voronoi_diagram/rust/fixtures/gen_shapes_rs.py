@@ -4,7 +4,7 @@ The embedded coordinates are the Python-normalized boundary vertices, emitted
 as shortest-round-trip decimal literals, so the Rust polygons are bit-identical
 to the shapely ones. Run after (re)generating fixtures:
 
-    .venv-fixtures/bin/python rust/fixtures/gen_shapes_rs.py
+    .venv-fixtures/bin/python free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/fixtures/gen_shapes_rs.py
 """
 
 import json
