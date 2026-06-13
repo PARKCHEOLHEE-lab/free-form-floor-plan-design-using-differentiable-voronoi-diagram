@@ -12,3 +12,6 @@ runs/
 
 # rust build artifacts
 rust/target/
+
+# generated comparison artifacts (regenerate via comparison/README.md)
+comparison/output/
