@@ -10,11 +10,11 @@
         "dockerfile": "Dockerfile",
         "context": "../../free_form_floor_plan_design_using_differentiable_voronoi_diagram/python"
     },
-    "mounts": [
-        "source=${localEnv:USERPROFILE}/.gitconfig,target=/root/.gitconfig,type=bind",
-        "source=${localEnv:USERPROFILE}/.ssh/id_rsa,target=/root/.ssh/id_rsa,type=bind",
-        "source=${localEnv:USERPROFILE}/.ssh/id_rsa.pub,target=/root/.ssh/id_rsa.pub,type=bind"
-    ],
+    // No host bind mounts for gitconfig/ssh on purpose: VS Code copies the
+    // local .gitconfig into the container and forwards the running SSH agent
+    // automatically. That works on Windows/macOS/Linux without hardcoding a
+    // home path (no single env var covers all three) or a key filename (a
+    // bind mount of a missing ~/.ssh/id_rsa would block the container start).
     "customizations": {
         "vscode": {
             "settings": {
