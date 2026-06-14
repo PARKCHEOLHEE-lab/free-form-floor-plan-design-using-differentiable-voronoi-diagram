@@ -46,10 +46,10 @@ pub fn is_empty_cell(cell: &Polygon<f64>) -> bool {
     cell.exterior().0.is_empty()
 }
 
-/// Voronoi cell polygon per site (site order), clipped to a box that
-/// generously contains both the boundary and all sites. The box only matters
-/// through `cell ∩ boundary`, which is identical for any box ⊇ boundary.
-pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Vec<Polygon<f64>> {
+/// Build the voronoice diagram in a box that generously contains both the
+/// boundary and all sites. The box only matters through `cell ∩ boundary`,
+/// which is identical for any box ⊇ boundary.
+fn build_voronoi(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> voronoice::Voronoi {
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
@@ -76,7 +76,7 @@ pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Ve
         x: (min_x + max_x) / 2.0,
         y: (min_y + max_y) / 2.0,
     };
-    let voronoi = VoronoiBuilder::default()
+    VoronoiBuilder::default()
         .set_sites(
             sites_f64
                 .iter()
@@ -85,9 +85,12 @@ pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Ve
         )
         .set_bounding_box(BoundingBox::new(center, max_x - min_x, max_y - min_y))
         .build()
-        .expect("voronoi construction failed");
+        .expect("voronoi construction failed")
+}
 
-    voronoi
+/// Voronoi cell polygon per site (site order).
+pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Vec<Polygon<f64>> {
+    build_voronoi(sites_f64, boundary)
         .iter_cells()
         .map(|cell| {
             Polygon::new(
@@ -102,6 +105,44 @@ pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Ve
         .collect()
 }
 
+/// Voronoi neighbor site indices per site (the sites sharing a Voronoi edge).
+/// Stable under a tiny site perturbation, so the local-gradient path caches
+/// this once per step and reuses it for all 2N perturbations.
+pub fn site_neighbors(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Vec<Vec<usize>> {
+    let voronoi = build_voronoi(sites_f64, boundary);
+    let mut neighbors = vec![Vec::new(); sites_f64.len()];
+    for cell in voronoi.iter_cells() {
+        neighbors[cell.site()] = cell.iter_neighbors().collect();
+    }
+    neighbors
+}
+
+/// Clip one raw Voronoi cell to the boundary, returning the chosen piece and
+/// the number of intersection pieces. On a MultiPolygon split, keep the piece
+/// containing the site, or — if the site has drifted outside the boundary —
+/// the largest piece (see `compute_cells_direct`).
+pub fn clip_cell(raw: &Polygon<f64>, boundary: &Polygon<f64>, site: [f64; 2]) -> (Polygon<f64>, usize) {
+    use geo::Area;
+    let inter: MultiPolygon<f64> = raw.intersection(boundary);
+    let pieces: Vec<Polygon<f64>> = inter.0;
+    let n = pieces.len();
+    let cell = match n {
+        0 => empty_cell(),
+        1 => pieces.into_iter().next().unwrap(),
+        _ => {
+            let s = Point::new(site[0], site[1]);
+            pieces
+                .into_iter()
+                .max_by(|a, b| {
+                    let key = |p: &Polygon<f64>| (p.contains(&s), p.unsigned_area());
+                    key(a).partial_cmp(&key(b)).unwrap()
+                })
+                .unwrap_or_else(empty_cell)
+        }
+    };
+    (cell, n)
+}
+
 /// Welds floating-point-twin vertices across the clipped pieces.
 ///
 /// Where a shared Voronoi edge crosses the boundary, the seam intersection
@@ -112,7 +153,7 @@ pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Ve
 /// below any real feature size; displacement is invisible at the f32 loss
 /// precision) restores the bitwise-shared edges that GEOS gets for free from
 /// its single noding step.
-fn snap_cells(cells: &mut [Polygon<f64>]) {
+pub(crate) fn snap_cells(cells: &mut [Polygon<f64>]) {
     use std::collections::HashMap;
     const TOL: f64 = 1e-12;
     let mut canon: HashMap<(i64, i64), Vec<(f64, f64)>> = HashMap::new();
@@ -276,34 +317,18 @@ fn compute_cells_direct(
     boundary: &Polygon<f64>,
     cell_of_site: &[Polygon<f64>],
 ) -> CellGeometry {
-    use geo::Area;
     let n = sites_f64.len();
     let mut cells_sorted: Vec<Polygon<f64>> = Vec::with_capacity(n);
     let mut n_pieces = 0usize;
     let mut split_positions = Vec::new();
-    for (i, &[x, y]) in sites_f64.iter().enumerate() {
-        let raw = &cell_of_site[i];
-        let inter: MultiPolygon<f64> = raw.intersection(boundary);
-        let pieces: Vec<Polygon<f64>> = inter.0;
-        n_pieces += pieces.len().max(1);
-        let cell = match pieces.len() {
-            0 => empty_cell(),
-            1 => pieces.into_iter().next().unwrap(),
-            _ => {
-                split_positions.push((i, pieces.len()));
-                let site = Point::new(x, y);
-                // prefer the piece containing the site; else (site outside
-                // boundary) the largest piece. Tuple key (contains, area)
-                // sorts a containing piece above all, then by area.
-                pieces
-                    .into_iter()
-                    .max_by(|a, b| {
-                        let key = |p: &Polygon<f64>| (p.contains(&site), p.unsigned_area());
-                        key(a).partial_cmp(&key(b)).unwrap()
-                    })
-                    .unwrap_or_else(empty_cell)
-            }
-        };
+    for (i, &site) in sites_f64.iter().enumerate() {
+        // prefer the piece containing the site; else (site outside boundary)
+        // the largest piece — see `clip_cell`.
+        let (cell, np) = clip_cell(&cell_of_site[i], boundary, site);
+        n_pieces += np.max(1);
+        if np > 1 {
+            split_positions.push((i, np));
+        }
         cells_sorted.push(cell);
     }
 
