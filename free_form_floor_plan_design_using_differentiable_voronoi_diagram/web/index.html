@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Free-form Floor Plans · Differentiable Voronoi Diagram</title>
+  <style>
+    :root {
+      --ink: #1a1a1a;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #4e79a7;
+      --bg: #ffffff;
+      --panel: #fafafa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+    header { text-align: center; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 .4rem; }
+    .sub { color: var(--muted); margin: 0; }
+    p.lede { color: #374151; }
+    h2 { font-size: 1.15rem; font-weight: 650; margin: 2.2rem 0 .6rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line); }
+    code { background: #f3f4f6; padding: .08em .35em; border-radius: 4px; font-size: .9em; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .stage { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1.5rem; align-items: start; }
+    @media (max-width: 720px) { .stage { grid-template-columns: 1fr; } }
+
+    .canvas-card { }
+    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--line); border-radius: 8px; background: #fff; touch-action: none; cursor: crosshair; display: block; }
+    .readout { display: flex; justify-content: space-between; align-items: center; margin-top: .6rem; color: var(--muted); font-variant-numeric: tabular-nums; font-size: .9rem; }
+    canvas#loss { width: 100%; height: 70px; border: 1px solid var(--line); border-radius: 8px; margin-top: .5rem; background: var(--panel); display: block; }
+
+    .controls { font-size: .9rem; }
+    .group { margin-bottom: 1.1rem; }
+    .group > .label { font-weight: 650; font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: .45rem; }
+    .row { display: flex; align-items: center; gap: .5rem; margin: .3rem 0; }
+    .row label { width: 46px; color: #374151; }
+    .row input[type=range] { flex: 1; accent-color: var(--accent); }
+    .row .val { width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+    .row input[type=number] { width: 72px; padding: .25rem .4rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+
+    .seg { display: flex; flex-wrap: wrap; gap: .3rem; }
+    .seg button { flex: 1 1 auto; padding: .35rem .4rem; border: 1px solid var(--line); background: #fff; border-radius: 6px; font: inherit; font-size: .82rem; cursor: pointer; color: #374151; }
+    .seg button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .seg button:hover:not(.active) { border-color: #c7ccd1; }
+
+    .actions { display: flex; gap: .4rem; margin-top: 1.2rem; }
+    .actions button { flex: 1; padding: .55rem; border-radius: 7px; border: 1px solid var(--line); background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    .actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .actions button:disabled { opacity: .45; cursor: default; }
+    .hint { color: var(--muted); font-size: .8rem; margin: .3rem 0 0; }
+
+    footer { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+    .legend { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: .4rem; font-size: .82rem; color: var(--muted); }
+    .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+    .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Free-form Floor Plan Design</h1>
+    <p class="sub">via a differentiable Voronoi diagram — the Rust optimizer compiled to WebAssembly, running live in your browser</p>
+  </header>
+
+  <p class="lede">
+    Draw a boundary (or pick a preset), choose how many rooms and how the loss is weighted,
+    then watch Voronoi sites move under <strong>central finite-difference gradients</strong> and
+    <strong>AdamW</strong> until the cells settle into rooms. Every step — the Voronoi diagram,
+    the six loss components, the gradients — runs in-browser. No server.
+  </p>
+
+  <div class="stage">
+    <div class="canvas-card">
+      <canvas id="plan" width="520" height="520"></canvas>
+      <div class="readout"><span id="status">draw a boundary, or pick a preset →</span><span id="iterinfo"></span></div>
+      <canvas id="loss" width="520" height="70"></canvas>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="controls">
+      <div class="group">
+        <div class="label">Boundary</div>
+        <div class="seg" id="presets">
+          <button data-mode="draw" class="active">✎ Draw</button>
+          <button data-mode="shape_a">A</button>
+          <button data-mode="shape_b">B</button>
+          <button data-mode="shape_c">C</button>
+          <button data-mode="shape_duck">Duck</button>
+        </div>
+        <p class="hint" id="drawhint">Click on the canvas to add points (≥3), then Run.</p>
+      </div>
+
+      <div class="group">
+        <div class="label">Layout</div>
+        <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="40"><span class="val" id="sites_v">40</span></div>
+        <div class="row"><label>rooms</label><input id="rooms" type="range" min="2" max="8" step="1" value="4"><span class="val" id="rooms_v">4</span></div>
+      </div>
+
+      <div class="group">
+        <div class="label">Loss weights</div>
+        <div class="row"><label>wall</label><input id="w_wall" type="range" min="0" max="10" step="0.1" value="2.5"><span class="val" id="w_wall_v">2.5</span></div>
+        <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="40" step="0.5" value="20"><span class="val" id="w_area_v">20</span></div>
+        <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="10" step="0.1" value="2.1"><span class="val" id="w_lloyd_v">2.1</span></div>
+        <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="10" step="0.1" value="1.5"><span class="val" id="w_topo_v">1.5</span></div>
+        <div class="row"><label>bb</label><input id="w_bb" type="range" min="0" max="5" step="0.1" value="0"><span class="val" id="w_bb_v">0</span></div>
+        <div class="row"><label>cell</label><input id="w_cell" type="range" min="0" max="5" step="0.1" value="0"><span class="val" id="w_cell_v">0</span></div>
+      </div>
+
+      <div class="group">
+        <div class="label">Optimization</div>
+        <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="800" step="10" value="300"><span class="val" id="iters_v">300</span></div>
+        <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.01"><span class="val" id="lr_v">0.010</span></div>
+        <div class="row"><label>seed</label><input id="seed" type="number" min="0" step="1" value="777"></div>
+      </div>
+
+      <div class="actions">
+        <button id="run" class="primary">▶ Run</button>
+        <button id="pause" disabled>❚❚ Pause</button>
+        <button id="reset">⟲ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Rust port of <a href="https://github.com/PARKCHEOLHEE-lab/free-form-floor-plan-design-using-differentiable-voronoi-diagram">free-form-floor-plan-design-using-differentiable-voronoi-diagram</a>
+    (paper: <a href="https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&dl=0">Free-form Floor Plan Design using Differentiable Voronoi Diagram</a>),
+    compiled to WebAssembly. The in-browser trajectory is valid but not byte-identical to the native binary
+    (cross-platform floating-point differences in the geometry predicates).
+  </footer>
+</div>
+
+<script type="module">
+const COLORS = ['#4e79a7', '#e15759', '#59a14f', '#f28e2b', '#b07aa1', '#76b7b2', '#edc948', '#ff9da7'];
+const R = 1.18; // normalized boundaries fit within radius 1
+
+const plan = document.getElementById('plan');
+const pctx = plan.getContext('2d');
+const lossCv = document.getElementById('loss');
+const lctx = lossCv.getContext('2d');
+const $ = id => document.getElementById(id);
+
+let CW = plan.width, CH = plan.height;
+const nx = x => (x + R) / (2 * R) * CW;       // normalized -> canvas
+const ny = y => CH - (y + R) / (2 * R) * CH;  // flip y
+
+let mode = 'draw';        // 'draw' | shape name
+let drawPts = [];         // canvas-pixel points while drawing
+let built = false;        // the worker holds an optimizer for the current params
+let running = false;
+let paused = false;
+let maxIters = 300;
+let lossHist = [];
+let gen = 0, curGen = 0;  // build generation; frames from a superseded build are dropped
+
+// The optimizer lives in a Web Worker, so every wasm step runs OFF the main
+// thread; the UI stays responsive and only renders the frames it streams back.
+const worker = new Worker('./worker.js', { type: 'module' });
+
+// ---------- inputs ----------
+const SLIDERS = ['sites','rooms','w_wall','w_area','w_lloyd','w_topo','w_bb','w_cell','iters','lr'];
+for (const id of SLIDERS) {
+  const el = $(id), out = $(id + '_v');
+  const fmt = id === 'lr' ? v => (+v).toFixed(3) : v => (+v % 1 ? (+v).toFixed(1) : String(+v));
+  el.addEventListener('input', () => { out.textContent = fmt(el.value); });
+}
+function params() {
+  const k = +$('rooms').value;
+  return {
+    sites: +$('sites').value,
+    ratios: Float64Array.from({ length: k }, () => 1 / k),
+    w: ['w_wall','w_area','w_lloyd','w_topo','w_bb','w_cell'].map(id => +$(id).value),
+    iters: +$('iters').value,
+    lr: +$('lr').value,
+    seed: +$('seed').value | 0,
+  };
+}
+
+// Build (or rebuild) the optimizer in the worker. `then` is what the worker
+// does once built: 'preview' (draw the initial layout) or 'start' (run).
+function sendBuild(then) {
+  const p = params();
+  let boundary = null;
+  if (mode === 'draw') {
+    if (drawPts.length < 3) { $('status').textContent = 'need at least 3 boundary points'; return false; }
+    // Drawn points are in canvas pixels (y down); the optimizer + drawFrame use
+    // a y-up convention (like the preset shapes), so flip y here — otherwise the
+    // result renders vertically mirrored from what was drawn.
+    boundary = Float64Array.from(drawPts.flatMap(([x, y]) => [x, CH - y]));
+  }
+  maxIters = p.iters;
+  curGen = ++gen;
+  const base = { cmd: 'build', gen: curGen,
+    sites: p.sites, ratios: p.ratios, w: p.w, seed: p.seed, lr: p.lr, iters: p.iters, then };
+  if (mode === 'draw') worker.postMessage({ ...base, kind: 'custom', boundary });
+  else worker.postMessage({ ...base, kind: 'shape', mode });
+  return true;
+}
+
+// ---------- worker messages ----------
+worker.onmessage = (e) => {
+  const m = e.data;
+  // drop frames/results from a build that has since been superseded
+  if ((m.type === 'frame' || m.type === 'built' || m.type === 'done') && m.gen !== curGen) return;
+  switch (m.type) {
+    case 'ready':
+      $('status').textContent = 'click to add points (≥3), then Run';
+      break;
+    case 'error':
+      $('status').textContent = m.msg;
+      running = false; paused = false; setButtons();
+      break;
+    case 'built':
+      built = true;
+      break;
+    case 'frame':
+      drawFrame(m.frame);
+      if (m.mode === 'preview') {
+        $('status').textContent = mode + ' · ready to Run';
+      } else {
+        lossHist.push(m.frame.loss); drawLoss();
+      }
+      break;
+    case 'done':
+      running = false; paused = false; setButtons();
+      $('status').textContent = 'done';
+      break;
+  }
+};
+
+// ---------- presets / draw mode ----------
+$('presets').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  [...$('presets').children].forEach(x => x.classList.toggle('active', x === b));
+  mode = b.dataset.mode;
+  stop();
+  drawPts = [];
+  $('drawhint').style.display = mode === 'draw' ? '' : 'none';
+  if (mode === 'draw') { $('status').textContent = 'click to add points (≥3), then Run'; clearPlan(); }
+  else { $('status').textContent = mode + ' · building…'; sendBuild('preview'); }
+});
+
+plan.addEventListener('click', e => {
+  if (mode !== 'draw' || running) return;
+  const r = plan.getBoundingClientRect();
+  drawPts.push([(e.clientX - r.left) * CW / r.width, (e.clientY - r.top) * CH / r.height]);
+  drawSketch();
+  $('status').textContent = `${drawPts.length} point${drawPts.length === 1 ? '' : 's'}` + (drawPts.length >= 3 ? ' · ready to Run' : '');
+});
+
+// ---------- drawing ----------
+function clearPlan() { pctx.fillStyle = '#fff'; pctx.fillRect(0, 0, CW, CH); }
+function drawSketch() {
+  clearPlan();
+  if (!drawPts.length) return;
+  pctx.beginPath();
+  drawPts.forEach(([x, y], i) => i ? pctx.lineTo(x, y) : pctx.moveTo(x, y));
+  if (drawPts.length >= 3) { pctx.closePath(); pctx.fillStyle = '#4e79a722'; pctx.fill(); }
+  pctx.strokeStyle = '#4e79a7'; pctx.lineWidth = 1.5; pctx.stroke();
+  pctx.fillStyle = '#4e79a7';
+  for (const [x, y] of drawPts) { pctx.beginPath(); pctx.arc(x, y, 3, 0, 7); pctx.fill(); }
+}
+
+function drawFrame(f) {
+  clearPlan();
+  for (const cell of f.cells) {
+    pctx.beginPath();
+    cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
+    pctx.closePath();
+    pctx.fillStyle = COLORS[cell.room % COLORS.length] + 'cc';
+    pctx.fill();
+    pctx.lineWidth = 1; pctx.strokeStyle = '#33373b'; pctx.stroke();
+  }
+  pctx.fillStyle = '#111';
+  for (const [x, y] of f.sites) { pctx.beginPath(); pctx.arc(nx(x), ny(y), 1.6, 0, 7); pctx.fill(); }
+  $('iterinfo').textContent = `iter ${f.iteration} · loss ${f.loss.toFixed(3)}`;
+}
+
+function drawLoss() {
+  const W = lossCv.width, H = lossCv.height;
+  lctx.clearRect(0, 0, W, H);
+  if (lossHist.length < 2) return;
+  const lo = Math.min(...lossHist), hi = Math.max(...lossHist), span = hi - lo || 1;
+  lctx.beginPath();
+  lossHist.forEach((v, i) => {
+    const x = i / (maxIters - 1) * W, y = H - 6 - (v - lo) / span * (H - 12);
+    i ? lctx.lineTo(x, y) : lctx.moveTo(x, y);
+  });
+  lctx.strokeStyle = '#4e79a7'; lctx.lineWidth = 1.5; lctx.stroke();
+}
+
+function legend(k) {
+  $('legend').innerHTML = Array.from({ length: k }, (_, i) =>
+    `<span><i class="sw" style="background:${COLORS[i % COLORS.length]}"></i>room ${i + 1}</span>`).join('');
+}
+
+// ---------- run loop ----------
+function stop() {
+  running = false; paused = false;
+  curGen = ++gen;                 // invalidate any in-flight frames from the prior build
+  worker.postMessage({ cmd: 'dispose' });
+  built = false;
+  setButtons();
+}
+
+function setButtons() {
+  $('run').textContent = paused ? '▶ Resume' : '▶ Run';
+  $('run').disabled = running;
+  $('pause').disabled = !running;
+}
+
+$('run').onclick = () => {
+  if (paused && built) {                 // resume mid-run
+    paused = false; running = true; setButtons();
+    $('status').textContent = (mode === 'draw' ? '' : mode + ' · ') + 'optimizing…';
+    worker.postMessage({ cmd: 'resume' });
+    return;
+  }
+  lossHist = [];                         // fresh run
+  const p = params(); legend(p.ratios.length);
+  if (!sendBuild('start')) return;
+  running = true; paused = false; setButtons();
+  $('status').textContent = (mode === 'draw' ? '' : mode + ' · ') + 'optimizing…';
+};
+
+$('pause').onclick = () => {
+  if (!running) return;
+  running = false; paused = true; setButtons();
+  $('status').textContent = 'paused';
+  worker.postMessage({ cmd: 'pause' });
+};
+
+$('reset').onclick = () => {
+  stop();
+  lossHist = []; drawLoss(); $('iterinfo').textContent = '';
+  if (mode === 'draw') { drawPts = []; clearPlan(); $('status').textContent = 'click to add points (≥3), then Run'; }
+  else { $('status').textContent = mode + ' · building…'; sendBuild('preview'); }
+};
+
+clearPlan();
+</script>
+</body>
+</html>
