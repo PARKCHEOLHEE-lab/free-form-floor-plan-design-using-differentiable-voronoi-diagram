@@ -48,14 +48,15 @@ pub fn finite_difference_grads(
         (loss_pos - loss_neg) / (2.0 * EPS)
     };
 
-    // Native fans the 2N evaluations across rayon threads; wasm has no threads,
-    // so it runs them serially. The entries are bitwise identical either way.
-    #[cfg(not(target_arch = "wasm32"))]
+    // With the `parallel` feature (default on native, and on the threaded wasm
+    // build via wasm-bindgen-rayon) the 2N evaluations fan across rayon threads;
+    // otherwise they run serially. The entries are bitwise identical either way.
+    #[cfg(feature = "parallel")]
     let entries: Vec<f32> = {
         use rayon::prelude::*;
         (0..n * 2).into_par_iter().map(eval).collect()
     };
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(feature = "parallel"))]
     let entries: Vec<f32> = (0..n * 2).map(eval).collect();
 
     entries.chunks_exact(2).map(|c| [c[0], c[1]]).collect()

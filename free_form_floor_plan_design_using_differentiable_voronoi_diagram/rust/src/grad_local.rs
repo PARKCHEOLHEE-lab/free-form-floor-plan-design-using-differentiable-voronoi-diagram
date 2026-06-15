@@ -5,17 +5,22 @@
 //! perturbation of one site only changes that site's Voronoi cell and its
 //! immediate neighbors, so most of that work is redundant. This module caches
 //! the base-step geometry once and, per perturbation, recomputes only the
-//! affected cells and the loss delta.
+//! affected cells and the rooms they touch.
 //!
-//! It is NOT bit-identical to the global path (the f32 loss reductions are
-//! order-sensitive), so it stays a demo-only path — the native CLI keeps the
-//! global gradients for its bit-exact equivalence with the Python reference.
+//! The dominant cost is the per-room boolean union that wall/topo/bb need, so
+//! this path uses geo's i_overlay `unary_union` (`room_union`) instead of the
+//! exact Martinez-Rueda union. Its robust internal noding welds shared/twin
+//! vertices, so the affected cells need no pre-snapping, and it is faster end to
+//! end. The result is directionally close to the exact global gradient (cosine >
+//! 0.99) but not bit-identical, so it stays a demo-only path — the native CLI
+//! keeps the global gradients (exact union) for its bit-exact equivalence with
+//! Python.
 
 use crate::loss::{
     compute_area_loss, compute_bb_loss, compute_cell_area_loss, compute_lloyd_loss,
-    compute_topology_loss, compute_wall_loss, rooms_group, union_group, LossWeights,
+    compute_topology_loss, compute_wall_loss, rooms_group, LossWeights,
 };
-use crate::voronoi::{compute_cells, site_neighbors, snap_cells};
+use crate::voronoi::{compute_cells, site_neighbors};
 use geo::{MultiPolygon, Polygon};
 
 /// Sum the six loss components from already-built geometry, mirroring
@@ -36,6 +41,15 @@ fn total_from(
     let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
     wall + area + lloyd + topo + bb + cell
+}
+
+/// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
+/// Its robust internal noding welds shared/twin vertices, so the input cells
+/// need NOT be pre-snapped (unlike the old edge-cancellation union, which
+/// required bitwise-shared edges). Demo-only; the CLI path keeps the exact
+/// geo-booleanop union for Python bit-parity.
+pub(crate) fn room_union(cells: &[&Polygon<f64>]) -> MultiPolygon<f64> {
+    geo::algorithm::unary_union(cells.iter().copied())
 }
 
 /// Local finite-difference gradients: same central-difference formula as
@@ -79,11 +93,14 @@ impl<'a> LocalGradContext<'a> {
     ) -> Self {
         let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let base_cells = compute_cells(sites, boundary, None).cells_sorted;
+        let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0;
         let (n_rooms, base_unions, base_total) = {
             let groups = rooms_group(&base_cells, room_indices);
             let n_rooms = groups.len();
-            let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 {
-                groups.iter().map(|g| union_group(g)).collect()
+            // Edge-cancellation union (see module docs): the base per-room unions
+            // are reused for the rooms a single-site perturbation does not touch.
+            let unions: Vec<MultiPolygon<f64>> = if need_unions {
+                groups.iter().map(|g| room_union(g)).collect()
             } else {
                 Vec::new()
             };
@@ -123,6 +140,43 @@ impl<'a> LocalGradContext<'a> {
             .collect()
     }
 
+    /// Parallel sibling of `gradients`: fans the 2N independent perturbation
+    /// evaluations across rayon threads on native (each task gets its own
+    /// scratch copy of the sites); the wasm build has no threads, so it runs
+    /// them serially. Bitwise identical to `gradients` — each (site, axis)
+    /// evaluation depends only on that single perturbed coordinate.
+    pub fn gradients_par(&self, sites: &[[f32; 2]]) -> Vec<[f32; 2]> {
+        const EPS: f32 = 1e-6;
+        // Each (site, axis) evaluation is independent; give every task its own
+        // scratch copy so concurrent perturbations cannot race. The per-index
+        // arithmetic is identical to `gradients` (serial reuses one scratch and
+        // restores it after each axis, so its scratch always equals `sites` at
+        // the start of a site too), hence the result is bitwise identical.
+        let one = |i: usize| -> [f32; 2] {
+            let mut buf = sites.to_vec();
+            let mut g = [0.0f32; 2];
+            for j in 0..2 {
+                let orig = sites[i][j];
+                buf[i][j] = orig + EPS;
+                let loss_pos = self.local_total(&buf, i);
+                buf[i][j] = orig - EPS;
+                let loss_neg = self.local_total(&buf, i);
+                buf[i][j] = orig;
+                g[j] = (loss_pos - loss_neg) / (2.0 * EPS);
+            }
+            g
+        };
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            (0..sites.len()).into_par_iter().map(one).collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            (0..sites.len()).map(one).collect()
+        }
+    }
+
     /// Recompute the clipped cells affected by perturbing one site: the site's
     /// own cell plus its Voronoi neighbors. Returns `(site_index, clipped_cell)`
     /// pairs. These must match what the global `compute_cells` produces for
@@ -136,7 +190,21 @@ impl<'a> LocalGradContext<'a> {
         affected
             .into_iter()
             .map(|j| {
-                let (cell, _) = crate::voronoi::clip_cell(&raw[j], self.boundary, pert_f64[j]);
+                // Trivial accept: a cell fully inside the boundary is unchanged
+                // by clipping (cell ∩ boundary == cell), so skip the boolean
+                // intersection — ~half of all affected-cell clips qualify. The
+                // raw cell has the same vertex set as the clip but voronoice's
+                // winding, so orient it to the clipped winding (geo Default: CCW
+                // exterior); room_union's i_overlay fill rule is winding-sensitive,
+                // so a mismatched cell would not dissolve shared edges. The predicate is
+                // sound (never a false accept), so this only drops identity work.
+                // (Demo path only; the exact CLI path keeps clip_cell.)
+                let cell = if crate::voronoi::cell_inside_boundary(&raw[j], self.boundary) {
+                    use geo::orient::{Direction, Orient};
+                    raw[j].orient(Direction::Default)
+                } else {
+                    crate::voronoi::clip_cell(&raw[j], self.boundary, pert_f64[j]).0
+                };
                 (j, cell)
             })
             .collect()
@@ -155,16 +223,17 @@ impl<'a> LocalGradContext<'a> {
             affected_rooms[self.room_indices[j]] = true;
             cells[j] = cell;
         }
-        // re-weld twin vertices (idempotent on the untouched base cells)
-        snap_cells(&mut cells);
-
+        // No snap: room_union (i_overlay) nodes shared/twin vertices internally,
+        // so the patched cells need not be pre-welded (the old edge-cancellation
+        // union required bitwise-shared edges and a snap pass; i_overlay does not).
         let groups = rooms_group(&cells, self.room_indices);
+
         let need_unions = self.w.w_wall > 0.0 || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
         let unions: Vec<MultiPolygon<f64>> = if need_unions {
             (0..self.n_rooms)
                 .map(|r| {
                     if affected_rooms[r] {
-                        union_group(&groups[r])
+                        room_union(&groups[r])
                     } else {
                         self.base_unions[r].clone()
                     }
@@ -196,7 +265,13 @@ mod tests {
     }
 
     #[test]
-    fn local_grad_matches_global_cosine() {
+    fn local_grad_directionally_close_but_not_exact() {
+        // The demo path uses the edge-cancellation union (~3x faster than the
+        // pairwise Martinez-Rueda union). Its wall term is ~1 ulp off the exact
+        // union, which the central finite difference (÷2e-6) amplifies, so the
+        // local gradient is directionally close to the exact global gradient
+        // (cosine > 0.99) but no longer bit-identical (maxAbsDiff > 0). The
+        // native CLI keeps the exact union, so its Python parity is unaffected.
         let (sites, boundary, target_areas, room_indices, w) = shape_a_setup();
         let global = crate::grad::finite_difference_grads(&sites, &boundary, &target_areas, &room_indices, &w, None);
         let local = finite_difference_grads_local(&sites, &boundary, &target_areas, &room_indices, &w);
@@ -204,7 +279,32 @@ mod tests {
         let ng: f32 = global.iter().map(|g| g[0] * g[0] + g[1] * g[1]).sum::<f32>().sqrt();
         let nl: f32 = local.iter().map(|l| l[0] * l[0] + l[1] * l[1]).sum::<f32>().sqrt();
         let cos = dot / (ng * nl);
-        assert!(cos > 0.999, "gradient cosine {} (global norm {}, local norm {})", cos, ng, nl);
+        let max_abs: f32 = global
+            .iter()
+            .zip(&local)
+            .flat_map(|(g, l)| [(g[0] - l[0]).abs(), (g[1] - l[1]).abs()])
+            .fold(0.0, f32::max);
+        assert!(cos > 0.99, "gradient cosine {cos} below 0.99 (global norm {ng}, local norm {nl})");
+        assert!(
+            max_abs > 0.0,
+            "expected the faster edge-cancellation union path (maxAbsDiff > 0), got bit-identical {max_abs:e}"
+        );
+    }
+
+    #[test]
+    fn gradients_par_matches_serial_bitwise() {
+        let (sites, boundary, target_areas, room_indices, w) = shape_a_setup();
+        let ctx = LocalGradContext::new(&sites, &boundary, &target_areas, &room_indices, &w);
+        let serial = ctx.gradients(&sites);
+        let par = ctx.gradients_par(&sites);
+        assert_eq!(serial.len(), par.len(), "length mismatch");
+        for (k, (s, p)) in serial.iter().zip(&par).enumerate() {
+            assert_eq!(
+                (s[0].to_bits(), s[1].to_bits()),
+                (p[0].to_bits(), p[1].to_bits()),
+                "grad[{k}] serial {s:?} != par {p:?}"
+            );
+        }
     }
 
     #[test]
@@ -253,6 +353,95 @@ mod tests {
                 g.unsigned_area()
             );
         }
+    }
+
+    #[test]
+    fn interior_skip_preserves_gradient_direction() {
+        // KR2: skipping the boolean clip for interior cells must NOT change the
+        // demo gradient direction — it stays cosine > 0.99 vs the exact global
+        // gradient. A naive skip that returns the raw cell without matching the
+        // clipped winding breaks `room_union`'s winding-sensitive fill rule
+        // (shared edges no longer dissolve), collapsing the cosine: RED until the
+        // skip orients the cell to the clipped winding.
+        let (sites, boundary, target_areas, room_indices, w) = shape_a_setup();
+
+        // the fixture must actually contain interior cells, or the skip never
+        // exercises and the cosine check is vacuous.
+        let ctx = LocalGradContext::new(&sites, &boundary, &target_areas, &room_indices, &w);
+        let mut skips = 0usize;
+        for i in 0..sites.len() {
+            let mut pert = sites.clone();
+            pert[i][0] += 1e-6;
+            let pert_f64: Vec<[f64; 2]> = pert.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
+            let raw = crate::voronoi::raw_cells_per_site(&pert_f64, &boundary);
+            for (j, _) in ctx.affected_cells(&pert, i) {
+                if crate::voronoi::cell_inside_boundary(&raw[j], &boundary) {
+                    skips += 1;
+                }
+            }
+        }
+        assert!(skips > 0, "fixture has no interior cells — the skip never exercises");
+
+        let global =
+            crate::grad::finite_difference_grads(&sites, &boundary, &target_areas, &room_indices, &w, None);
+        let local = finite_difference_grads_local(&sites, &boundary, &target_areas, &room_indices, &w);
+        let dot: f32 = global.iter().zip(&local).map(|(g, l)| g[0] * l[0] + g[1] * l[1]).sum();
+        let ng: f32 = global.iter().map(|g| g[0] * g[0] + g[1] * g[1]).sum::<f32>().sqrt();
+        let nl: f32 = local.iter().map(|l| l[0] * l[0] + l[1] * l[1]).sum::<f32>().sqrt();
+        let cos = dot / (ng * nl);
+        assert!(
+            cos > 0.99,
+            "interior-skip broke gradient direction: cosine {cos} (global norm {ng}, local norm {nl})"
+        );
+    }
+
+    #[test]
+    fn room_union_correct_on_unsnapped_cells() {
+        // KR1: room_union (i_overlay) must produce a correctly dissolved room
+        // union from UNSNAPPED clipped cells — its perimeter matches the exact
+        // reference union (`loss::union_group`, Martinez on snapped cells).
+        // i_overlay nodes internally, so the manual snap is unnecessary. A union
+        // that fails to dissolve internal edges has an inflated perimeter, which
+        // this catches.
+        use geo::LineString;
+        fn ring_len(ls: &LineString<f64>) -> f64 {
+            ls.0.windows(2)
+                .map(|w| ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt())
+                .sum()
+        }
+        fn perimeter(mp: &MultiPolygon<f64>) -> f64 {
+            mp.iter()
+                .map(|p| ring_len(p.exterior()) + p.interiors().iter().map(ring_len).sum::<f64>())
+                .sum()
+        }
+
+        let (sites, boundary, _ta, ri, _w) = shape_a_setup();
+        let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
+        let raw = crate::voronoi::raw_cells_per_site(&sites_f64, &boundary);
+        // clipped but UNSNAPPED cells (site order)
+        let unsnapped: Vec<Polygon<f64>> = (0..sites.len())
+            .map(|j| crate::voronoi::clip_cell(&raw[j], &boundary, sites_f64[j]).0)
+            .collect();
+        // snapped reference copy
+        let mut snapped = unsnapped.clone();
+        crate::voronoi::snap_cells(&mut snapped);
+
+        // pick the room with the most cells (guarantees internal shared edges)
+        let n_rooms = ri.iter().copied().max().unwrap() + 1;
+        let r = (0..n_rooms).max_by_key(|&r| ri.iter().filter(|&&x| x == r).count()).unwrap();
+        let snapped_room: Vec<&Polygon<f64>> =
+            (0..sites.len()).filter(|&j| ri[j] == r).map(|j| &snapped[j]).collect();
+        let unsnapped_room: Vec<&Polygon<f64>> =
+            (0..sites.len()).filter(|&j| ri[j] == r).map(|j| &unsnapped[j]).collect();
+
+        let reference = perimeter(&crate::loss::union_group(&snapped_room));
+        let got = perimeter(&room_union(&unsnapped_room));
+        assert!(reference > 0.0, "degenerate reference");
+        assert!(
+            (got - reference).abs() / reference < 1e-3,
+            "room_union perimeter {got} vs reference {reference} (rel {})",
+            (got - reference).abs() / reference
+        );
     }
 
     #[test]

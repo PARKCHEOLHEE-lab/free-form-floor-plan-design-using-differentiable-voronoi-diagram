@@ -143,6 +143,41 @@ pub fn clip_cell(raw: &Polygon<f64>, boundary: &Polygon<f64>, site: [f64; 2]) ->
     (cell, n)
 }
 
+/// True iff the raw Voronoi cell lies entirely inside the boundary, so clipping
+/// it is the identity (`cell ∩ boundary == cell`) and the boolean intersection
+/// can be skipped. SOUND but conservative: it may return `false` for a cell that
+/// is in fact interior (a missed skip — never wrong), but it never returns
+/// `true` for a cell the boundary actually cuts. Used only by the local demo
+/// gradient path (`grad_local`); the exact CLI path keeps `clip_cell`.
+pub(crate) fn cell_inside_boundary(raw: &Polygon<f64>, boundary: &Polygon<f64>) -> bool {
+    let pts = &raw.exterior().0;
+    if pts.len() < 3 {
+        return false;
+    }
+    // cell bounding box
+    let (mut cx0, mut cy0, mut cx1, mut cy1) =
+        (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for c in pts {
+        cx0 = cx0.min(c.x);
+        cy0 = cy0.min(c.y);
+        cx1 = cx1.max(c.x);
+        cy1 = cy1.max(c.y);
+    }
+    // If any boundary edge's bbox overlaps the cell bbox, the boundary may cut
+    // through the cell — bail to the real clip (conservative: never a false
+    // accept, only a missed skip).
+    for e in boundary.exterior().lines() {
+        let (ex0, ex1) = (e.start.x.min(e.end.x), e.start.x.max(e.end.x));
+        let (ey0, ey1) = (e.start.y.min(e.end.y), e.start.y.max(e.end.y));
+        if cx0 <= ex1 && cx1 >= ex0 && cy0 <= ey1 && cy1 >= ey0 {
+            return false;
+        }
+    }
+    // No boundary edge is near the cell, so it is wholly inside or wholly
+    // outside; one point-in-polygon settles which.
+    boundary.contains(&Point::new(pts[0].x, pts[0].y))
+}
+
 /// Welds floating-point-twin vertices across the clipped pieces.
 ///
 /// Where a shared Voronoi edge crosses the boundary, the seam intersection
@@ -339,5 +374,118 @@ fn compute_cells_direct(
         n_raw_cells: cell_of_site.len(),
         n_pieces,
         split_positions,
+    }
+}
+
+/// Render-only cells: every piece of each site's Voronoi cell ∩ boundary, tagged
+/// with the site index. Unlike `compute_cells` (which keeps ONE piece per site
+/// for the bit-exact loss pairing), this keeps ALL pieces, so the rendered plan
+/// covers the whole boundary — matching the Python renderer (`generator.py`,
+/// which iterates `cell.geoms` for a MultiPolygon). The loss/gradient path is
+/// unaffected.
+pub fn render_cells(sites: &[[f32; 2]], boundary: &Polygon<f64>) -> Vec<(usize, Polygon<f64>)> {
+    let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
+    let raw = raw_cells_per_site(&sites_f64, boundary);
+    let mut out = Vec::with_capacity(raw.len());
+    for (i, raw_cell) in raw.iter().enumerate() {
+        // keep EVERY piece of this cell's intersection with the boundary, so the
+        // pieces of all cells tile the boundary with no uncovered gap.
+        let inter: MultiPolygon<f64> = raw_cell.intersection(boundary);
+        for piece in inter.0 {
+            if !is_empty_cell(&piece) {
+                out.push((i, piece));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::loss::LossWeights;
+    use crate::optim::AdamW;
+    use crate::{config, grad, init, shapes};
+    use geo::Area;
+
+    #[test]
+    fn render_cells_covers_boundary_at_multipart_split() {
+        let cfg = config::by_name("shape_a").unwrap();
+        let boundary = shapes::by_name("shape_a").unwrap().polygon();
+        let barea = boundary.unsigned_area();
+        let ta: Vec<f64> = cfg.area_ratio.iter().map(|r| barea * r).collect();
+        let w = LossWeights {
+            w_wall: cfg.w_wall, w_area: cfg.w_area, w_lloyd: cfg.w_lloyd,
+            w_topo: cfg.w_topo, w_bb: cfg.w_bb, w_cell: cfg.w_cell,
+        };
+        let mut sites = init::initialize_sites(&boundary, cfg.num_sites, 777);
+        let ri = init::kmeans_labels(&sites, cfg.area_ratio.len(), 777);
+        let mut opt = AdamW::new(sites.len(), cfg.lr_initial);
+
+        // advance until a cell ∩ boundary splits into comparable pieces, leaving
+        // a significant one-piece coverage gap (deterministic trajectory; break
+        // early to keep the test fast in debug mode).
+        let mut split_sites = None;
+        for _ in 0..30 {
+            let cov: f64 = compute_cells(&sites, &boundary, None)
+                .cells_sorted.iter().map(|c| c.unsigned_area()).sum();
+            if barea - cov > 1.5e-3 { split_sites = Some(sites.clone()); break; }
+            let g = grad::finite_difference_grads(&sites, &boundary, &ta, &ri, &w, None);
+            opt.step(&mut sites, &g);
+        }
+        let worst_sites = split_sites.expect("expected a significant one-piece coverage gap within 30 iters");
+
+        // at that config, the one-piece compute_cells path leaves the gap...
+        let geom = compute_cells(&worst_sites, &boundary, None);
+        let one_piece: f64 = geom.cells_sorted.iter().map(|c| c.unsigned_area()).sum();
+        assert!(barea - one_piece > 1e-3, "one-piece gap should be present: {}", barea - one_piece);
+
+        // ...but render_cells keeps ALL pieces -> covers the whole boundary.
+        let pieces = render_cells(&worst_sites, &boundary);
+        let all: f64 = pieces.iter().map(|(_, p)| p.unsigned_area()).sum();
+        assert!((barea - all).abs() < 1e-5, "render_cells must cover the boundary; gap = {}", barea - all);
+        assert!(pieces.len() > geom.cells_sorted.len(), "the split must expand the piece count: {} vs {}", pieces.len(), geom.cells_sorted.len());
+    }
+}
+
+#[cfg(test)]
+mod interior_tests {
+    use super::*;
+    use crate::{init, shapes};
+    use geo::Area;
+
+    // KR1: `cell_inside_boundary` is a SOUND trivial-accept predicate — every
+    // cell it calls "inside" must have clip-identity (the boolean clip leaves the
+    // area unchanged), and both classes must occur on real geometry (it is not
+    // vacuously all-true or all-false). The sound direction is the safety
+    // property: a `true` that is not actually clip-identity would let the caller
+    // skip a clip the boundary needed, corrupting the cell.
+    #[test]
+    fn cell_inside_boundary_is_sound_and_nonvacuous() {
+        let boundary = shapes::by_name("shape_a").unwrap().polygon();
+        let sites = init::initialize_sites(&boundary, 40, 777);
+        let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
+        let raw = raw_cells_per_site(&sites_f64, &boundary);
+
+        let (mut n_true, mut n_false) = (0usize, 0usize);
+        for (i, rc) in raw.iter().enumerate() {
+            let pred = cell_inside_boundary(rc, &boundary);
+            // reference truth: clipping is identity iff the cell is fully inside
+            let (clipped, _) = clip_cell(rc, &boundary, sites_f64[i]);
+            let ra = rc.unsigned_area();
+            let ca = clipped.unsigned_area();
+            let identity = ra > 0.0 && ((ra - ca).abs() / ra < 1e-9);
+            if pred {
+                n_true += 1;
+                assert!(
+                    identity,
+                    "cell {i}: predicate said inside but clip changed area (raw {ra}, clipped {ca})"
+                );
+            } else {
+                n_false += 1;
+            }
+        }
+        assert!(n_true > 0, "predicate never returned true — it recognizes no interior cells");
+        assert!(n_false > 0, "predicate never returned false — it recognizes no boundary cells");
     }
 }
