@@ -850,7 +850,6 @@ dependencies = [
  "gif",
  "rand",
  "rand_chacha",
- "rayon",
  "serde_json",
  "tiny-skia",
  "voronoice",

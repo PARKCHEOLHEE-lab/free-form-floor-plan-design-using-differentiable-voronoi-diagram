@@ -5,64 +5,135 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Free-form Floor Plans · Differentiable Voronoi Diagram</title>
   <style>
-    :root {
-      --ink: #1a1a1a;
-      --muted: #6b7280;
-      --line: #e5e7eb;
-      --accent: #4e79a7;
-      --bg: #ffffff;
-      --panel: #fafafa;
+    /* Self-hosted PT Sans (vendored, no CDN) — matches the reference site's
+       design system: PT Sans, flat surfaces (border + tint, no shadows or
+       gradients), em-based spacing. Room/plot colors stay semantic. */
+    @font-face {
+      font-family: "PT Sans";
+      src: local("PT Sans"), local("PTSans-Regular"), url("./fonts/PTSans-Regular.woff") format("woff");
+      font-weight: normal; font-style: normal; font-display: swap;
     }
+    @font-face {
+      font-family: "PT Sans";
+      src: local("PT Sans Bold"), local("PTSans-Bold"), url("./fonts/PTSans-Bold.woff") format("woff");
+      font-weight: bold; font-style: normal; font-display: swap;
+    }
+
+    :root {
+      --font: "PT Sans", -apple-system, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --dark: #000;
+      --light: #fff;
+      --text-dark: rgb(70, 70, 70);
+      --link: #66a1ff;
+      --featured: #0011e3;
+      --bg-subtle: #f7f7f8;
+      --divider: #e5e5e6;
+      --reduce-14: rgba(128, 128, 128, 0.14);
+      --reduce-30: rgba(128, 128, 128, 0.30);
+      --reduce-90: rgba(128, 128, 128, 0.90);
+    }
+
     * { box-sizing: border-box; }
+    html { overflow-x: clip; }
     body {
       margin: 0;
-      background: var(--bg);
-      color: var(--ink);
-      font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--light);
+      color: var(--dark);
+      font-family: var(--font);
+      font-size: calc(0.76rem + 0.2vw);
+      line-height: 1.6;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
-    .wrap { max-width: 880px; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
-    header { text-align: center; margin-bottom: 1.5rem; }
-    h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 .4rem; }
-    .sub { color: var(--muted); margin: 0; }
-    p.lede { color: #374151; }
-    h2 { font-size: 1.15rem; font-weight: 650; margin: 2.2rem 0 .6rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line); }
-    code { background: #f3f4f6; padding: .08em .35em; border-radius: 4px; font-size: .9em; }
-    a { color: var(--accent); text-decoration: none; }
+    /* the reference keeps backgrounds flat even in dark mode */
+    @media (prefers-color-scheme: dark) { body { background: var(--light); color: var(--dark); } }
+
+    .wrap { max-width: 940px; margin: 0 auto; padding: 2.8em clamp(1.2em, 4vw, 2.4em) 3.4em; }
+
+    /* one restrained, staggered load reveal */
+    @keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
+    header, .lede, .stage, footer { animation: rise .55s cubic-bezier(.2, .7, .2, 1) both; }
+    .lede { animation-delay: .06s; }
+    .stage { animation-delay: .12s; }
+    footer { animation-delay: .2s; }
+    @media (prefers-reduced-motion: reduce) { header, .lede, .stage, footer { animation: none; } }
+
+    header { margin-bottom: 1.1em; }
+    h1 { font-size: 1.7em; font-weight: bold; letter-spacing: -0.015em; margin: 0 0 .15em; }
+    .sub { color: var(--text-dark); margin: 0; }
+    .lede { color: var(--text-dark); margin: 0 0 2.2em; max-width: 64ch; }
+    .lede strong { color: var(--dark); font-weight: bold; }
+    a { color: var(--link); text-decoration: inherit; }
     a:hover { text-decoration: underline; }
+    code { font-family: var(--mono); background: var(--bg-subtle); padding: .05em .35em; border-radius: 3px; font-size: .92em; }
 
-    .stage { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1.5rem; align-items: start; }
-    @media (max-width: 720px) { .stage { grid-template-columns: 1fr; } }
+    .stage { display: grid; grid-template-columns: minmax(0, 1fr) 268px; gap: 2em; align-items: start; }
+    @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
 
-    .canvas-card { }
-    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--line); border-radius: 8px; background: #fff; touch-action: none; cursor: crosshair; display: block; }
-    .readout { display: flex; justify-content: space-between; align-items: center; margin-top: .6rem; color: var(--muted); font-variant-numeric: tabular-nums; font-size: .9rem; }
-    canvas#loss { width: 100%; height: 70px; border: 1px solid var(--line); border-radius: 8px; margin-top: .5rem; background: var(--panel); display: block; }
+    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--divider); background: var(--light); touch-action: none; cursor: crosshair; display: block; }
+    .readout { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; margin-top: .7em; }
+    .readout #status { color: var(--text-dark); }
+    .readout #iterinfo { font-family: var(--mono); font-size: .86em; color: var(--dark); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    canvas#loss { width: 100%; height: 64px; border: 1px solid var(--divider); background: var(--bg-subtle); margin-top: .7em; display: block; }
 
-    .controls { font-size: .9rem; }
-    .group { margin-bottom: 1.1rem; }
-    .group > .label { font-weight: 650; font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: .45rem; }
-    .row { display: flex; align-items: center; gap: .5rem; margin: .3rem 0; }
-    .row label { width: 46px; color: #374151; }
-    .row input[type=range] { flex: 1; accent-color: var(--accent); }
-    .row .val { width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
-    .row input[type=number] { width: 72px; padding: .25rem .4rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+    .controls { font-size: .96em; }
+    .group { margin-bottom: 1.5em; }
+    .group > .label { font-weight: bold; font-size: .76em; text-transform: uppercase; letter-spacing: .07em; color: var(--reduce-90); margin-bottom: .6em; }
 
-    .seg { display: flex; flex-wrap: wrap; gap: .3rem; }
-    .seg button { flex: 1 1 auto; padding: .35rem .4rem; border: 1px solid var(--line); background: #fff; border-radius: 6px; font: inherit; font-size: .82rem; cursor: pointer; color: #374151; }
-    .seg button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .seg button:hover:not(.active) { border-color: #c7ccd1; }
+    .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
+    .row > label { width: 3.4em; flex: none; color: var(--text-dark); }
+    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: .85em; color: var(--dark); font-variant-numeric: tabular-nums; }
 
-    .actions { display: flex; gap: .4rem; margin-top: 1.2rem; }
-    .actions button { flex: 1; padding: .55rem; border-radius: 7px; border: 1px solid var(--line); background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-    .actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .actions button:disabled { opacity: .45; cursor: default; }
-    .hint { color: var(--muted); font-size: .8rem; margin: .3rem 0 0; }
+    /* thin track + link-colored thumb (the reference's scrubber) */
+    input[type=range] {
+      -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0;
+      height: 4px; border-radius: 3px; background: var(--reduce-30); outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: var(--link); cursor: pointer; transition: transform .1s;
+    }
+    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.18); }
+    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 50%; background: var(--link); cursor: pointer; }
 
-    footer { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
-    .legend { display: flex; flex-wrap: wrap; gap: .8rem; margin-top: .4rem; font-size: .82rem; color: var(--muted); }
-    .legend span { display: inline-flex; align-items: center; gap: .35rem; }
-    .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+    input[type=number] {
+      font-family: var(--mono); font-size: .85em; width: 4.6em; padding: .3em .4em;
+      border: 1px solid var(--reduce-30); border-radius: 4px; background: var(--light); color: var(--dark);
+    }
+    input[type=number]:focus { outline: none; border-color: var(--featured); }
+
+    .roomareas { display: flex; flex-wrap: wrap; gap: .4em; margin: .55em 0 .1em; }
+    .roomareas .ra { display: inline-flex; align-items: center; gap: .3em; }
+    .roomareas .ra label { color: var(--text-dark); font-size: .82em; }
+    .roomareas .ra input { width: 3em; font-size: .8em; padding: .25em .3em; }
+
+    .seg { display: flex; flex-wrap: wrap; gap: .35em; }
+    .seg button {
+      flex: 1 1 auto; padding: .42em .5em; border: 1px solid var(--reduce-30); background: transparent;
+      border-radius: 4px; font: inherit; font-size: .85em; color: var(--text-dark); cursor: pointer;
+      transition: background .12s, border-color .12s, color .12s;
+    }
+    .seg button:hover:not(.active) { background: var(--reduce-14); color: var(--dark); }
+    .seg button.active { background: var(--dark); border-color: var(--dark); color: var(--light); }
+
+    .hint { color: var(--text-dark); font-size: .82em; margin: .5em 0 0; }
+
+    .actions { display: flex; gap: .4em; margin-top: 1.7em; }
+    .actions button {
+      flex: 1; padding: .62em; border: 1px solid var(--reduce-30); background: transparent; border-radius: 4px;
+      font: inherit; font-weight: bold; color: var(--dark); cursor: pointer;
+      transition: background .12s, border-color .12s, opacity .12s;
+    }
+    .actions button:hover:not(:disabled) { background: var(--reduce-14); }
+    .actions button.primary { background: var(--featured); border-color: var(--featured); color: var(--light); }
+    .actions button.primary:hover:not(:disabled) { background: #000fc0; }
+    .actions button:disabled { opacity: .4; cursor: default; }
+
+    footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
+    .legend { display: flex; flex-wrap: wrap; gap: .9em; margin-top: .7em; font-size: .82em; color: var(--text-dark); }
+    .legend span { display: inline-flex; align-items: center; gap: .4em; }
+    .sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
   </style>
 </head>
 <body>
@@ -104,6 +175,7 @@
         <div class="label">Layout</div>
         <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="40"><span class="val" id="sites_v">40</span></div>
         <div class="row"><label>rooms</label><input id="rooms" type="range" min="2" max="8" step="1" value="4"><span class="val" id="rooms_v">4</span></div>
+        <div class="roomareas" id="roomareas"></div>
       </div>
 
       <div class="group">
@@ -140,7 +212,9 @@
 </div>
 
 <script type="module">
-const COLORS = ['#4e79a7', '#e15759', '#59a14f', '#f28e2b', '#b07aa1', '#76b7b2', '#edc948', '#ff9da7'];
+// matplotlib Accent colormap blended 50% over white — opaque pastel room fills
+// matching the reference look (the native renderer uses Accent at alpha 0.5).
+const COLORS = ['#bfe4bf', '#ded7ea', '#fee0c2', '#ffffcc', '#9cb6d8', '#f881bf', '#dfad8b', '#b3b3b3'];
 const R = 1.18; // normalized boundaries fit within radius 1
 
 const plan = document.getElementById('plan');
@@ -149,9 +223,36 @@ const lossCv = document.getElementById('loss');
 const lctx = lossCv.getContext('2d');
 const $ = id => document.getElementById(id);
 
-let CW = plan.width, CH = plan.height;
+let CW = 520, CH = 520, LW = 520, LH = 64;    // CSS-pixel drawing dims (set by fitCanvases)
+let lastFrame = null;                          // last rendered cell-frame, for resize redraw
 const nx = x => (x + R) / (2 * R) * CW;       // normalized -> canvas
 const ny = y => CH - (y + R) / (2 * R) * CH;  // flip y
+
+// Size each canvas backing store to its displayed size x devicePixelRatio so the
+// render stays crisp on HiDPI screens and when the column is wider than 520px;
+// the 2D context is scaled so all drawing stays in CSS-pixel coordinates.
+function fitCanvases() {
+  const dpr = window.devicePixelRatio || 1;
+  CW = CH = Math.max(1, Math.round(plan.getBoundingClientRect().width));
+  plan.width = Math.round(CW * dpr);
+  plan.height = Math.round(CH * dpr);
+  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const lr = lossCv.getBoundingClientRect();
+  LW = Math.max(1, Math.round(lr.width));
+  LH = Math.max(1, Math.round(lr.height));
+  lossCv.width = Math.round(LW * dpr);
+  lossCv.height = Math.round(LH * dpr);
+  lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function redraw() {
+  fitCanvases();
+  if (lastFrame) drawFrame(lastFrame);
+  else if (mode === 'draw') drawSketch();
+  else clearPlan();
+  drawLoss();
+}
+let resizeTimer = 0;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
 
 let mode = 'draw';        // 'draw' | shape name
 let drawPts = [];         // canvas-pixel points while drawing
@@ -173,11 +274,26 @@ for (const id of SLIDERS) {
   const fmt = id === 'lr' ? v => (+v).toFixed(3) : v => (+v % 1 ? (+v).toFixed(1) : String(+v));
   el.addEventListener('input', () => { out.textContent = fmt(el.value); });
 }
+
+// One relative-weight input per room; regenerated when the room count changes.
+// The weights are normalized to sum to 1 in params() and sent as area ratios.
+function renderRoomAreas() {
+  const k = +$('rooms').value;
+  $('roomareas').innerHTML = Array.from({ length: k }, (_, i) =>
+    `<span class="ra"><label>r${i + 1}</label><input id="area_${i}" type="number" min="0" step="0.1" value="1"></span>`
+  ).join('');
+}
+$('rooms').addEventListener('input', renderRoomAreas);
+renderRoomAreas();
+
 function params() {
   const k = +$('rooms').value;
+  // per-room relative weights -> area ratios normalized to sum 1
+  const weights = Array.from({ length: k }, (_, i) => Math.max(0, +(($('area_' + i) || {}).value ?? 1)));
+  const wsum = weights.reduce((a, b) => a + b, 0) || 1;
   return {
     sites: +$('sites').value,
-    ratios: Float64Array.from({ length: k }, () => 1 / k),
+    ratios: Float64Array.from(weights, w => w / wsum),
     w: ['w_wall','w_area','w_lloyd','w_topo','w_bb','w_cell'].map(id => +$(id).value),
     iters: +$('iters').value,
     lr: +$('lr').value,
@@ -223,6 +339,7 @@ worker.onmessage = (e) => {
       built = true;
       break;
     case 'frame':
+      lastFrame = m.frame;
       drawFrame(m.frame);
       if (m.mode === 'preview') {
         $('status').textContent = mode + ' · ready to Run';
@@ -260,33 +377,61 @@ plan.addEventListener('click', e => {
 // ---------- drawing ----------
 function clearPlan() { pctx.fillStyle = '#fff'; pctx.fillRect(0, 0, CW, CH); }
 function drawSketch() {
+  lastFrame = null;
   clearPlan();
   if (!drawPts.length) return;
   pctx.beginPath();
   drawPts.forEach(([x, y], i) => i ? pctx.lineTo(x, y) : pctx.moveTo(x, y));
-  if (drawPts.length >= 3) { pctx.closePath(); pctx.fillStyle = '#4e79a722'; pctx.fill(); }
-  pctx.strokeStyle = '#4e79a7'; pctx.lineWidth = 1.5; pctx.stroke();
-  pctx.fillStyle = '#4e79a7';
+  if (drawPts.length >= 3) { pctx.closePath(); pctx.fillStyle = '#66a1ff22'; pctx.fill(); }
+  pctx.strokeStyle = '#66a1ff'; pctx.lineWidth = 1.5; pctx.stroke();
+  pctx.fillStyle = '#66a1ff';
   for (const [x, y] of drawPts) { pctx.beginPath(); pctx.arc(x, y, 3, 0, 7); pctx.fill(); }
 }
 
 function drawFrame(f) {
   clearPlan();
+  // 1) opaque pastel room fills (each cell painted with its room colour)
   for (const cell of f.cells) {
     pctx.beginPath();
     cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
     pctx.closePath();
-    pctx.fillStyle = COLORS[cell.room % COLORS.length] + 'cc';
+    pctx.fillStyle = COLORS[cell.room % COLORS.length];
     pctx.fill();
-    pctx.lineWidth = 1; pctx.strokeStyle = '#33373b'; pctx.stroke();
   }
+  // 2) classify every cell edge: an edge shared by two cells of the SAME room is
+  //    an internal Voronoi division (drawn faint, 50% opacity); any other edge —
+  //    a room-to-room seam or the outer domain boundary — is a room outline
+  //    (drawn solid black). Endpoints are rounded so the unsnapped twin vertices
+  //    of neighbouring cells match.
+  const key = (p) => `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)}`;
+  const edges = new Map();
+  for (const cell of f.cells) {
+    const r = cell.ring;
+    for (let i = 0; i + 1 < r.length; i++) {
+      const ka = key(r[i]), kb = key(r[i + 1]);
+      const id = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+      const e = edges.get(id);
+      if (e) e.rooms.push(cell.room);
+      else edges.set(id, { a: r[i], b: r[i + 1], rooms: [cell.room] });
+    }
+  }
+  const internal = (e) => e.rooms.length === 2 && e.rooms[0] === e.rooms[1];
+  const seg = (e) => { pctx.beginPath(); pctx.moveTo(nx(e.a[0]), ny(e.a[1])); pctx.lineTo(nx(e.b[0]), ny(e.b[1])); pctx.stroke(); };
+  pctx.lineJoin = 'round'; pctx.lineCap = 'round';
+  // faint internal cell divisions first...
+  pctx.strokeStyle = 'rgba(40,40,40,0.5)'; pctx.lineWidth = 0.6;
+  for (const e of edges.values()) if (internal(e)) seg(e);
+  // ...then solid room + domain outlines on top
+  pctx.strokeStyle = '#111'; pctx.lineWidth = 1.4;
+  for (const e of edges.values()) if (!internal(e)) seg(e);
+  // 3) sites
   pctx.fillStyle = '#111';
   for (const [x, y] of f.sites) { pctx.beginPath(); pctx.arc(nx(x), ny(y), 1.6, 0, 7); pctx.fill(); }
   $('iterinfo').textContent = `iter ${f.iteration} · loss ${f.loss.toFixed(3)}`;
 }
 
 function drawLoss() {
-  const W = lossCv.width, H = lossCv.height;
+  const W = LW, H = LH;
   lctx.clearRect(0, 0, W, H);
   if (lossHist.length < 2) return;
   const lo = Math.min(...lossHist), hi = Math.max(...lossHist), span = hi - lo || 1;
@@ -295,7 +440,7 @@ function drawLoss() {
     const x = i / (maxIters - 1) * W, y = H - 6 - (v - lo) / span * (H - 12);
     i ? lctx.lineTo(x, y) : lctx.moveTo(x, y);
   });
-  lctx.strokeStyle = '#4e79a7'; lctx.lineWidth = 1.5; lctx.stroke();
+  lctx.strokeStyle = '#66a1ff'; lctx.lineWidth = 1.5; lctx.stroke();
 }
 
 function legend(k) {
@@ -309,6 +454,7 @@ function stop() {
   curGen = ++gen;                 // invalidate any in-flight frames from the prior build
   worker.postMessage({ cmd: 'dispose' });
   built = false;
+  lastFrame = null;
   setButtons();
 }
 
@@ -346,6 +492,7 @@ $('reset').onclick = () => {
   else { $('status').textContent = mode + ' · building…'; sendBuild('preview'); }
 };
 
+fitCanvases();
 clearPlan();
 </script>
 </body>

@@ -9,8 +9,12 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# the geometry/optimization core (compiles to wasm32; see ../rust Cargo.toml)
-voronoi-floorplan = { path = "../rust" }
+# the geometry/optimization core (compiles to wasm32; see ../rust Cargo.toml).
+# default-features = false keeps the demo build SERIAL: the core's `parallel`
+# (rayon) feature is native-only — in the browser rayon's globally-locked wasm
+# heap makes the allocation-heavy gradient anti-scale (see WASM_THREADS.md). The
+# native CLI/bench keep parallel on.
+voronoi-floorplan = { path = "../rust", default-features = false }
 geo = "0.30"
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
