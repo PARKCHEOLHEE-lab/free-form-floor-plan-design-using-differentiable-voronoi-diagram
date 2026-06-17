@@ -143,3 +143,40 @@ class ShapeC(ShapePathParser):
         ]
 
         super().__init__(path, normalize)
+
+
+class ShapeD(ShapePathParser):
+    # demo boundary: orthogonal staircase with a slanted (diagonal) left wall —
+    # an orthogonal + diagonal mix for the adaptive wall-alignment loss.
+    def __init__(self, normalize=True):
+        path = [
+            [-0.5, 0.7],
+            [-0.85, -0.25],
+            [-0.6, -0.7],
+            [0.15, -0.7],
+            [0.15, -0.25],
+            [0.75, -0.25],
+            [0.75, 0.55],
+            [-0.25, 0.55],
+            [-0.25, 0.7],
+        ]
+
+        super().__init__(path, normalize)
+
+
+class ShapeE(ShapePathParser):
+    # demo boundary: orthogonal runs with two diagonal walls (top-right +
+    # bottom-left) — another orthogonal + diagonal mix.
+    def __init__(self, normalize=True):
+        path = [
+            [0.75, 0.0],
+            [0.45, 0.7],
+            [-0.65, 0.7],
+            [-0.65, -0.15],
+            [-0.35, -0.75],
+            [0.15, -0.75],
+            [0.15, -0.25],
+            [0.75, -0.25],
+        ]
+
+        super().__init__(path, normalize)

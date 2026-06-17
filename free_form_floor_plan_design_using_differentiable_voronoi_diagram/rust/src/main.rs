@@ -6,7 +6,7 @@ fn main() {
     let args = Args::parse();
     let config = config::by_name(&args.example).unwrap_or_else(|| {
         eprintln!(
-            "unknown example '{}'; expected one of shape_a, shape_b, shape_c, shape_duck",
+            "unknown example '{}'; expected one of shape_a, shape_b, shape_c, shape_d, shape_e, shape_duck",
             args.example
         );
         std::process::exit(2);

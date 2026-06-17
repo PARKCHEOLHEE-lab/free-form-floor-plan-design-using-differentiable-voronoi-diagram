@@ -80,6 +80,207 @@ pub fn compute_wall_loss(room_unions: &[MultiPolygon<f64>], w_wall: f64) -> f32 
     (loss_wall as f32) * (w_wall as f32)
 }
 
+/// Local-frame wall loss: like `compute_wall_loss`, but every room-boundary edge
+/// is measured as a *rotated* taxicab length in the frame of the nearest
+/// domain-boundary segment (its orientation φ). An edge parallel or
+/// perpendicular to the local boundary costs its Euclidean length; a 45°-skewed
+/// edge costs √2×. Reduces exactly to `compute_wall_loss` when every φ = 0.
+///
+/// PARITY (#3): this term is Rust-only — `loss.py` has no `wall_local` and sums
+/// only the other six terms. Python↔Rust parity therefore holds only at
+/// `w_wall_local = 0`; every golden parity trace is generated with it off.
+pub fn compute_wall_local_loss(
+    room_unions: &[MultiPolygon<f64>],
+    boundary: &Polygon<f64>,
+    w_wall_local: f64,
+) -> f32 {
+    let mut loss: f64 = 0.0;
+    for room_union in room_unions {
+        for room in room_union {
+            loss += ring_wall_local_sum(room.exterior(), boundary) as f64;
+            for interior in room.interiors() {
+                loss += ring_wall_local_sum(interior, boundary) as f64;
+            }
+        }
+    }
+    (loss as f32) * (w_wall_local as f32)
+}
+
+/// Experimental "Blend" wall_local (`WallLocalMode::Blend`): continuous
+/// distance-weighted, length-independent pure alignment (Codex #1 + #6). Sums the
+/// per-edge `edge_alignment_penalty_sampled` over every room-boundary ring.
+fn compute_wall_local_loss_blend(
+    room_unions: &[MultiPolygon<f64>],
+    boundary: &Polygon<f64>,
+    w_wall_local: f64,
+) -> f32 {
+    let mut loss: f64 = 0.0;
+    for room_union in room_unions {
+        for room in room_union {
+            loss += ring_wall_local_blend_sum(room.exterior(), boundary) as f64;
+            for interior in room.interiors() {
+                loss += ring_wall_local_blend_sum(interior, boundary) as f64;
+            }
+        }
+    }
+    (loss as f32) * (w_wall_local as f32)
+}
+
+/// Dispatch the wall_local term by `WallLocalMode` (0 when `w_wall_local ≤ 0`).
+/// The SINGLE source used by both `floor_plan_loss` (native/global path) and
+/// `grad_local::total_from` (demo/local path), so the mode reaches every code
+/// path — otherwise the demo would silently ignore `Blend`.
+pub(crate) fn wall_local_term(
+    room_unions: &[MultiPolygon<f64>],
+    boundary: &Polygon<f64>,
+    w: &LossWeights,
+) -> f32 {
+    if w.w_wall_local <= 0.0 {
+        return 0.0;
+    }
+    match w.wall_local_mode {
+        WallLocalMode::Nearest => compute_wall_local_loss(room_unions, boundary, w.w_wall_local),
+        WallLocalMode::Blend => compute_wall_local_loss_blend(room_unions, boundary, w.w_wall_local),
+    }
+}
+
+/// Per-edge local-frame ALIGNMENT penalty for the Blend mode, blended continuously
+/// over nearby boundary segments. Each segment `k` contributes a pure-alignment
+/// penalty `g_k = f(θ−φ_k) − 1` (0 when the edge is parallel/perpendicular to
+/// segment `k`, up to √2−1 at 45°), combined by distance weight `w_k = 1/(d_k²+ε)`:
+/// `penalty = Σ w_k g_k / Σ w_k`. Blending the SCALAR penalties (not the angle)
+/// makes it CONTINUOUS in the edge position (Codex #1 — an averaged angle has
+/// cross-field singularities); the `−1` makes it length-independent pure alignment
+/// (#6). Exterior + interior rings vote (#4); zero-length edges/segments skipped (#7).
+fn edge_alignment_penalty(mx: f64, my: f64, dx: f32, dy: f32, boundary: &Polygon<f64>) -> f32 {
+    let l = ((dx * dx + dy * dy) as f64).sqrt();
+    if l == 0.0 {
+        return 0.0;
+    }
+    let mut sum_w = 0.0_f64;
+    let mut sum_wg = 0.0_f64;
+    let segments = boundary
+        .exterior()
+        .lines()
+        .chain(boundary.interiors().iter().flat_map(|ring| ring.lines()));
+    for line in segments {
+        let (ax, ay) = (line.start.x, line.start.y);
+        let (ex, ey) = (line.end.x - ax, line.end.y - ay);
+        let len2 = ex * ex + ey * ey;
+        if len2 == 0.0 {
+            continue;
+        }
+        let t = (((mx - ax) * ex + (my - ay) * ey) / len2).clamp(0.0, 1.0);
+        let (px, py) = (ax + t * ex, ay + t * ey);
+        let d2 = (mx - px) * (mx - px) + (my - py) * (my - py);
+        let w = 1.0 / (d2 + 1e-9);
+        let phi = ey.atan2(ex);
+        let (c, sn) = (phi.cos() as f32, phi.sin() as f32);
+        let du = dx * c + dy * sn;
+        let dv = -dx * sn + dy * c;
+        let f = (du.abs() + dv.abs()) as f64 / l;
+        sum_w += w;
+        sum_wg += w * (f - 1.0);
+    }
+    if sum_w == 0.0 {
+        return 0.0;
+    }
+    (sum_wg / sum_w) as f32
+}
+
+/// Blend edge penalty averaged over K=3 points along the edge (#5), so a long
+/// edge spanning more than one orientation is not decided by its midpoint alone.
+fn edge_alignment_penalty_sampled(
+    xi: f64,
+    yi: f64,
+    xj: f64,
+    yj: f64,
+    dx: f32,
+    dy: f32,
+    boundary: &Polygon<f64>,
+) -> f32 {
+    const K: usize = 3;
+    let mut sum = 0.0_f32;
+    for s in 0..K {
+        let t = (s as f64 + 0.5) / K as f64; // 1/6, 1/2, 5/6
+        let mx = xi * (1.0 - t) + xj * t;
+        let my = yi * (1.0 - t) + yj * t;
+        sum += edge_alignment_penalty(mx, my, dx, dy, boundary);
+    }
+    sum / K as f32
+}
+
+/// Sum of per-edge Blend alignment penalties over a ring (mirrors
+/// `ring_wall_local_sum` but uses the continuous sampled blend).
+fn ring_wall_local_blend_sum(ring: &LineString<f64>, boundary: &Polygon<f64>) -> f32 {
+    let pts = &ring.0;
+    let n = pts.len().saturating_sub(1);
+    if n == 0 {
+        return 0.0;
+    }
+    let t: Vec<[f32; 2]> = pts[..n].iter().map(|c| [c.x as f32, c.y as f32]).collect();
+    let mut s: f32 = 0.0;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let dx = t[i][0] - t[j][0];
+        let dy = t[i][1] - t[j][1];
+        s += edge_alignment_penalty_sampled(pts[i].x, pts[i].y, pts[j].x, pts[j].y, dx, dy, boundary);
+    }
+    s
+}
+
+/// Orientation (radians) of the boundary segment nearest to point `(mx, my)`.
+/// The rotated-L1 below only uses this angle mod 90°, so segment direction sign
+/// is irrelevant.
+fn nearest_boundary_angle(mx: f64, my: f64, boundary: &Polygon<f64>) -> f64 {
+    let mut best_d2 = f64::INFINITY;
+    let mut ang = 0.0;
+    for line in boundary.exterior().lines() {
+        let (ax, ay) = (line.start.x, line.start.y);
+        let (ex, ey) = (line.end.x - ax, line.end.y - ay);
+        let len2 = ex * ex + ey * ey;
+        if len2 == 0.0 {
+            continue; // #7: a zero-length segment carries no orientation — skip it
+        }
+        // projection parameter of (mx,my) onto the segment, clamped to [0,1]
+        let t = (((mx - ax) * ex + (my - ay) * ey) / len2).clamp(0.0, 1.0);
+        let (px, py) = (ax + t * ex, ay + t * ey);
+        let d2 = (mx - px) * (mx - px) + (my - py) * (my - py);
+        if d2 < best_d2 {
+            best_d2 = d2;
+            ang = ey.atan2(ex);
+        }
+    }
+    ang
+}
+
+/// `ring_wall_sum` measured in the local boundary frame: each edge vector is
+/// rotated by −φ (φ = nearest-boundary orientation at the edge midpoint) before
+/// the |Δu| + |Δv| taxicab sum. Mirrors `ring_wall_sum`'s f32-first casting, so
+/// at φ = 0 it is bit-identical to `ring_wall_sum`.
+fn ring_wall_local_sum(ring: &LineString<f64>, boundary: &Polygon<f64>) -> f32 {
+    let pts = &ring.0;
+    let n = pts.len().saturating_sub(1);
+    if n == 0 {
+        return 0.0;
+    }
+    let t: Vec<[f32; 2]> = pts[..n].iter().map(|c| [c.x as f32, c.y as f32]).collect();
+    let mut s: f32 = 0.0;
+    for i in 0..n {
+        let j = (i + 1) % n; // torch.roll(t1, -1, 0)
+        let dx = t[i][0] - t[j][0];
+        let dy = t[i][1] - t[j][1];
+        let mx = (pts[i].x + pts[j].x) * 0.5;
+        let my = (pts[i].y + pts[j].y) * 0.5;
+        let phi = nearest_boundary_angle(mx, my, boundary);
+        let (c, sn) = (phi.cos() as f32, phi.sin() as f32);
+        let du = dx * c + dy * sn; // edge rotated by −φ
+        let dv = -dx * sn + dy * c;
+        s += du.abs() + dv.abs();
+    }
+    s
+}
+
 pub fn compute_area_loss(
     cells_sorted: &[Polygon<f64>],
     target_areas: &[f64],
@@ -197,6 +398,19 @@ pub fn compute_cell_area_loss(cells_sorted: &[Polygon<f64>], w_cell: f64) -> f32
     (sum as f32) * (w_cell as f32)
 }
 
+/// Which algorithm computes the local-frame wall-alignment term.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum WallLocalMode {
+    /// Original (production default): nearest-boundary-segment φ, length-coupled
+    /// rotated-L1. Bit-exactly reduces to the global wall loss at φ = 0.
+    #[default]
+    Nearest,
+    /// Experimental, opt-in: continuous distance-weighted, length-independent
+    /// pure alignment (Codex #1 continuity + #6 length-decoupling).
+    Blend,
+}
+
+#[derive(Default)]
 pub struct LossWeights {
     pub w_wall: f64,
     pub w_area: f64,
@@ -204,6 +418,11 @@ pub struct LossWeights {
     pub w_topo: f64,
     pub w_bb: f64,
     pub w_cell: f64,
+    /// Local-frame wall alignment (rotated-L1, nearest-boundary φ). Separate from
+    /// `w_wall` so the global and local terms can be weighted independently.
+    pub w_wall_local: f64,
+    /// Selects the wall_local algorithm (default `Nearest` = production original).
+    pub wall_local_mode: WallLocalMode,
 }
 
 pub struct LossBreakdown {
@@ -214,6 +433,7 @@ pub struct LossBreakdown {
     pub topo: f32,
     pub bb: f32,
     pub cell: f32,
+    pub wall_local: f32,
 }
 
 /// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
@@ -235,7 +455,7 @@ pub fn floor_plan_loss(
     // Compute it once per group here and share it (it used to be recomputed
     // inside each component). The result is identical, so the f32 losses are
     // bitwise unchanged; this only removes the duplicate boolean ops.
-    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 {
+    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 || w.w_wall_local > 0.0 {
         groups.iter().map(|g| union_group(g)).collect()
     } else {
         Vec::new()
@@ -271,9 +491,10 @@ pub fn floor_plan_loss(
     } else {
         0.0
     };
+    let wall_local = wall_local_term(&unions, boundary, w);
 
-    // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
-    let total = wall + area + lloyd + topo + bb + cell;
+    // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell (+ loss_wall_local)
+    let total = wall + area + lloyd + topo + bb + cell + wall_local;
     LossBreakdown {
         total,
         wall,
@@ -282,5 +503,138 @@ pub fn floor_plan_loss(
         topo,
         bb,
         cell,
+        wall_local,
+    }
+}
+
+#[cfg(test)]
+mod wall_local_tests {
+    use super::*;
+
+    /// A unit square rotated 45° — every boundary edge runs at ±45°, so the
+    /// local frame φ near the center is ±45° (mod 90°).
+    fn diamond_boundary() -> Polygon<f64> {
+        Polygon::new(
+            LineString::from(vec![(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)]),
+            vec![],
+        )
+    }
+
+    /// A small square room centered at the origin; `rot45` rotates the SAME
+    /// square 45° (edges become ±45°), so both variants have identical edge
+    /// lengths and differ only in orientation relative to the local frame.
+    fn square_room(rot45: bool) -> MultiPolygon<f64> {
+        let s = 0.1;
+        let d = s * std::f64::consts::SQRT_2;
+        let pts = if rot45 {
+            vec![(0.0, d), (-d, 0.0), (0.0, -d), (d, 0.0)]
+        } else {
+            vec![(s, s), (-s, s), (-s, -s), (s, -s)]
+        };
+        MultiPolygon::new(vec![Polygon::new(LineString::from(pts), vec![])])
+    }
+
+    #[test]
+    fn wall_local_prefers_wall_parallel_to_local_diagonal_boundary() {
+        let b = diamond_boundary();
+        let aligned = compute_wall_local_loss(&[square_room(true)], &b, 1.0); // edges ∥/⟂ to 45° boundary
+        let axis = compute_wall_local_loss(&[square_room(false)], &b, 1.0); // edges at 0°/90°
+        assert!(
+            aligned < axis,
+            "wall_local must reward walls aligned to the local diagonal boundary: aligned={aligned} axis={axis}"
+        );
+    }
+
+    #[test]
+    fn wall_local_reduces_to_global_wall_loss_on_axis_aligned_boundary() {
+        // Axis-aligned square boundary → every nearest-boundary angle is 0°/90°
+        // (≡ 0 mod 90°), so the rotated-L1 collapses to the plain L1 and
+        // compute_wall_local_loss must equal compute_wall_loss exactly.
+        let b = Polygon::new(
+            LineString::from(vec![(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)]),
+            vec![],
+        );
+        let room = square_room(false); // axis-aligned room
+        let global = compute_wall_loss(&[room.clone()], 2.5);
+        let local = compute_wall_local_loss(&[room], &b, 2.5);
+        assert_eq!(
+            local, global,
+            "wall_local must reduce to the global wall loss on an axis-aligned boundary"
+        );
+    }
+
+    fn shape_a_geom() -> (Vec<[f32; 2]>, Polygon<f64>, Vec<f64>, Vec<usize>) {
+        let boundary = crate::shapes::by_name("shape_a").unwrap().polygon();
+        let barea = boundary.unsigned_area();
+        let ratios = [0.5, 0.3, 0.1, 0.1];
+        let target_areas: Vec<f64> = ratios.iter().map(|r| barea * r).collect();
+        let sites = crate::init::initialize_sites(&boundary, 40, 777);
+        let room_indices = crate::init::kmeans_labels(&sites, ratios.len(), 777);
+        (sites, boundary, target_areas, room_indices)
+    }
+
+    #[test]
+    fn floor_plan_loss_includes_wall_local_when_weighted() {
+        let (sites, boundary, ta, ri) = shape_a_geom();
+        // every weight off but w_wall_local: total must come ENTIRELY from the
+        // new term, and the term must be reported in the breakdown.
+        let off = LossWeights { w_wall: 0.0, w_area: 0.0, w_lloyd: 0.0, w_topo: 0.0, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
+        let on = LossWeights { w_wall: 0.0, w_area: 0.0, w_lloyd: 0.0, w_topo: 0.0, w_bb: 0.0, w_cell: 0.0, w_wall_local: 5.0, ..Default::default() };
+        let b0 = floor_plan_loss(&sites, &boundary, &ta, &ri, &off, None);
+        let b1 = floor_plan_loss(&sites, &boundary, &ta, &ri, &on, None);
+        assert!(
+            b1.total > b0.total && b1.wall_local > 0.0,
+            "w_wall_local>0 must add a positive wall_local term to total: total {} -> {}, wall_local={}",
+            b0.total, b1.total, b1.wall_local
+        );
+    }
+
+    /// #7: a boundary with a DUPLICATED vertex has a zero-length segment whose
+    /// orientation `atan2(0,0)` is a meaningless 0. A query point nearest that
+    /// corner must still get the real adjacent edges' local frame, not φ = 0.
+    #[test]
+    fn degenerate_boundary_segment_does_not_corrupt_local_angle() {
+        let clean = diamond_boundary();
+        let dup = Polygon::new(
+            LineString::from(vec![(1.0, 0.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)]),
+            vec![],
+        );
+        let (qx, qy) = (1.1, 0.0); // projects onto the duplicated corner (1,0)
+        let a_clean = nearest_boundary_angle(qx, qy, &clean);
+        let a_dup = nearest_boundary_angle(qx, qy, &dup);
+        assert_eq!(
+            a_dup, a_clean,
+            "a zero-length boundary segment must not change the nearest-boundary angle (clean {a_clean}, dup {a_dup})"
+        );
+    }
+
+    /// KR2 (#1): the Blend mode's per-edge penalty must be CONTINUOUS across a
+    /// boundary-orientation change (a nearest-segment pick jumps ~the full range).
+    #[test]
+    fn blend_edge_penalty_is_continuous_across_a_corner() {
+        let b = Polygon::new(
+            LineString::from(vec![(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (1.0, 4.0), (0.0, 3.0)]),
+            vec![],
+        );
+        let (dx, dy) = (0.2_f32, 0.2_f32); // a fixed 45° edge vector
+        let n = 120;
+        let mut prev: Option<f64> = None;
+        let (mut lo, mut hi, mut max_jump) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+        for i in 0..=n {
+            let x = 0.55 + (2.5 - 0.55) * (i as f64) / (n as f64);
+            let p = edge_alignment_penalty(x, 3.4, dx, dy, &b) as f64;
+            lo = lo.min(p);
+            hi = hi.max(p);
+            if let Some(pp) = prev {
+                max_jump = max_jump.max((p - pp).abs());
+            }
+            prev = Some(p);
+        }
+        let range = hi - lo;
+        assert!(range > 0.1, "sweep must cross a real orientation change (range {range} too small)");
+        assert!(
+            max_jump < 0.25 * range,
+            "Blend penalty must be continuous; max step {max_jump} ≥ 0.25×range {range} (a jump)"
+        );
     }
 }

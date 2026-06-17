@@ -11,6 +11,7 @@ pub struct ExampleConfig {
     pub w_topo: f64,
     pub w_bb: f64,
     pub w_cell: f64,
+    pub w_wall_local: f64,
     pub init_with_kmeans: bool,
     pub iterations: usize,
     pub iteration_to_modify_lr: usize,
@@ -28,6 +29,7 @@ const COMMON: ExampleConfig = ExampleConfig {
     w_topo: 1.5,
     w_bb: 0.0,
     w_cell: 0.0,
+    w_wall_local: 0.0,
     init_with_kmeans: true,
     iterations: 800,
     iteration_to_modify_lr: 300,
@@ -41,6 +43,8 @@ pub fn by_name(name: &str) -> Option<ExampleConfig> {
         "shape_b" => ("shape_b", &[0.5, 0.2, 0.1, 0.1, 0.1]),
         "shape_c" => ("shape_c", &[0.4, 0.3, 0.2, 0.1]),
         "shape_duck" => ("shape_duck", &[0.2, 0.2, 0.2, 0.2, 0.2]),
+        "shape_d" => ("shape_d", &[0.3, 0.25, 0.2, 0.15, 0.1]),
+        "shape_e" => ("shape_e", &[0.3, 0.25, 0.2, 0.15, 0.1]),
         _ => return None,
     };
     Some(ExampleConfig {

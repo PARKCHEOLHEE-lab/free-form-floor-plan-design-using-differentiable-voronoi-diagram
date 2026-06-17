@@ -7,6 +7,7 @@ pub mod loss;
 pub mod optim;
 pub mod shapes;
 pub mod voronoi;
+pub mod walls;
 
 // Native-only: GIF/tfevents IO, the CLI, and the run pipeline that ties them
 // together. Excluded from the wasm build (the browser demo renders to a

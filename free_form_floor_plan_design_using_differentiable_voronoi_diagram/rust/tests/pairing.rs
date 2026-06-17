@@ -40,7 +40,7 @@ fn no_hint_pairing_assigns_each_site_to_a_cell_containing_it() {
 fn no_hint_pairing_stays_healthy_during_optimization() {
     use voronoi_floorplan::loss::LossWeights;
     use voronoi_floorplan::{grad, optim::AdamW};
-    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0 };
+    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
     for name in shapes::SHAPE_NAMES {
         let fx = load_checkpoint(name);
         let boundary = shapes::by_name(name).unwrap().polygon();
@@ -73,7 +73,7 @@ fn no_hint_cells_tile_the_boundary() {
     use geo::Area;
     use voronoi_floorplan::loss::LossWeights;
     use voronoi_floorplan::{grad, optim::AdamW};
-    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0 };
+    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
     for name in shapes::SHAPE_NAMES {
         let fx = load_checkpoint(name);
         let boundary = shapes::by_name(name).unwrap().polygon();

@@ -139,6 +139,13 @@ class FloorPlanLoss(torch.autograd.Function):
         w_cell: float,
         save: bool = True,
     ) -> torch.Tensor:
+        # NOTE: the Rust port (rust/src/loss.rs) carries one extra loss term,
+        # `wall_local` — a local-frame wall ALIGNMENT penalty — that has no
+        # counterpart here. It is a Rust-only experimental term, so Python<->Rust
+        # parity holds only when w_wall_local = 0 (every recorded parity trace is
+        # generated with it off). Porting it would mean mirroring Rust's rotated-L1
+        # `ring_wall_local_sum` f32-for-f32; until then, do not rely on parity for
+        # w_wall_local > 0.
         cells = []
         walls = []
 

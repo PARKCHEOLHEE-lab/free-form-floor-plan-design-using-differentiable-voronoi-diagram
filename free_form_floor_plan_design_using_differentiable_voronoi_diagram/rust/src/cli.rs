@@ -6,7 +6,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(name = "voronoi-floorplan", about = "Free-form floor plan generation with a differentiable Voronoi diagram (Rust port)")]
 pub struct Args {
-    /// Example configuration: shape_a | shape_b | shape_c | shape_duck
+    /// Example configuration: shape_a | shape_b | shape_c | shape_d | shape_e | shape_duck
     pub example: String,
 
     /// Override the number of optimization iterations

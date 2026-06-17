@@ -5,7 +5,7 @@
 // same `--target web` ES module that index.html used to import directly).
 //
 // Protocol
-//   main -> worker : {cmd:'build', kind, mode|boundary, sites, ratios, w[6], seed, lr, iters, then:'preview'|'start'}
+//   main -> worker : {cmd:'build', mode, sites, ratios, w[6], seed, lr, iters, then:'preview'|'start'}
 //                    {cmd:'dispose'}
 //   worker -> main : {type:'ready'} | {type:'built'} | {type:'error', msg}
 //                    {type:'frame', frame, mode:'preview'|'step'} | {type:'done'}
@@ -32,16 +32,12 @@ function build(msg) {
   gen = msg.gen;
   maxIters = msg.iters;
   const ratios = Float64Array.from(msg.ratios);
-  const w = msg.w; // [w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell]
-  if (msg.kind === 'custom') {
-    const flat = Float64Array.from(msg.boundary);
-    opt = new WasmOpt(flat, msg.sites, ratios, w[0], w[1], w[2], w[3], w[4], w[5], msg.seed, msg.lr);
-  } else {
-    opt = WasmOpt.from_shape(msg.mode, msg.sites, ratios, w[0], w[1], w[2], w[3], w[4], w[5], msg.seed, msg.lr);
-    if (!opt) {
-      postMessage({ type: 'error', msg: 'unknown shape' });
-      return false;
-    }
+  const w = msg.w; // [w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell, w_wall_local]
+  // msg.blend selects the experimental continuous wall_local (WallLocalMode::Blend)
+  opt = WasmOpt.from_shape(msg.mode, msg.sites, ratios, w[0], w[1], w[2], w[3], w[4], w[5], w[6], !!msg.blend, msg.seed, msg.lr);
+  if (!opt) {
+    postMessage({ type: 'error', msg: 'unknown shape' });
+    return false;
   }
   return true;
 }

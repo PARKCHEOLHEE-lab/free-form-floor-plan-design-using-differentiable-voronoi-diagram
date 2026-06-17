@@ -63,6 +63,8 @@ fn run_start(name: &str, iterations: usize, perturb: Option<(usize, usize)>) -> 
         w_topo: 1.5,
         w_bb: 0.0,
         w_cell: 0.0,
+        w_wall_local: 0.0,
+        ..Default::default()
     };
 
     let mut sites = fx.initial_sites.clone();

@@ -417,6 +417,8 @@ mod render_tests {
         let w = LossWeights {
             w_wall: cfg.w_wall, w_area: cfg.w_area, w_lloyd: cfg.w_lloyd,
             w_topo: cfg.w_topo, w_bb: cfg.w_bb, w_cell: cfg.w_cell,
+            w_wall_local: 0.0,
+            ..Default::default()
         };
         let mut sites = init::initialize_sites(&boundary, cfg.num_sites, 777);
         let ri = init::kmeans_labels(&sites, cfg.area_ratio.len(), 777);

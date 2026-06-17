@@ -213,6 +213,8 @@ fn remaining_losses_and_total_match_python() {
             w_topo: 1.5,
             w_bb: 0.0,
             w_cell: 0.0,
+            w_wall_local: 0.0,
+            ..Default::default()
         };
         let breakdown = loss::floor_plan_loss(
             &fx.initial_sites,
@@ -260,6 +262,8 @@ fn finite_difference_gradients_match_python() {
             w_topo: 1.5,
             w_bb: 0.0,
             w_cell: 0.0,
+            w_wall_local: 0.0,
+            ..Default::default()
         };
 
         let grads = grad::finite_difference_grads(
@@ -317,6 +321,8 @@ fn optimization_trace_matches_python() {
             w_topo: 1.5,
             w_bb: 0.0,
             w_cell: 0.0,
+            w_wall_local: 0.0,
+            ..Default::default()
         };
 
         let mut sites = fx.initial_sites.clone();
