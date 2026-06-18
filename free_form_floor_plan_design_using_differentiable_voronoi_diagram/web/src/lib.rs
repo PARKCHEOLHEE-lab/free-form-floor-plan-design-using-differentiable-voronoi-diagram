@@ -9,7 +9,7 @@
 
 use geo::{Area, LineString, MultiPolygon, Polygon, Simplify};
 use serde::Serialize;
-use voronoi_floorplan::loss::{LossWeights, WallLocalMode};
+use voronoi_floorplan::loss::LossWeights;
 use voronoi_floorplan::{grad_local, init, loss, optim::AdamW, shapes, voronoi};
 use wasm_bindgen::prelude::*;
 
@@ -75,7 +75,6 @@ impl WasmOpt {
         w_bb: f64,
         w_cell: f64,
         w_wall_local: f64,
-        wall_local_blend: bool,
         seed: u32,
         lr: f64,
     ) -> WasmOpt {
@@ -83,7 +82,6 @@ impl WasmOpt {
         let pts: Vec<(f64, f64)> = boundary_xy.chunks_exact(2).map(|c| (c[0], c[1])).collect();
         let w = LossWeights {
             w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell, w_wall_local,
-            wall_local_mode: if wall_local_blend { WallLocalMode::Blend } else { WallLocalMode::Nearest },
         };
         WasmOpt::build(normalize(&pts), num_sites, area_ratios.to_vec(), w, seed as u64, lr)
     }
@@ -101,7 +99,6 @@ impl WasmOpt {
         w_bb: f64,
         w_cell: f64,
         w_wall_local: f64,
-        wall_local_blend: bool,
         seed: u32,
         lr: f64,
     ) -> Option<WasmOpt> {
@@ -109,7 +106,6 @@ impl WasmOpt {
         let boundary = shapes::by_name(name)?.polygon();
         let w = LossWeights {
             w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell, w_wall_local,
-            wall_local_mode: if wall_local_blend { WallLocalMode::Blend } else { WallLocalMode::Nearest },
         };
         Some(WasmOpt::build(boundary, num_sites, area_ratios.to_vec(), w, seed as u64, lr))
     }
@@ -332,7 +328,6 @@ mod tests {
             &[0.4, 0.3, 0.2, 0.1],
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, // wall, area, lloyd, topo, bb, cell all off
             5.0, // w_wall_local
-            false, // wall_local_blend (Nearest)
             777,
             1e-2,
         )
@@ -345,30 +340,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn from_shape_threads_blend_mode() {
-        // from_shape must thread the blend flag: on a diagonal shape with only
-        // w_wall_local active, Blend (continuous pure-alignment) and Nearest
-        // (length-coupled) yield different pre-step losses.
-        let mk = |blend: bool| -> f32 {
-            let mut o = WasmOpt::from_shape(
-                "shape_d",
-                40,
-                &[0.4, 0.3, 0.2, 0.1],
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, // only w_wall_local active
-                blend,
-                777,
-                1e-2,
-            )
-            .unwrap();
-            o.advance().loss
-        };
-        let nearest = mk(false);
-        let blend = mk(true);
-        assert!(nearest > 0.0 && blend > 0.0, "both modes must produce a positive wall_local loss");
-        assert!(
-            (nearest - blend).abs() > 1e-3,
-            "from_shape must thread the blend flag: Nearest {nearest} vs Blend {blend} should differ"
-        );
-    }
 }

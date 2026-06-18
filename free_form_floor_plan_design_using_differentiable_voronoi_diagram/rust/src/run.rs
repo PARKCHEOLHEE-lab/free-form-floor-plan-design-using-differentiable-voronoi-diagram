@@ -2,7 +2,7 @@
 //! backward, step) -> gif, mirroring the Python example scripts end to end.
 
 use crate::config::ExampleConfig;
-use crate::loss::{LossWeights, WallLocalMode};
+use crate::loss::LossWeights;
 use crate::render::GifWriter;
 use crate::tfevents::TfEventsWriter;
 use crate::{grad, init, loss, render, shapes, voronoi};
@@ -72,7 +72,6 @@ pub fn run_example(
         w_bb: config.w_bb,
         w_cell: config.w_cell,
         w_wall_local: config.w_wall_local,
-        wall_local_mode: WallLocalMode::Nearest,
     };
     let mut optimizer = crate::optim::AdamW::new(sites.len(), config.lr_initial);
 

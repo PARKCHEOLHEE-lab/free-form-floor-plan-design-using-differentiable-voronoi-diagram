@@ -33,8 +33,7 @@ function build(msg) {
   maxIters = msg.iters;
   const ratios = Float64Array.from(msg.ratios);
   const w = msg.w; // [w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell, w_wall_local]
-  // msg.blend selects the experimental continuous wall_local (WallLocalMode::Blend)
-  opt = WasmOpt.from_shape(msg.mode, msg.sites, ratios, w[0], w[1], w[2], w[3], w[4], w[5], w[6], !!msg.blend, msg.seed, msg.lr);
+  opt = WasmOpt.from_shape(msg.mode, msg.sites, ratios, w[0], w[1], w[2], w[3], w[4], w[5], w[6], msg.seed, msg.lr);
   if (!opt) {
     postMessage({ type: 'error', msg: 'unknown shape' });
     return false;
