@@ -193,7 +193,6 @@
         <div class="label">Wall alignment (experimental)</div>
         <div class="row"><label>local</label><input id="w_wall_local" type="range" min="0" max="1" step="0.01" value="0.00"><span class="val" id="w_wall_local_v">0.00</span></div>
         <p class="hint">aligns each room's walls to the nearest boundary's angle (diagonal-friendly), independent of the global <code>wall</code> term.</p>
-        <p class="hint"><label style="cursor:pointer"><input type="checkbox" id="w_wall_blend"> <b>blend</b> mode — continuous &amp; length-independent (experimental; off = original nearest-segment)</label></p>
       </div>
 
       <div class="group">
@@ -273,12 +272,15 @@ const worker = new Worker('./worker.js', { type: 'module' });
 // ---------- inputs ----------
 const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','w_wall_local','iters','lr'];
 const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo','w_wall_local']);
+// Shared slider -> readout formatter (used by the live listeners and applyPreset).
+function fmtVal(id, v) {
+  return (id === 'lr' || id === 'wall') ? (+v).toFixed(3)
+       : IMPORTANCE_IDS.has(id) ? (+v).toFixed(2)
+       : (+v % 1 ? (+v).toFixed(1) : String(+v));
+}
 for (const id of SLIDERS) {
   const el = $(id), out = $(id + '_v');
-  const fmt = (id === 'lr' || id === 'wall') ? v => (+v).toFixed(3)
-            : IMPORTANCE_IDS.has(id) ? v => (+v).toFixed(2)
-            : v => (+v % 1 ? (+v).toFixed(1) : String(+v));
-  el.addEventListener('input', () => { out.textContent = fmt(el.value); });
+  el.addEventListener('input', () => { out.textContent = fmtVal(id, el.value); });
 }
 
 // The wall slider is a pure render parameter (canvas stroke width) — update the
@@ -376,7 +378,6 @@ function params() {
     iters: +$('iters').value,
     lr: +$('lr').value,
     seed: +$('seed').value | 0,
-    blend: $('w_wall_blend').checked,
   };
 }
 
@@ -387,7 +388,7 @@ function sendBuild(then) {
   maxIters = p.iters;
   curGen = ++gen;
   worker.postMessage({ cmd: 'build', gen: curGen, kind: 'shape', mode,
-    sites: p.sites, ratios: p.ratios, w: p.w, blend: p.blend, seed: p.seed, lr: p.lr, iters: p.iters, then });
+    sites: p.sites, ratios: p.ratios, w: p.w, seed: p.seed, lr: p.lr, iters: p.iters, then });
   return true;
 }
 
@@ -423,10 +424,48 @@ worker.onmessage = (e) => {
 };
 
 // ---------- presets ----------
+// Per-boundary starting configuration. A boundary listed here loads that full
+// control set when selected (sites, rooms + per-room area shares, loss importance,
+// wall-alignment, optimization); a boundary with no entry only switches the shape
+// and keeps the current controls.
+const PRESETS = {
+  // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
+  shape_d: {
+    sites: 80, rooms: 6,
+    roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
+    wall: 0.02,
+    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    iters: 2000, lr: 0.005, seed: 777,
+  },
+};
+
+// Bulk-apply a boundary's preset to the controls (no-op + false when none). Sets
+// values + readouts directly (no synthetic input events) so the single sendBuild
+// in the click handler stays the only rebuild; rooms is special-cased because
+// changing the count regenerates the per-room sliders before the ratios can load.
+function applyPreset(mode) {
+  const p = PRESETS[mode];
+  if (!p) return false;
+  const set = (id, val) => { $(id).value = val; const o = $(id + '_v'); if (o) o.textContent = fmtVal(id, val); };
+  set('sites', p.sites);
+  set('wall', p.wall);
+  set('w_wall', p.w_wall); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
+  set('w_wall_local', p.w_wall_local);
+  set('iters', p.iters); set('lr', p.lr);
+  $('seed').value = p.seed;
+  $('rooms').value = p.rooms; $('rooms_v').textContent = fmtVal('rooms', p.rooms);
+  renderRoomAreas();                  // regenerates area_i sliders + resets roomRatios to equal split
+  roomRatios = p.roomRatios.slice();  // override with the preset's per-room weights
+  p.roomRatios.forEach((r, i) => { const el = $('area_' + i); if (el) el.value = r; });
+  refreshRoomReadout();               // recompute share %s from the new roomRatios
+  return true;
+}
+
 $('presets').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   [...$('presets').children].forEach(x => x.classList.toggle('active', x === b));
   mode = b.dataset.mode;
+  applyPreset(mode);  // load this boundary's preset, if it has one
   stop();
   $('status').textContent = mode + ' · building…';
   sendBuild('preview');
