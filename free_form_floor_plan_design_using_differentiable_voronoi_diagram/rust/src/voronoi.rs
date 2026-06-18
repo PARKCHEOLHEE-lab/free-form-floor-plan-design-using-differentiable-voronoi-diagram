@@ -427,15 +427,20 @@ mod render_tests {
         // advance until a cell ∩ boundary splits into comparable pieces, leaving
         // a significant one-piece coverage gap (deterministic trajectory; break
         // early to keep the test fast in debug mode).
+        // advance until a cell ∩ boundary splits into comparable pieces, leaving a
+        // significant one-piece coverage gap (deterministic trajectory). The
+        // blue-noise (Poisson-disk) init spreads sites well, so this degeneracy
+        // surfaces later (~iter 58 for shape_a/seed 777) than the old uniform-blob
+        // init did (<30); the 120 budget keeps margin while staying deterministic.
         let mut split_sites = None;
-        for _ in 0..30 {
+        for _ in 0..120 {
             let cov: f64 = compute_cells(&sites, &boundary, None)
                 .cells_sorted.iter().map(|c| c.unsigned_area()).sum();
             if barea - cov > 1.5e-3 { split_sites = Some(sites.clone()); break; }
             let g = grad::finite_difference_grads(&sites, &boundary, &ta, &ri, &w, None);
             opt.step(&mut sites, &g);
         }
-        let worst_sites = split_sites.expect("expected a significant one-piece coverage gap within 30 iters");
+        let worst_sites = split_sites.expect("expected a significant one-piece coverage gap within 120 iters");
 
         // at that config, the one-piece compute_cells path leaves the gap...
         let geom = compute_cells(&worst_sites, &boundary, None);
