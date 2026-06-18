@@ -120,12 +120,14 @@ pub(crate) fn wall_local_term(
     compute_wall_local_loss(room_unions, boundary, w.w_wall_local)
 }
 
-/// Orientation (radians) of the boundary segment nearest to point `(mx, my)`.
-/// The rotated-L1 below only uses this angle mod 90°, so segment direction sign
-/// is irrelevant.
-fn nearest_boundary_angle(mx: f64, my: f64, boundary: &Polygon<f64>) -> f64 {
+/// Unit direction `(cx, cy)` (= cos φ, sin φ) of the boundary segment nearest to
+/// `(mx, my)`, as f32. Computing the unit vector by division — not atan2/cos/sin —
+/// keeps the rotated-L1 below portable f32-exact across platforms (libm trig is
+/// not IEEE-mandated; +,−,×,÷,√ are). At an axis-aligned segment (cx,cy) is exactly
+/// (±1,0)/(0,±1), so the local sum reduces bit-identically to the global wall sum.
+fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32, f32) {
     let mut best_d2 = f64::INFINITY;
-    let mut ang = 0.0;
+    let (mut cx, mut cy) = (1.0f32, 0.0f32); // φ = 0 default (no usable segment)
     for line in boundary.exterior().lines() {
         let (ax, ay) = (line.start.x, line.start.y);
         let (ex, ey) = (line.end.x - ax, line.end.y - ay);
@@ -139,10 +141,12 @@ fn nearest_boundary_angle(mx: f64, my: f64, boundary: &Polygon<f64>) -> f64 {
         let d2 = (mx - px) * (mx - px) + (my - py) * (my - py);
         if d2 < best_d2 {
             best_d2 = d2;
-            ang = ey.atan2(ex);
+            let l = len2.sqrt();
+            cx = (ex / l) as f32;
+            cy = (ey / l) as f32;
         }
     }
-    ang
+    (cx, cy)
 }
 
 /// `ring_wall_sum` measured in the local boundary frame: each edge vector is
@@ -163,8 +167,7 @@ fn ring_wall_local_sum(ring: &LineString<f64>, boundary: &Polygon<f64>) -> f32 {
         let dy = t[i][1] - t[j][1];
         let mx = (pts[i].x + pts[j].x) * 0.5;
         let my = (pts[i].y + pts[j].y) * 0.5;
-        let phi = nearest_boundary_angle(mx, my, boundary);
-        let (c, sn) = (phi.cos() as f32, phi.sin() as f32);
+        let (c, sn) = nearest_boundary_direction(mx, my, boundary);
         let du = dx * c + dy * sn; // edge rotated by −φ
         let dv = -dx * sn + dy * c;
         s += du.abs() + dv.abs();
@@ -466,9 +469,9 @@ mod wall_local_tests {
         );
     }
 
-    /// #7: a boundary with a DUPLICATED vertex has a zero-length segment whose
-    /// orientation `atan2(0,0)` is a meaningless 0. A query point nearest that
-    /// corner must still get the real adjacent edges' local frame, not φ = 0.
+    /// #7: a boundary with a DUPLICATED vertex has a zero-length segment with no
+    /// direction. A query point nearest that corner must still get the real
+    /// adjacent edges' local frame, not a corrupted (cx,cy).
     #[test]
     fn degenerate_boundary_segment_does_not_corrupt_local_angle() {
         let clean = diamond_boundary();
@@ -477,11 +480,11 @@ mod wall_local_tests {
             vec![],
         );
         let (qx, qy) = (1.1, 0.0); // projects onto the duplicated corner (1,0)
-        let a_clean = nearest_boundary_angle(qx, qy, &clean);
-        let a_dup = nearest_boundary_angle(qx, qy, &dup);
+        let a_clean = nearest_boundary_direction(qx, qy, &clean);
+        let a_dup = nearest_boundary_direction(qx, qy, &dup);
         assert_eq!(
             a_dup, a_clean,
-            "a zero-length boundary segment must not change the nearest-boundary angle (clean {a_clean}, dup {a_dup})"
+            "a zero-length boundary segment must not change the nearest-boundary direction (clean {a_clean:?}, dup {a_dup:?})"
         );
     }
 
