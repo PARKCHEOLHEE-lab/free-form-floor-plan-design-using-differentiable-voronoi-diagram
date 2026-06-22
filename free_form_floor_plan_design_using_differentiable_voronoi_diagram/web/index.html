@@ -304,6 +304,9 @@ function rebuildPreviewSoon() {
 }
 $('sites').addEventListener('input', rebuildPreviewSoon);
 $('rooms').addEventListener('input', rebuildPreviewSoon);
+// seed reseeds the site initialization, so a committed seed change (Enter / blur /
+// spinner) rebuilds the preview too — no need to press Run or Reset.
+$('seed').addEventListener('change', rebuildPreviewSoon);
 
 // One 0..1 area-WEIGHT slider per room (regenerated when the room count changes).
 // roomRatios is the source of truth; params() normalizes weights -> shares, and
@@ -429,13 +432,47 @@ worker.onmessage = (e) => {
 // wall-alignment, optimization); a boundary with no entry only switches the shape
 // and keeps the current controls.
 const PRESETS = {
+  // A — orthogonal staircase boundary, 5 rooms tuned to fill each step (user preset, 2026-06).
+  shape_a: {
+    sites: 80, rooms: 5,
+    roomRatios: [0.13, 0.30, 0.23, 0.13, 0.21],  // normalized shares 13/30/23/13/21%
+    wall: 0.02,
+    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    iters: 1000, lr: 0.005, seed: 777,
+  },
+  // B — orthogonal boundary, 7 rooms (user preset, 2026-06).
+  shape_b: {
+    sites: 80, rooms: 7,
+    roomRatios: [0.12, 0.12, 0.25, 0.16, 0.07, 0.12, 0.15],  // displayed shares 12/12/25/16/7/12/15%
+    wall: 0.02,
+    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    iters: 1000, lr: 0.005, seed: 777,
+  },
+  // C — orthogonal boundary, 5 rooms (user preset, 2026-06).
+  shape_c: {
+    sites: 80, rooms: 5,
+    // displayed shares 12/27/32/12/19% — the image's integers sum to 102 (rounding),
+    // so the weights are normalized to sum 1.0 here to reproduce that exact readout.
+    roomRatios: [0.116, 0.266, 0.316, 0.116, 0.186],
+    wall: 0.02,
+    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    iters: 1000, lr: 0.005, seed: 777,
+  },
   // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
   shape_d: {
     sites: 80, rooms: 6,
     roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
     wall: 0.02,
     w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
-    iters: 2000, lr: 0.005, seed: 777,
+    iters: 1000, lr: 0.005, seed: 777,
+  },
+  // E — orthogonal runs with two diagonal walls, 6 rooms (user preset, 2026-06).
+  shape_e: {
+    sites: 80, rooms: 6,
+    roomRatios: [0.13, 0.11, 0.21, 0.20, 0.11, 0.24],  // normalized shares 13/11/21/20/11/24%
+    wall: 0.02,
+    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    iters: 1000, lr: 0.005, seed: 777,
   },
 };
 
@@ -589,6 +626,7 @@ $('reset').onclick = () => {
 
 fitCanvases();
 clearPlan();
+applyPreset(mode);  // load the default boundary's preset on first load (same as clicking it)
 $('status').textContent = mode + ' · building…';
 sendBuild('preview');
 </script>
