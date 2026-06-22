@@ -60,7 +60,6 @@ fn first_gif_frame_is_post_step_geometry_like_python() {
         w_topo: cfg.w_topo,
         w_bb: cfg.w_bb,
         w_cell: cfg.w_cell,
-        w_wall_local: 0.0,
         ..Default::default()
     };
     let n_rooms = cfg.area_ratio.len();

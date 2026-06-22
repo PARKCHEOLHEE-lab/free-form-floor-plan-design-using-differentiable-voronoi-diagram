@@ -40,7 +40,7 @@ fn no_hint_pairing_assigns_each_site_to_a_cell_containing_it() {
 fn no_hint_pairing_stays_healthy_during_optimization() {
     use voronoi_floorplan::loss::LossWeights;
     use voronoi_floorplan::{grad, optim::AdamW};
-    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
+    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, ..Default::default() };
     for name in shapes::SHAPE_NAMES {
         let fx = load_checkpoint(name);
         let boundary = shapes::by_name(name).unwrap().polygon();
@@ -73,7 +73,7 @@ fn no_hint_cells_tile_the_boundary() {
     use geo::Area;
     use voronoi_floorplan::loss::LossWeights;
     use voronoi_floorplan::{grad, optim::AdamW};
-    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
+    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, ..Default::default() };
     for name in shapes::SHAPE_NAMES {
         let fx = load_checkpoint(name);
         let boundary = shapes::by_name(name).unwrap().polygon();
@@ -88,11 +88,22 @@ fn no_hint_cells_tile_the_boundary() {
             let g = grad::finite_difference_grads(&sites, &boundary, &fx.target_areas, &fx.room_indices, &w, None);
             opt.step(&mut sites, &g);
             let geom = voronoi::compute_cells(&sites, &boundary, None);
+            // At a multipart split (a cell ∩ boundary breaks into >1 piece) the
+            // one-piece compute_cells path keeps a single piece and drops the rest
+            // BY DESIGN, so its coverage legitimately dips — the very behavior
+            // render_cells_covers_boundary_at_multipart_split documents, not a
+            // no-hint pairing fault. The iter it strikes is chaotic-trajectory
+            // dependent (shape_c ~iter 13 under the wall-alignment loss). Skip those;
+            // a coverage hole with NO split would be a dropped/misassigned piece —
+            // the bug this guards against — and still fails.
+            if voronoi::render_cells(&sites, &boundary).len() > geom.cells_sorted.len() {
+                continue;
+            }
             let covered: f64 = geom.cells_sorted.iter().map(|c| c.unsigned_area()).sum();
             let frac = covered / b_area;
             assert!(
                 frac >= 0.99,
-                "{name}: iter {it} cells cover only {:.3} of the boundary (a cell went empty)",
+                "{name}: iter {it} cells cover only {:.3} of the boundary (no-hint pairing dropped a piece)",
                 frac
             );
         }

@@ -403,52 +403,28 @@ pub fn render_cells(sites: &[[f32; 2]], boundary: &Polygon<f64>) -> Vec<(usize, 
 #[cfg(test)]
 mod render_tests {
     use super::*;
-    use crate::loss::LossWeights;
-    use crate::optim::AdamW;
-    use crate::{config, grad, init, shapes};
+    use crate::{init, shapes};
     use geo::Area;
 
     #[test]
     fn render_cells_covers_boundary_at_multipart_split() {
-        let cfg = config::by_name("shape_a").unwrap();
-        let boundary = shapes::by_name("shape_a").unwrap().polygon();
+        // A small site count makes some Voronoi cells large enough to straddle a
+        // concave notch of the boundary, so the cell ∩ boundary splits into more
+        // than one piece. The config is chosen deterministically (init only, no
+        // optimization), so — unlike the old version, which advanced the optimizer
+        // to *find* this degeneracy — it does not depend on a chaotic trajectory
+        // and cannot be perturbed away by a loss or init change.
+        let boundary = shapes::by_name("shape_b").unwrap().polygon();
         let barea = boundary.unsigned_area();
-        let ta: Vec<f64> = cfg.area_ratio.iter().map(|r| barea * r).collect();
-        let w = LossWeights {
-            w_wall: cfg.w_wall, w_area: cfg.w_area, w_lloyd: cfg.w_lloyd,
-            w_topo: cfg.w_topo, w_bb: cfg.w_bb, w_cell: cfg.w_cell,
-            w_wall_local: 0.0,
-            ..Default::default()
-        };
-        let mut sites = init::initialize_sites(&boundary, cfg.num_sites, 777);
-        let ri = init::kmeans_labels(&sites, cfg.area_ratio.len(), 777);
-        let mut opt = AdamW::new(sites.len(), cfg.lr_initial);
+        let sites = init::initialize_sites(&boundary, 16, 5);
 
-        // advance until a cell ∩ boundary splits into comparable pieces, leaving
-        // a significant one-piece coverage gap (deterministic trajectory; break
-        // early to keep the test fast in debug mode).
-        // advance until a cell ∩ boundary splits into comparable pieces, leaving a
-        // significant one-piece coverage gap (deterministic trajectory). The
-        // blue-noise (Poisson-disk) init spreads sites well, so this degeneracy
-        // surfaces later (~iter 58 for shape_a/seed 777) than the old uniform-blob
-        // init did (<30); the 120 budget keeps margin while staying deterministic.
-        let mut split_sites = None;
-        for _ in 0..120 {
-            let cov: f64 = compute_cells(&sites, &boundary, None)
-                .cells_sorted.iter().map(|c| c.unsigned_area()).sum();
-            if barea - cov > 1.5e-3 { split_sites = Some(sites.clone()); break; }
-            let g = grad::finite_difference_grads(&sites, &boundary, &ta, &ri, &w, None);
-            opt.step(&mut sites, &g);
-        }
-        let worst_sites = split_sites.expect("expected a significant one-piece coverage gap within 120 iters");
-
-        // at that config, the one-piece compute_cells path leaves the gap...
-        let geom = compute_cells(&worst_sites, &boundary, None);
+        // the one-piece compute_cells path drops the smaller split piece -> a gap...
+        let geom = compute_cells(&sites, &boundary, None);
         let one_piece: f64 = geom.cells_sorted.iter().map(|c| c.unsigned_area()).sum();
         assert!(barea - one_piece > 1e-3, "one-piece gap should be present: {}", barea - one_piece);
 
         // ...but render_cells keeps ALL pieces -> covers the whole boundary.
-        let pieces = render_cells(&worst_sites, &boundary);
+        let pieces = render_cells(&sites, &boundary);
         let all: f64 = pieces.iter().map(|(_, p)| p.unsigned_area()).sum();
         assert!((barea - all).abs() < 1e-5, "render_cells must cover the boundary; gap = {}", barea - all);
         assert!(pieces.len() > geom.cells_sorted.len(), "the split must expand the piece count: {} vs {}", pieces.len(), geom.cells_sorted.len());

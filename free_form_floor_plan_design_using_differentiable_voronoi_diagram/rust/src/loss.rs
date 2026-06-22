@@ -46,49 +46,12 @@ pub fn union_group(group: &[&Polygon<f64>]) -> MultiPolygon<f64> {
     acc
 }
 
-/// One ring's `torch.abs(t1 - t2).sum().item()`: coordinates cast to f32
-/// (tensor materialization), rolled difference and |.| summed in f32 in
-/// row-major element order, widened to f64 by `.item()`.
-fn ring_wall_sum(ring: &LineString<f64>) -> f32 {
-    let pts = &ring.0;
-    let n = pts.len().saturating_sub(1); // coords[:-1] drops the closing dup
-    if n == 0 {
-        return 0.0;
-    }
-    let t: Vec<[f32; 2]> = pts[..n].iter().map(|c| [c.x as f32, c.y as f32]).collect();
-    let mut s: f32 = 0.0;
-    for i in 0..n {
-        let j = (i + 1) % n; // torch.roll(t1, -1, 0)
-        s += (t[i][0] - t[j][0]).abs();
-        s += (t[i][1] - t[j][1]).abs();
-    }
-    s
-}
-
-pub fn compute_wall_loss(room_unions: &[MultiPolygon<f64>], w_wall: f64) -> f32 {
-    // Python accumulates the per-ring f32 sums into a Python float (f64) ...
-    let mut loss_wall: f64 = 0.0;
-    for room_union in room_unions {
-        for room in room_union {
-            loss_wall += ring_wall_sum(room.exterior()) as f64;
-            for interior in room.interiors() {
-                loss_wall += ring_wall_sum(interior) as f64;
-            }
-        }
-    }
-    // ... then `torch.tensor(loss_wall)` casts to f32 and `*= w_wall` stays f32
-    (loss_wall as f32) * (w_wall as f32)
-}
-
-/// Local-frame wall loss: like `compute_wall_loss`, but every room-boundary edge
-/// is measured as a *rotated* taxicab length in the frame of the nearest
-/// domain-boundary segment (its orientation φ). An edge parallel or
-/// perpendicular to the local boundary costs its Euclidean length; a 45°-skewed
-/// edge costs √2×. Reduces exactly to `compute_wall_loss` when every φ = 0.
-///
-/// PARITY (#3): this term is Rust-only — `loss.py` has no `wall_local` and sums
-/// only the other six terms. Python↔Rust parity therefore holds only at
-/// `w_wall_local = 0`; every golden parity trace is generated with it off.
+/// The wall loss: every room-boundary edge is measured as a *rotated* taxicab
+/// length in the frame of the nearest domain-boundary segment (its orientation
+/// φ). An edge parallel or perpendicular to the local boundary costs its
+/// Euclidean length; a 45°-skewed edge costs √2×. On an axis-aligned boundary
+/// every φ ≡ 0 (mod 90°), so this reduces bit-exactly to the plain taxicab wall
+/// length (which is why the axis-aligned goldens are unchanged by the switch).
 pub fn compute_wall_local_loss(
     room_unions: &[MultiPolygon<f64>],
     boundary: &Polygon<f64>,
@@ -104,20 +67,6 @@ pub fn compute_wall_local_loss(
         }
     }
     (loss as f32) * (w_wall_local as f32)
-}
-
-/// The wall_local term (0 when `w_wall_local ≤ 0`). The single source used by both
-/// `floor_plan_loss` (native/global path) and `grad_local::total_from` (demo/local
-/// path), so every code path agrees.
-pub(crate) fn wall_local_term(
-    room_unions: &[MultiPolygon<f64>],
-    boundary: &Polygon<f64>,
-    w: &LossWeights,
-) -> f32 {
-    if w.w_wall_local <= 0.0 {
-        return 0.0;
-    }
-    compute_wall_local_loss(room_unions, boundary, w.w_wall_local)
 }
 
 /// Unit direction `(cx, cy)` (= cos φ, sin φ) of the boundary segment nearest to
@@ -300,9 +249,6 @@ pub struct LossWeights {
     pub w_topo: f64,
     pub w_bb: f64,
     pub w_cell: f64,
-    /// Local-frame wall alignment (rotated-L1, nearest-boundary φ). Separate from
-    /// `w_wall` so the global and local terms can be weighted independently.
-    pub w_wall_local: f64,
 }
 
 pub struct LossBreakdown {
@@ -313,7 +259,6 @@ pub struct LossBreakdown {
     pub topo: f32,
     pub bb: f32,
     pub cell: f32,
-    pub wall_local: f32,
 }
 
 /// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
@@ -335,14 +280,16 @@ pub fn floor_plan_loss(
     // Compute it once per group here and share it (it used to be recomputed
     // inside each component). The result is identical, so the f32 losses are
     // bitwise unchanged; this only removes the duplicate boolean ops.
-    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 || w.w_wall_local > 0.0 {
+    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 {
         groups.iter().map(|g| union_group(g)).collect()
     } else {
         Vec::new()
     };
 
+    // The wall term is the nearest-boundary alignment loss (rotated-L1). On an
+    // axis-aligned boundary it reduces bit-exactly to the plain taxicab length.
     let wall = if w.w_wall > 0.0 {
-        compute_wall_loss(&unions, w.w_wall)
+        compute_wall_local_loss(&unions, boundary, w.w_wall)
     } else {
         0.0
     };
@@ -371,10 +318,8 @@ pub fn floor_plan_loss(
     } else {
         0.0
     };
-    let wall_local = wall_local_term(&unions, boundary, w);
-
-    // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell (+ loss_wall_local)
-    let total = wall + area + lloyd + topo + bb + cell + wall_local;
+    // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
+    let total = wall + area + lloyd + topo + bb + cell;
     LossBreakdown {
         total,
         wall,
@@ -383,7 +328,6 @@ pub fn floor_plan_loss(
         topo,
         bb,
         cell,
-        wall_local,
     }
 }
 
@@ -435,18 +379,35 @@ mod wall_local_tests {
             vec![],
         );
         let room = square_room(false); // axis-aligned room
-        let global = compute_wall_loss(&[room.clone()], 2.5);
+        // taxicab reference (the pre-merge global wall loss), computed inline
+        // since that path was removed — proves the alignment loss reduces to it.
+        let mut tx = 0.0f64;
+        for poly in &room {
+            let pts = &poly.exterior().0;
+            let n = pts.len().saturating_sub(1);
+            let t: Vec<[f32; 2]> = pts[..n].iter().map(|c| [c.x as f32, c.y as f32]).collect();
+            let mut s = 0.0f32;
+            for i in 0..n {
+                let j = (i + 1) % n;
+                s += (t[i][0] - t[j][0]).abs();
+                s += (t[i][1] - t[j][1]).abs();
+            }
+            tx += s as f64;
+        }
+        let taxicab = (tx as f32) * 2.5f32;
         let local = compute_wall_local_loss(&[room], &b, 2.5);
         assert_eq!(
-            local, global,
-            "wall_local must reduce to the global wall loss on an axis-aligned boundary"
+            local, taxicab,
+            "the alignment wall loss must reduce to the plain taxicab length on an axis-aligned boundary"
         );
     }
 
-    fn shape_a_geom() -> (Vec<[f32; 2]>, Polygon<f64>, Vec<f64>, Vec<usize>) {
-        let boundary = crate::shapes::by_name("shape_a").unwrap().polygon();
+    fn duck_geom() -> (Vec<[f32; 2]>, Polygon<f64>, Vec<f64>, Vec<usize>) {
+        // duck has 40 diagonal boundary edges, so the rotated-L1 alignment loss
+        // differs from the global taxicab loss — the shape that distinguishes them.
+        let boundary = crate::shapes::by_name("shape_duck").unwrap().polygon();
         let barea = boundary.unsigned_area();
-        let ratios = [0.5, 0.3, 0.1, 0.1];
+        let ratios = [0.2, 0.2, 0.2, 0.2, 0.2];
         let target_areas: Vec<f64> = ratios.iter().map(|r| barea * r).collect();
         let sites = crate::init::initialize_sites(&boundary, 40, 777);
         let room_indices = crate::init::kmeans_labels(&sites, ratios.len(), 777);
@@ -454,18 +415,21 @@ mod wall_local_tests {
     }
 
     #[test]
-    fn floor_plan_loss_includes_wall_local_when_weighted() {
-        let (sites, boundary, ta, ri) = shape_a_geom();
-        // every weight off but w_wall_local: total must come ENTIRELY from the
-        // new term, and the term must be reported in the breakdown.
-        let off = LossWeights { w_wall: 0.0, w_area: 0.0, w_lloyd: 0.0, w_topo: 0.0, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
-        let on = LossWeights { w_wall: 0.0, w_area: 0.0, w_lloyd: 0.0, w_topo: 0.0, w_bb: 0.0, w_cell: 0.0, w_wall_local: 5.0, ..Default::default() };
-        let b0 = floor_plan_loss(&sites, &boundary, &ta, &ri, &off, None);
-        let b1 = floor_plan_loss(&sites, &boundary, &ta, &ri, &on, None);
-        assert!(
-            b1.total > b0.total && b1.wall_local > 0.0,
-            "w_wall_local>0 must add a positive wall_local term to total: total {} -> {}, wall_local={}",
-            b0.total, b1.total, b1.wall_local
+    fn wall_term_computes_nearest_boundary_alignment_on_diagonal_shape() {
+        // KR3: the single `wall` term (weighted by w_wall) must be the
+        // nearest-boundary ALIGNMENT loss, not the global taxicab loss. On the
+        // duck (diagonal edges) the two differ, so this distinguishes them.
+        let (sites, boundary, ta, ri) = duck_geom();
+        let w = LossWeights { w_wall: 2.5, ..Default::default() };
+        let b = floor_plan_loss(&sites, &boundary, &ta, &ri, &w, None);
+        // reference alignment from the same unions floor_plan_loss builds internally
+        let geom = crate::voronoi::compute_cells(&sites, &boundary, None);
+        let groups = rooms_group(&geom.cells_sorted, &ri);
+        let unions: Vec<MultiPolygon<f64>> = groups.iter().map(|g| union_group(g)).collect();
+        let alignment = compute_wall_local_loss(&unions, &boundary, 2.5);
+        assert_eq!(
+            b.wall, alignment,
+            "the wall term must be the nearest-boundary ALIGNMENT loss, not the global taxicab loss"
         );
     }
 

@@ -18,7 +18,7 @@
 
 use crate::loss::{
     compute_area_loss, compute_bb_loss, compute_cell_area_loss, compute_lloyd_loss,
-    compute_topology_loss, compute_wall_loss, rooms_group, wall_local_term, LossWeights,
+    compute_topology_loss, compute_wall_local_loss, rooms_group, LossWeights,
 };
 use crate::voronoi::{compute_cells, site_neighbors};
 use geo::{MultiPolygon, Polygon};
@@ -35,14 +35,13 @@ fn total_from(
     w: &LossWeights,
     boundary: &Polygon<f64>,
 ) -> f32 {
-    let wall = if w.w_wall > 0.0 { compute_wall_loss(unions, w.w_wall) } else { 0.0 };
+    let wall = if w.w_wall > 0.0 { compute_wall_local_loss(unions, boundary, w.w_wall) } else { 0.0 };
     let area = if w.w_area > 0.0 { compute_area_loss(cells, target_areas, room_indices, w.w_area) } else { 0.0 };
     let lloyd = if w.w_lloyd > 0.0 { compute_lloyd_loss(cells, sites, w.w_lloyd) } else { 0.0 };
     let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
     let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
-    let wall_local = wall_local_term(unions, boundary, w);
-    wall + area + lloyd + topo + bb + cell + wall_local
+    wall + area + lloyd + topo + bb + cell
 }
 
 /// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
@@ -95,7 +94,7 @@ impl<'a> LocalGradContext<'a> {
     ) -> Self {
         let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let base_cells = compute_cells(sites, boundary, None).cells_sorted;
-        let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 || w.w_wall_local > 0.0;
+        let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0;
         let (n_rooms, base_unions, base_total) = {
             let groups = rooms_group(&base_cells, room_indices);
             let n_rooms = groups.len();
@@ -230,7 +229,7 @@ impl<'a> LocalGradContext<'a> {
         // union required bitwise-shared edges and a snap pass; i_overlay does not).
         let groups = rooms_group(&cells, self.room_indices);
 
-        let need_unions = self.w.w_wall > 0.0 || self.w.w_topo > 0.0 || self.w.w_bb > 0.0 || self.w.w_wall_local > 0.0;
+        let need_unions = self.w.w_wall > 0.0 || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
         let unions: Vec<MultiPolygon<f64>> = if need_unions {
             (0..self.n_rooms)
                 .map(|r| {
@@ -262,25 +261,25 @@ mod tests {
         let target_areas: Vec<f64> = ratios.iter().map(|r| area * r).collect();
         let sites = init::initialize_sites(&boundary, 40, 777);
         let room_indices = init::kmeans_labels(&sites, ratios.len(), 777);
-        let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
+        let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, ..Default::default() };
         (sites, boundary, target_areas, room_indices, w)
     }
 
     #[test]
-    fn local_grad_includes_wall_local_and_matches_global() {
+    fn local_grad_wall_term_matches_global() {
         let (sites, boundary, ta, ri, _) = shape_a_setup();
-        // only the local-frame wall term active
+        // only the wall (alignment) term active
         let w = LossWeights {
-            w_wall: 0.0, w_area: 0.0, w_lloyd: 0.0, w_topo: 0.0, w_bb: 0.0, w_cell: 0.0, w_wall_local: 5.0,
+            w_wall: 5.0, w_area: 0.0, w_lloyd: 0.0, w_topo: 0.0, w_bb: 0.0, w_cell: 0.0,
             ..Default::default()
         };
         let global = floor_plan_loss(&sites, &boundary, &ta, &ri, &w, None).total;
-        assert!(global > 0.0, "precondition: the global wall_local loss must be positive");
+        assert!(global > 0.0, "precondition: the global wall loss must be positive");
         let ctx = LocalGradContext::new(&sites, &boundary, &ta, &ri, &w);
         // the FD path must see the same loss as the global path...
         assert!(
             (ctx.base_total() - global).abs() < 1e-4,
-            "grad_local base_total {} must include wall_local and match global {}",
+            "grad_local base_total {} must include the wall term and match global {}",
             ctx.base_total(),
             global
         );
@@ -288,7 +287,7 @@ mod tests {
         let g = ctx.gradients(&sites);
         let nonzero = g.iter().any(|c| c[0].abs() > 0.0 || c[1].abs() > 0.0);
         let finite = g.iter().all(|c| c[0].is_finite() && c[1].is_finite());
-        assert!(nonzero && finite, "wall_local must drive a finite, non-zero local gradient");
+        assert!(nonzero && finite, "the wall term must drive a finite, non-zero local gradient");
     }
 
     #[test]

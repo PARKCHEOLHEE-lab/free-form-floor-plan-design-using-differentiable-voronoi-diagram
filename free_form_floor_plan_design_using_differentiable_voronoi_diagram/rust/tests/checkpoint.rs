@@ -134,7 +134,7 @@ fn wall_and_area_losses_match_python() {
         let groups = loss::rooms_group(&geom.cells_sorted, &fx.room_indices);
         let unions: Vec<_> = groups.iter().map(|g| loss::union_group(g)).collect();
 
-        let wall = loss::compute_wall_loss(&unions, W_WALL) as f64;
+        let wall = loss::compute_wall_local_loss(&unions, &boundary, W_WALL) as f64;
         assert!(
             rel_err(wall, fx.iter0.losses.wall) <= 1e-6,
             "{name}: loss_wall {wall} vs Python {} (rel err {})",
@@ -213,7 +213,6 @@ fn remaining_losses_and_total_match_python() {
             w_topo: 1.5,
             w_bb: 0.0,
             w_cell: 0.0,
-            w_wall_local: 0.0,
             ..Default::default()
         };
         let breakdown = loss::floor_plan_loss(
@@ -262,7 +261,6 @@ fn finite_difference_gradients_match_python() {
             w_topo: 1.5,
             w_bb: 0.0,
             w_cell: 0.0,
-            w_wall_local: 0.0,
             ..Default::default()
         };
 
@@ -321,7 +319,6 @@ fn optimization_trace_matches_python() {
             w_topo: 1.5,
             w_bb: 0.0,
             w_cell: 0.0,
-            w_wall_local: 0.0,
             ..Default::default()
         };
 

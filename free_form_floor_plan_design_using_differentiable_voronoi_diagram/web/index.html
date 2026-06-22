@@ -192,13 +192,7 @@
         <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
         <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
         <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
-        <p class="hint">relative importance per term — equal values ⇒ equal weight at the start. Each is divided by a fixed per-term scale before the optimizer.</p>
-      </div>
-
-      <div class="group">
-        <div class="label">Wall alignment (experimental)</div>
-        <div class="row"><label>local</label><input id="w_wall_local" type="range" min="0" max="1" step="0.01" value="0.00"><span class="val" id="w_wall_local_v">0.00</span></div>
-        <p class="hint">aligns each room's walls to the nearest boundary's angle (diagonal-friendly), independent of the global <code>wall</code> term.</p>
+        <p class="hint">relative importance per term — equal values ⇒ equal weight at the start. Each is divided by a fixed per-term scale before the optimizer. The <code>wall</code> term aligns each room's walls to the nearest boundary edge's angle (diagonal-friendly).</p>
       </div>
 
       <div class="group">
@@ -270,8 +264,8 @@ let gen = 0, curGen = 0;  // build generation; frames from a superseded build ar
 const worker = new Worker('./worker.js', { type: 'module' });
 
 // ---------- inputs ----------
-const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','w_wall_local','iters','lr'];
-const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo','w_wall_local']);
+const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr'];
+const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo']);
 // Shared slider -> readout formatter (used by the live listeners and applyPreset).
 function fmtVal(id, v) {
   return (id === 'lr' || id === 'wall') ? (+v).toFixed(3)
@@ -356,7 +350,7 @@ $('roomareas').addEventListener('input', e => {
 // start. wall is stable across shapes (x1.3), area is roughest (x2.7, because it
 // is a sum-then-square), and topo is never >0 in practice so its scale is a
 // judgment value (= one room split into two pieces).
-const LOSS_SCALES = { w_wall: 13.2, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0, w_wall_local: 13.0 };
+const LOSS_SCALES = { w_wall: 13.0, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0 };
 
 function params() {
   const k = +$('rooms').value;
@@ -365,7 +359,7 @@ function params() {
   // Each loss slider is a 0..1 importance; divide by the per-term scale to get the
   // raw weight the optimizer consumes. The default {0.70,0.10,0.12,0.06} ~back-maps
   // to the old demo weights {5,20,2.1,1.5} (within slider rounding; the global
-  // factor is irrelevant under AdamW). bb, cell stay 0; w[6] = local-frame wall.
+  // factor is irrelevant under AdamW). bb, cell stay 0.
   const imp = id => +$(id).value;
   return {
     sites: +$('sites').value,
@@ -376,7 +370,6 @@ function params() {
       imp('w_lloyd') / LOSS_SCALES.w_lloyd,
       imp('w_topo')  / LOSS_SCALES.w_topo,
       0, 0,
-      imp('w_wall_local') / LOSS_SCALES.w_wall_local,
     ],
     iters: +$('iters').value,
     lr: +$('lr').value,
@@ -437,7 +430,7 @@ const PRESETS = {
     sites: 80, rooms: 5,
     roomRatios: [0.13, 0.30, 0.23, 0.13, 0.21],  // normalized shares 13/30/23/13/21%
     wall: 0.02,
-    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
   // B — orthogonal boundary, 7 rooms (user preset, 2026-06).
@@ -445,7 +438,7 @@ const PRESETS = {
     sites: 80, rooms: 7,
     roomRatios: [0.12, 0.12, 0.25, 0.16, 0.07, 0.12, 0.15],  // displayed shares 12/12/25/16/7/12/15%
     wall: 0.02,
-    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
   // C — orthogonal boundary, 5 rooms (user preset, 2026-06).
@@ -455,7 +448,7 @@ const PRESETS = {
     // so the weights are normalized to sum 1.0 here to reproduce that exact readout.
     roomRatios: [0.116, 0.266, 0.316, 0.116, 0.186],
     wall: 0.02,
-    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
   // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
@@ -463,7 +456,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
     wall: 0.02,
-    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
   // E — orthogonal runs with two diagonal walls, 6 rooms (user preset, 2026-06).
@@ -471,7 +464,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.13, 0.11, 0.21, 0.20, 0.11, 0.24],  // normalized shares 13/11/21/20/11/24%
     wall: 0.02,
-    w_wall: 0.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20, w_wall_local: 1.00,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
 };
@@ -487,7 +480,6 @@ function applyPreset(mode) {
   set('sites', p.sites);
   set('wall', p.wall);
   set('w_wall', p.w_wall); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
-  set('w_wall_local', p.w_wall_local);
   set('iters', p.iters); set('lr', p.lr);
   $('seed').value = p.seed;
   $('rooms').value = p.rooms; $('rooms_v').textContent = fmtVal('rooms', p.rooms);

@@ -31,7 +31,7 @@ fn main() {
     let targets: Vec<f64> = serde_json::from_value(v["target_areas"].clone()).unwrap();
     let n_rooms = targets.len();
     let boundary = shapes::by_name(&name).unwrap().polygon();
-    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, w_wall_local: 0.0, ..Default::default() };
+    let w = LossWeights { w_wall: 2.5, w_area: 20.0, w_lloyd: 2.1, w_topo: 1.5, w_bb: 0.0, w_cell: 0.0, ..Default::default() };
 
     let mut opt = AdamW::new(sites.len(), 1e-2);
     let mut gif = GifWriter::create(&out_dir.join(format!("rust_{name}.gif"))).unwrap();
