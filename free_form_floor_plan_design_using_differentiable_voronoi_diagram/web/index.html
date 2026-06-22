@@ -62,7 +62,9 @@
     header { margin-bottom: 1.1em; }
     h1 { font-size: 1.7em; font-weight: bold; letter-spacing: -0.015em; margin: 0 0 .15em; }
     .sub { color: var(--text-dark); margin: 0; }
-    .lede { color: var(--text-dark); margin: 0 0 2.2em; max-width: 64ch; }
+    .lede { color: var(--text-dark); margin: 0 0 2.2em; }
+    .lede p { margin: 0 0 .9em; }
+    .lede p:last-child { margin-bottom: 0; }
     .lede strong { color: var(--dark); font-weight: bold; }
     a { color: var(--link); text-decoration: inherit; }
     a:hover { text-decoration: underline; }
@@ -142,12 +144,27 @@
     <p class="sub">via a differentiable Voronoi diagram — the Rust optimizer compiled to WebAssembly, running live in your browser</p>
   </header>
 
-  <p class="lede">
-    Pick a preset boundary, choose how many rooms and how the loss is weighted,
-    then watch Voronoi sites move under <strong>central finite-difference gradients</strong> and
-    <strong>AdamW</strong> until the cells settle into rooms. Every step — the Voronoi diagram,
-    the six loss components, the gradients — runs in-browser. No server.
-  </p>
+  <div class="lede">
+    <p>
+      Pick a preset boundary, choose how many rooms and how the loss is weighted,
+      then watch Voronoi sites move under <strong>central finite-difference gradients</strong> and
+      <strong>AdamW</strong> until the cells settle into rooms. Every step — the Voronoi diagram,
+      the six loss components, the gradients — runs in-browser. No server.
+    </p>
+    <p>
+      Six weighted terms shape each plan: <strong>wall</strong> snaps every room edge to the
+      nearest boundary segment's angle (diagonal-friendly), <strong>area</strong> drives rooms
+      toward their target sizes, <strong>Lloyd</strong> keeps cells compact, and
+      <strong>topology</strong> keeps each room a single piece. Drag the importance sliders to
+      rebalance them live, switch boundary A–E for a different footprint, or change the seed for
+      a fresh starting layout.
+    </p>
+    <p>
+      The optimizer is the same Rust code that runs natively — compiled to WebAssembly and
+      checked bit-for-bit against recorded Python golden traces — so this is the real engine
+      running in your browser, not a reimplementation.
+    </p>
+  </div>
 
   <div class="stage">
     <div class="canvas-card">
