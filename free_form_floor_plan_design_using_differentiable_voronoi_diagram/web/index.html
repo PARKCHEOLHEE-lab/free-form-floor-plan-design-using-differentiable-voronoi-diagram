@@ -121,7 +121,7 @@
 
     .hint { color: var(--text-dark); font-size: .82em; margin: .5em 0 0; }
 
-    .actions { display: flex; gap: .4em; margin-top: 1.7em; }
+    .actions { display: flex; gap: .4em; margin-bottom: 1.5em; }
     .actions button {
       flex: 1; padding: .62em; border: 1px solid var(--reduce-30); background: transparent; border-radius: 4px;
       font: inherit; font-weight: bold; color: var(--dark); cursor: pointer;
@@ -157,6 +157,12 @@
     </div>
 
     <div class="controls">
+      <div class="actions">
+        <button id="run" class="primary">▶ Run</button>
+        <button id="pause" disabled>❚❚ Pause</button>
+        <button id="reset">⟲ Reset</button>
+      </div>
+
       <div class="group">
         <div class="label">Boundary</div>
         <div class="seg" id="presets">
@@ -200,12 +206,6 @@
         <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
         <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
         <div class="row"><label>seed</label><input id="seed" type="number" min="0" step="1" value="777"></div>
-      </div>
-
-      <div class="actions">
-        <button id="run" class="primary">▶ Run</button>
-        <button id="pause" disabled>❚❚ Pause</button>
-        <button id="reset">⟲ Reset</button>
       </div>
     </div>
   </div>
