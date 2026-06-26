@@ -257,7 +257,7 @@ let CW = 520, CH = 520;                        // plan-canvas CSS-pixel dims (se
 let lastFrame = null;                          // last rendered cell-frame, for resize redraw
 let wallWidth = 0.02;                          // wall thickness (normalized half-width); JS-only render param
 // per-frame fit transform: center the plan in the canvas and scale it to fill
-// ~85% of the square (computed in drawFrame from the cell bbox = the boundary).
+// ~70% of the square (computed in drawFrame from the cell bbox = the boundary).
 let fitS = 1, fitCx = 0, fitCy = 0;
 const nx = x => CW / 2 + (x - fitCx) * fitS;  // normalized -> canvas (centered fit)
 const ny = y => CH / 2 - (y - fitCy) * fitS;  // flip y
@@ -539,7 +539,7 @@ function clearPlan() { pctx.fillStyle = '#fff'; pctx.fillRect(0, 0, CW, CH); }
 function drawFrame(f) {
   clearPlan();
   // Center the plan in the canvas: the cells tile the whole boundary, so their
-  // bbox is the (stable) plan extent. Center it and scale to ~85% of the square.
+  // bbox is the (stable) plan extent. Center it and scale to ~70% of the square.
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const cell of f.cells) for (const [x, y] of cell.ring) {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
@@ -547,7 +547,7 @@ function drawFrame(f) {
   }
   if (minX <= maxX) {
     fitCx = (minX + maxX) / 2; fitCy = (minY + maxY) / 2;
-    fitS = 0.85 * CW / (Math.max(maxX - minX, maxY - minY) || 1);
+    fitS = 0.70 * CW / (Math.max(maxX - minX, maxY - minY) || 1);
   }
   // 0) pastel room fills — each cell painted with its room colour (matplotlib
   //    Accent over white); under the walls + gray cells.
@@ -562,8 +562,14 @@ function drawFrame(f) {
   //    wall width (2·wallWidth), then white slightly narrower -> two black lines
   //    with a white interior. The centerlines are CLOSED rings (only joins, no
   //    caps), and the miter join renders the junctions cleanly.
-  const fullPx = Math.max(1, 2 * wallWidth * fitS);   // full wall width (2d) in CSS px
-  const lineP = 0.005 * fitS;                          // black line thickness (0.005 normalized)
+  // Wall stroke widths use a FIXED reference scale, not the per-preset fitS, so the
+  // same slider value renders at the same on-screen thickness for every boundary.
+  // (Each preset's plan fills ~70% of the canvas but has a different normalized
+  // bbox, so fitS varies and would make identical settings look thicker/thinner.)
+  // 1.45 ≈ the typical normalized plan extent across the demo presets.
+  const refS = 0.70 * CW / 1.45;
+  const fullPx = Math.max(1, 2 * wallWidth * refS);   // full wall width (2d) in CSS px
+  const lineP = 0.005 * refS;                          // black line thickness (0.005 normalized)
   const strokeWalls = (style, w) => {
     if (w <= 0) return;
     pctx.strokeStyle = style; pctx.lineWidth = w;
