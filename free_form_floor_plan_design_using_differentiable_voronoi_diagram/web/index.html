@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>free-form-floor-plan-design-using-differentiable-voronoi-diagram</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <title>Floor Plan Generation with Voronoi Diagram</title>
   <style>
     /* Self-hosted PT Sans (vendored, no CDN) — matches the reference site's
        design system: PT Sans, flat surfaces (border + tint, no shadows or
@@ -24,7 +25,7 @@
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       --dark: #000;
       --light: #fff;
-      --text-dark: rgb(70, 70, 70);
+      --text-dark: #000;   /* match the reference site: body text is pure black */
       --link: #66a1ff;
       --featured: #0011e3;
       --bg-subtle: #f7f7f8;
@@ -54,18 +55,19 @@
     /* one restrained, staggered load reveal */
     @keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
     header, .lede, .stage, footer { animation: rise .55s cubic-bezier(.2, .7, .2, 1) both; }
-    .lede { animation-delay: .06s; }
-    .stage { animation-delay: .12s; }
-    footer { animation-delay: .2s; }
+    .lede { animation-delay: .08s; }   /* intro paragraph under the header */
+    .stage { animation-delay: .14s; }
+    footer { animation-delay: .26s; }
     @media (prefers-reduced-motion: reduce) { header, .lede, .stage, footer { animation: none; } }
 
     header { margin-bottom: 1.1em; }
     h1 { font-size: 1.7em; font-weight: bold; letter-spacing: -0.015em; margin: 0 0 .15em; }
     .sub { color: var(--text-dark); margin: 0; }
-    .lede { color: var(--text-dark); margin: 0 0 2.2em; }
+    .lede { color: var(--text-dark); margin: 0 0 1.6em; }   /* intro paragraph under the header */
     .lede p { margin: 0 0 .9em; }
     .lede p:last-child { margin-bottom: 0; }
     .lede strong { color: var(--dark); font-weight: bold; }
+
     a { color: var(--link); text-decoration: inherit; }
     a:hover { text-decoration: underline; }
     code { font-family: var(--mono); background: var(--bg-subtle); padding: .05em .35em; border-radius: 3px; font-size: .92em; }
@@ -73,15 +75,37 @@
     .stage { display: grid; grid-template-columns: minmax(0, 1fr) 268px; gap: 2em; align-items: start; }
     @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
 
-    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--divider); background: var(--light); touch-action: none; display: block; }
-    .readout { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; margin-top: .7em; }
-    .readout #status { color: var(--text-dark); }
-    .readout #iterinfo { font-family: var(--mono); font-size: .86em; color: var(--dark); font-variant-numeric: tabular-nums; white-space: nowrap; }
-    canvas#loss { width: 100%; height: 64px; border: 1px solid var(--divider); background: var(--bg-subtle); margin-top: .7em; display: block; }
+    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--divider); border-radius: 8px; background: var(--light); touch-action: none; display: block; }
+    /* loss panel section subtitle (styled like LAYOUT / WALL / … via .label) */
+    .canvas-sub { margin-top: .9em; }
+    /* per-term loss graphs: one row each (label · own-scale sparkline); the
+       current value rides the playhead as a per-row tag (see .vtag below) */
+    .losspanel { margin-top: 0; position: relative; }   /* relative: the playhead spans the rows */
+    .lossrow { display: flex; align-items: center; gap: .7em; margin: .34em 0; }
+    .lossrow .lk { width: 3.4em; flex: none; color: var(--text-dark); }
+    .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--divider); border-radius: 6px; background: var(--light); display: block; }
+    .lossrow .spark polyline { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+    #sp_total { stroke: #66a1ff; } #sp_wall { stroke: #e08a5a; } #sp_area { stroke: #5aa469; }
+    #sp_lloyd { stroke: #8c7bd0; } #sp_topo { stroke: #c75d8f; }
+    /* vertical playhead marking the current iteration (replaces the plain iter text) */
+    .playhead { position: absolute; width: 0; border-left: 1px dotted rgba(20,20,20,.55); pointer-events: none; display: none; }
+    .playhead .tick { position: absolute; top: -2.15em; transform: translateX(-50%);
+      font-family: var(--mono); font-size: .76em; color: var(--light); background: var(--dark);
+      padding: .05em .45em; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .playhead .tick::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
+      border: 4px solid transparent; border-top-color: var(--dark); border-bottom: 0; }
+    /* per-row value tags ride the playhead, centered on the line (top set per row in JS);
+       each is a speech balloon with a downward tail in its own term colour (--c) */
+    .playhead .vtag { position: absolute; left: 0; transform: translate(-50%, -50%); color: var(--light); background: var(--c);
+      font-family: var(--mono); font-size: .72em; padding: .02em .34em; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .playhead .vtag::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
+      border: 4px solid transparent; border-top-color: var(--c); border-bottom: 0; }
+    #vt_total { --c: #66a1ff; } #vt_wall { --c: #e08a5a; } #vt_area { --c: #5aa469; }
+    #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
 
     .controls { font-size: .96em; }
     .group { margin-bottom: 1.5em; }
-    .group > .label { font-weight: bold; font-size: .76em; text-transform: uppercase; letter-spacing: .07em; color: var(--reduce-90); margin-bottom: .6em; }
+    .label { font-weight: bold; font-size: .76em; text-transform: uppercase; letter-spacing: .07em; color: var(--reduce-90); margin-bottom: .6em; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: 3.4em; flex: none; color: var(--text-dark); }
@@ -121,7 +145,6 @@
     .seg button:hover:not(.active) { background: var(--reduce-14); color: var(--dark); }
     .seg button.active { background: var(--dark); border-color: var(--dark); color: var(--light); }
 
-    .hint { color: var(--text-dark); font-size: .82em; margin: .5em 0 0; }
 
     .actions { display: flex; gap: .4em; margin-bottom: 1.5em; }
     .actions button {
@@ -130,8 +153,8 @@
       transition: background .12s, border-color .12s, opacity .12s;
     }
     .actions button:hover:not(:disabled) { background: var(--reduce-14); }
-    .actions button.primary { background: var(--featured); border-color: var(--featured); color: var(--light); }
-    .actions button.primary:hover:not(:disabled) { background: #000fc0; }
+    .actions button.primary { background: var(--dark); border-color: var(--dark); color: var(--light); }
+    .actions button.primary:hover:not(:disabled) { background: var(--dark); }
     .actions button:disabled { opacity: .4; cursor: default; }
 
     footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
@@ -140,54 +163,50 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>free-form-floor-plan-design-using-differentiable-voronoi-diagram</h1>
-    <p class="sub">via a differentiable Voronoi diagram — the Rust optimizer compiled to WebAssembly, running live in your browser</p>
+    <h1>Floor Plan Generation with Voronoi Diagram</h1>
+    <p class="sub">The Rust optimizer with central finite-difference gradients, ported by Claude and compiled to WASM, running live in browser</p>
   </header>
 
   <div class="lede">
     <p>
-      Pick a preset boundary, choose how many rooms and how the loss is weighted,
-      then watch Voronoi sites move under <strong>central finite-difference gradients</strong> and
-      <strong>AdamW</strong> until the cells settle into rooms. Every step — the Voronoi diagram,
-      the six loss components, the gradients — runs in-browser. No server.
-    </p>
-    <p>
-      Six weighted terms shape each plan: <strong>wall</strong> snaps every room edge to the
+      Four weighted terms shape each plan: <strong>wall</strong> snaps every room edge to the
       nearest boundary segment's angle (diagonal-friendly), <strong>area</strong> drives rooms
       toward their target sizes, <strong>Lloyd</strong> keeps cells compact, and
-      <strong>topology</strong> keeps each room a single piece. Drag the importance sliders to
-      rebalance them live, switch boundary A–E for a different footprint, or change the seed for
-      a fresh starting layout.
-    </p>
-    <p>
-      The optimizer is the same Rust code that runs natively — compiled to WebAssembly and
-      checked bit-for-bit against recorded Python golden traces — so this is the real engine
-      running in your browser, not a reimplementation.
+      <strong>topology</strong> keeps each room a single piece.
     </p>
   </div>
 
   <div class="stage">
     <div class="canvas-card">
       <canvas id="plan" width="520" height="520"></canvas>
-      <div class="readout"><span id="status">building…</span><span id="iterinfo"></span></div>
-      <canvas id="loss" width="520" height="70"></canvas>
+      <div class="label canvas-sub">Loss</div>
+      <!-- status text is no longer shown (the playhead + buttons convey run state);
+           kept hidden so the existing state/error setters never hit a null node -->
+      <span id="status" hidden></span>
+      <div class="losspanel" id="losspanel">
+        <div class="lossrow"><span class="lk">total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
+        <div class="lossrow"><span class="lk">wall</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
+        <div class="lossrow"><span class="lk">area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
+        <div class="lossrow"><span class="lk">lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
+        <div class="lossrow"><span class="lk">topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
+        <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
+      </div>
     </div>
 
     <div class="controls">
       <div class="actions">
-        <button id="run" class="primary">▶ Run</button>
-        <button id="pause" disabled>❚❚ Pause</button>
-        <button id="reset">⟲ Reset</button>
+        <button id="run" class="primary">Run</button>
+        <button id="reset">Reset</button>
       </div>
 
       <div class="group">
         <div class="label">Boundary</div>
         <div class="seg" id="presets">
-          <button data-mode="shape_a" class="active">A</button>
+          <button data-mode="shape_a">A</button>
           <button data-mode="shape_b">B</button>
           <button data-mode="shape_c">C</button>
           <button data-mode="shape_d">D</button>
-          <button data-mode="shape_e">E</button>
+          <button data-mode="shape_e" class="active">E</button>
         </div>
       </div>
 
@@ -199,27 +218,27 @@
       </div>
 
       <div class="group">
-        <div class="label">Plan view</div>
-        <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+        <div class="label">Wall</div>
+        <div class="row"><label>width</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
       </div>
 
       <div class="group">
-        <div class="label">Loss importance (0–1)</div>
+        <div class="label">Loss weight (0–1)</div>
         <div class="row"><label>wall</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="0.70"><span class="val" id="w_wall_v">0.70</span></div>
         <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
         <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
         <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
-        <p class="hint">relative importance per term — equal values ⇒ equal weight at the start. Each is divided by a fixed per-term scale before the optimizer. The <code>wall</code> term aligns each room's walls to the nearest boundary edge's angle (diagonal-friendly).</p>
       </div>
 
       <div class="group">
         <div class="label">Optimization</div>
         <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
         <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
-        <div class="row"><label>seed</label><input id="seed" type="number" min="0" step="1" value="777"></div>
+        <div class="row"><label>seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
       </div>
     </div>
   </div>
+
 </div>
 
 <script type="module">
@@ -230,11 +249,11 @@ const R = 1.18; // normalized boundaries fit within radius 1
 
 const plan = document.getElementById('plan');
 const pctx = plan.getContext('2d');
-const lossCv = document.getElementById('loss');
-const lctx = lossCv.getContext('2d');
 const $ = id => document.getElementById(id);
+// per-term loss graphs: 'total' + the 4 weighted terms, each its own y-scale
+const LOSS_TERMS = ['total', 'wall', 'area', 'lloyd', 'topo'];
 
-let CW = 520, CH = 520, LW = 520, LH = 64;    // CSS-pixel drawing dims (set by fitCanvases)
+let CW = 520, CH = 520;                        // plan-canvas CSS-pixel dims (set by fitCanvases)
 let lastFrame = null;                          // last rendered cell-frame, for resize redraw
 let wallWidth = 0.02;                          // wall thickness (normalized half-width); JS-only render param
 // per-frame fit transform: center the plan in the canvas and scale it to fill
@@ -252,28 +271,24 @@ function fitCanvases() {
   plan.width = Math.round(CW * dpr);
   plan.height = Math.round(CH * dpr);
   pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const lr = lossCv.getBoundingClientRect();
-  LW = Math.max(1, Math.round(lr.width));
-  LH = Math.max(1, Math.round(lr.height));
-  lossCv.width = Math.round(LW * dpr);
-  lossCv.height = Math.round(LH * dpr);
-  lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // the loss graphs are SVG (viewBox-scaled) — no DPR backing-store sizing needed
 }
 function redraw() {
   fitCanvases();
   if (lastFrame) drawFrame(lastFrame);
   else clearPlan();
-  drawLoss();
+  drawSparks();
 }
 let resizeTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
 
-let mode = 'shape_a';     // active preset shape
+let mode = 'shape_e';     // active preset shape
 let built = false;        // the worker holds an optimizer for the current params
 let running = false;
 let paused = false;
 let maxIters = 300;
-let lossHist = [];
+const hist = { total: [], wall: [], area: [], lloyd: [], topo: [] };
+const clearHist = () => { for (const t in hist) hist[t].length = 0; };
 let gen = 0, curGen = 0;  // build generation; frames from a superseded build are dropped
 
 // The optimizer lives in a Web Worker, so every wasm step runs OFF the main
@@ -281,7 +296,7 @@ let gen = 0, curGen = 0;  // build generation; frames from a superseded build ar
 const worker = new Worker('./worker.js', { type: 'module' });
 
 // ---------- inputs ----------
-const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr'];
+const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr','seed'];
 const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo']);
 // Shared slider -> readout formatter (used by the live listeners and applyPreset).
 function fmtVal(id, v) {
@@ -422,12 +437,13 @@ worker.onmessage = (e) => {
       break;
     case 'frame':
       lastFrame = m.frame;
-      drawFrame(m.frame);
       if (m.mode === 'preview') {
         $('status').textContent = mode + ' · ready to Run';
+        clearHist(); pushLoss(m.frame);   // seed the panel with iter-0 values (graphs fill on Run)
       } else {
-        lossHist.push(m.frame.loss); drawLoss();
+        pushLoss(m.frame);
       }
+      drawFrame(m.frame);                 // after pushLoss, so the playhead value tags read the current hist
       break;
     case 'done':
       running = false; paused = false; setButtons();
@@ -466,7 +482,7 @@ const PRESETS = {
     roomRatios: [0.116, 0.266, 0.316, 0.116, 0.186],
     wall: 0.02,
     w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
-    iters: 1000, lr: 0.005, seed: 777,
+    iters: 500, lr: 0.005, seed: 3764,
   },
   // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
   shape_d: {
@@ -474,7 +490,7 @@ const PRESETS = {
     roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
     wall: 0.02,
     w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
-    iters: 1000, lr: 0.005, seed: 777,
+    iters: 500, lr: 0.005, seed: 2153,
   },
   // E — orthogonal runs with two diagonal walls, 6 rooms (user preset, 2026-06).
   shape_e: {
@@ -482,7 +498,7 @@ const PRESETS = {
     roomRatios: [0.13, 0.11, 0.21, 0.20, 0.11, 0.24],  // normalized shares 13/11/21/20/11/24%
     wall: 0.02,
     w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
-    iters: 1000, lr: 0.005, seed: 777,
+    iters: 500, lr: 0.005, seed: 4971,
   },
 };
 
@@ -498,7 +514,7 @@ function applyPreset(mode) {
   set('wall', p.wall);
   set('w_wall', p.w_wall); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
   set('iters', p.iters); set('lr', p.lr);
-  $('seed').value = p.seed;
+  set('seed', p.seed);
   $('rooms').value = p.rooms; $('rooms_v').textContent = fmtVal('rooms', p.rooms);
   renderRoomAreas();                  // regenerates area_i sliders + resets roomRatios to equal split
   roomRatios = p.roomRatios.slice();  // override with the preset's per-room weights
@@ -574,21 +590,75 @@ function drawFrame(f) {
   // 3) sites — tiny faint dots (the Voronoi generators)
   pctx.fillStyle = 'rgba(0,0,0,0.4)';
   for (const [x, y] of f.sites) { pctx.beginPath(); pctx.arc(nx(x), ny(y), 1.4, 0, 7); pctx.fill(); }
-  $('iterinfo').textContent = `iter ${f.iteration} · loss ${f.loss.toFixed(3)}`;
+  movePlayhead(f.iteration);   // the current-iteration playhead replaces the old iter/loss text
 }
 
-function drawLoss() {
-  const W = LW, H = LH;
-  lctx.clearRect(0, 0, W, H);
-  if (lossHist.length < 2) return;
-  const lo = Math.min(...lossHist), hi = Math.max(...lossHist), span = hi - lo || 1;
-  lctx.beginPath();
-  lossHist.forEach((v, i) => {
-    const x = i / (maxIters - 1) * W, y = H - 6 - (v - lo) / span * (H - 12);
-    i ? lctx.lineTo(x, y) : lctx.moveTo(x, y);
-  });
-  lctx.strokeStyle = '#66a1ff'; lctx.lineWidth = 1.5; lctx.stroke();
+// Redraw every per-term sparkline. Each graph normalizes to its OWN min/max so
+// a small term (topo) still shows its shape next to a large one. (The current
+// value is shown by the per-row tags on the playhead — see movePlayhead.)
+function drawSparks() {
+  const den = Math.max(1, maxIters - 1);
+  for (const t of LOSS_TERMS) {
+    const h = hist[t], pl = $('sp_' + t);
+    if (h.length < 2) { pl.removeAttribute('points'); continue; }
+    const lo = Math.min(...h), hi = Math.max(...h), span = hi - lo || 1;
+    pl.setAttribute('points', h.map((v, i) => {
+      const x = i / den * 100;                 // viewBox is 0..100 wide
+      const y = 23 - (v - lo) / span * 22;     // 0..24 tall, 1px top/bottom pad
+      return x.toFixed(2) + ',' + y.toFixed(2);
+    }).join(' '));
+  }
 }
+// Record one frame's per-term losses (total + the 4 weighted terms) and redraw.
+function pushLoss(f) {
+  hist.total.push(f.loss);
+  hist.wall.push(f.wall);
+  hist.area.push(f.area);
+  hist.lloyd.push(f.lloyd);
+  hist.topo.push(f.topo);
+  drawSparks();
+}
+
+// Position the vertical playhead at the current iteration and label it. Reads the
+// spark boxes' live geometry, so it stays aligned across resizes / column widths.
+function movePlayhead(iter) {
+  const ph = $('playhead'), tick = $('tick');
+  const pr = $('losspanel').getBoundingClientRect();
+  const first = $('sp_total').closest('.spark').getBoundingClientRect();
+  const last = $('sp_topo').closest('.spark').getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, iter / Math.max(1, maxIters - 1)));
+  ph.style.display = 'block';
+  ph.style.left = (first.left - pr.left) + frac * first.width + 'px';
+  ph.style.top = (first.top - pr.top) + 'px';
+  ph.style.height = (last.bottom - first.top) + 'px';
+  tick.textContent = 'iter ' + iter;
+  clampBubble(tick, frac, first.width, false);
+  // value tags ride the line, one per row at its spark's vertical center, showing
+  // that term's current value; clamped to stay inside the graph (tail tracks the line)
+  for (const t of LOSS_TERMS) {
+    const tag = $('vt_' + t);
+    const r = $('sp_' + t).closest('.spark').getBoundingClientRect();
+    tag.style.top = (r.top + r.height / 2 - first.top) + 'px';
+    tag.textContent = hist[t].length ? hist[t][hist[t].length - 1].toFixed(3) : '';
+    clampBubble(tag, frac, first.width, true);
+  }
+}
+// Keep a speech bubble (centered on the line at playhead-local x=0) inside the graph
+// [0..w]: clamp its body to the nearest edge once it would overflow, and point its
+// tail (--tail-x) back at the line so only the tail moves past that point.
+function clampBubble(el, frac, w, vertical) {
+  const half = el.offsetWidth / 2;
+  const center = Math.max(-frac * w + half, Math.min((1 - frac) * w - half, 0));
+  const c = center - half;                       // px shift from the natural left:0 position
+  el.style.transform = vertical ? 'translate(' + c + 'px, -50%)' : 'translateX(' + c + 'px)';
+  // the tail tracks the line, but stays within the bubble (4px = the triangle's half-width)
+  // so it never hangs off the edge; once clamped it ends up flush in a bottom corner
+  el.style.setProperty('--tail-x', Math.max(4, Math.min(el.offsetWidth - 4, -c)) + 'px');
+  // square that bottom corner so the tail joins the bubble flush (no gap vs the rounding)
+  el.style.borderBottomLeftRadius = center > 0 ? '0' : '';
+  el.style.borderBottomRightRadius = center < 0 ? '0' : '';
+}
+function hidePlayhead() { $('playhead').style.display = 'none'; }
 
 // ---------- run loop ----------
 function stop() {
@@ -600,35 +670,33 @@ function stop() {
   setButtons();
 }
 
+// One Run / Pause / Resume toggle (the separate Pause button is merged in here).
 function setButtons() {
-  $('run').textContent = paused ? '▶ Resume' : '▶ Run';
-  $('run').disabled = running;
-  $('pause').disabled = !running;
+  $('run').textContent = running ? 'Pause' : (paused ? 'Resume' : 'Run');
 }
 
 $('run').onclick = () => {
-  if (paused && built) {                 // resume mid-run
+  if (running) {                         // running → pause
+    running = false; paused = true; setButtons();
+    $('status').textContent = 'paused';
+    worker.postMessage({ cmd: 'pause' });
+    return;
+  }
+  if (paused && built) {                 // paused → resume
     paused = false; running = true; setButtons();
     $('status').textContent = mode + ' · optimizing…';
     worker.postMessage({ cmd: 'resume' });
     return;
   }
-  lossHist = [];                         // fresh run
+  clearHist();                           // fresh run
   if (!sendBuild('start')) return;
   running = true; paused = false; setButtons();
   $('status').textContent = mode + ' · optimizing…';
 };
 
-$('pause').onclick = () => {
-  if (!running) return;
-  running = false; paused = true; setButtons();
-  $('status').textContent = 'paused';
-  worker.postMessage({ cmd: 'pause' });
-};
-
 $('reset').onclick = () => {
   stop();
-  lossHist = []; drawLoss(); $('iterinfo').textContent = '';
+  clearHist(); drawSparks(); hidePlayhead();
   $('status').textContent = mode + ' · building…';
   sendBuild('preview');
 };
@@ -639,5 +707,6 @@ applyPreset(mode);  // load the default boundary's preset on first load (same as
 $('status').textContent = mode + ' · building…';
 sendBuild('preview');
 </script>
+
 </body>
 </html>

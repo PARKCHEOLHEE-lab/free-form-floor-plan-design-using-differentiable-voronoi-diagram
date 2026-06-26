@@ -251,6 +251,7 @@ pub struct LossWeights {
     pub w_cell: f64,
 }
 
+#[derive(Clone, Copy)]
 pub struct LossBreakdown {
     pub total: f32,
     pub wall: f32,

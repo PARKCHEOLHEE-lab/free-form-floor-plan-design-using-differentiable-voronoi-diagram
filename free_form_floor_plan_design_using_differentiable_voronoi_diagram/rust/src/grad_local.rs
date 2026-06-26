@@ -18,13 +18,36 @@
 
 use crate::loss::{
     compute_area_loss, compute_bb_loss, compute_cell_area_loss, compute_lloyd_loss,
-    compute_topology_loss, compute_wall_local_loss, rooms_group, LossWeights,
+    compute_topology_loss, compute_wall_local_loss, rooms_group, LossBreakdown, LossWeights,
 };
 use crate::voronoi::{compute_cells, site_neighbors};
 use geo::{MultiPolygon, Polygon};
 
-/// Sum the six loss components from already-built geometry, mirroring
+/// The six per-term loss components from already-built geometry, mirroring
 /// `floor_plan_loss`'s guards and summation order so the result is identical.
+fn breakdown_from(
+    cells: &[Polygon<f64>],
+    groups: &[Vec<&Polygon<f64>>],
+    unions: &[MultiPolygon<f64>],
+    sites: &[[f32; 2]],
+    target_areas: &[f64],
+    room_indices: &[usize],
+    w: &LossWeights,
+    boundary: &Polygon<f64>,
+) -> LossBreakdown {
+    let wall = if w.w_wall > 0.0 { compute_wall_local_loss(unions, boundary, w.w_wall) } else { 0.0 };
+    let area = if w.w_area > 0.0 { compute_area_loss(cells, target_areas, room_indices, w.w_area) } else { 0.0 };
+    let lloyd = if w.w_lloyd > 0.0 { compute_lloyd_loss(cells, sites, w.w_lloyd) } else { 0.0 };
+    let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
+    let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
+    let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
+    let total = wall + area + lloyd + topo + bb + cell;
+    LossBreakdown { total, wall, area, lloyd, topo, bb, cell }
+}
+
+/// Sum the six loss components from already-built geometry. Thin wrapper over
+/// `breakdown_from` — the hot finite-difference path only needs the scalar
+/// total, and `.total` uses the same left-to-right sum so it stays identical.
 fn total_from(
     cells: &[Polygon<f64>],
     groups: &[Vec<&Polygon<f64>>],
@@ -35,13 +58,7 @@ fn total_from(
     w: &LossWeights,
     boundary: &Polygon<f64>,
 ) -> f32 {
-    let wall = if w.w_wall > 0.0 { compute_wall_local_loss(unions, boundary, w.w_wall) } else { 0.0 };
-    let area = if w.w_area > 0.0 { compute_area_loss(cells, target_areas, room_indices, w.w_area) } else { 0.0 };
-    let lloyd = if w.w_lloyd > 0.0 { compute_lloyd_loss(cells, sites, w.w_lloyd) } else { 0.0 };
-    let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
-    let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
-    let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
-    wall + area + lloyd + topo + bb + cell
+    breakdown_from(cells, groups, unions, sites, target_areas, room_indices, w, boundary).total
 }
 
 /// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
@@ -81,7 +98,9 @@ pub struct LocalGradContext<'a> {
     base_cells: Vec<Polygon<f64>>,
     base_unions: Vec<MultiPolygon<f64>>,
     n_rooms: usize,
-    base_total: f32,
+    /// Per-term loss at the base (unperturbed) sites. `base_total()` reads its
+    /// `.total`; the per-term fields feed the demo's per-term loss graphs.
+    base_breakdown: LossBreakdown,
 }
 
 impl<'a> LocalGradContext<'a> {
@@ -95,7 +114,7 @@ impl<'a> LocalGradContext<'a> {
         let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let base_cells = compute_cells(sites, boundary, None).cells_sorted;
         let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0;
-        let (n_rooms, base_unions, base_total) = {
+        let (n_rooms, base_unions, base_breakdown) = {
             let groups = rooms_group(&base_cells, room_indices);
             let n_rooms = groups.len();
             // Edge-cancellation union (see module docs): the base per-room unions
@@ -105,17 +124,23 @@ impl<'a> LocalGradContext<'a> {
             } else {
                 Vec::new()
             };
-            let total = total_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary);
-            (n_rooms, unions, total)
+            let bd = breakdown_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary);
+            (n_rooms, unions, bd)
         };
         let neighbors = site_neighbors(&sites_f64, boundary);
-        LocalGradContext { boundary, target_areas, room_indices, w, neighbors, base_cells, base_unions, n_rooms, base_total }
+        LocalGradContext { boundary, target_areas, room_indices, w, neighbors, base_cells, base_unions, n_rooms, base_breakdown }
     }
 
     /// Total loss at the base (unperturbed) sites — must equal the global
     /// `floor_plan_loss` total.
     pub fn base_total(&self) -> f32 {
-        self.base_total
+        self.base_breakdown.total
+    }
+
+    /// Per-term loss at the base (unperturbed) sites — the components that sum
+    /// to `base_total()`. Used to stream the per-term loss graphs in the demo.
+    pub fn base_breakdown(&self) -> LossBreakdown {
+        self.base_breakdown
     }
 
     /// Central finite-difference gradient (same formula as

@@ -38,6 +38,12 @@ struct Frame {
     iteration: usize,
     /// loss at the sites *before* this step (matches the CLI/tensorboard log)
     loss: f32,
+    /// the four weighted per-term contributions that the demo graphs (they sum
+    /// to `loss`; the demo's bb/cell weights are 0 so those terms are omitted).
+    wall: f32,
+    area: f32,
+    lloyd: f32,
+    topo: f32,
     sites: Vec<(f32, f32)>,
     cells: Vec<Cell>,
     /// wall centerlines — the simplified room-boundary rings. The canvas strokes
@@ -130,7 +136,7 @@ impl WasmOpt {
             &self.weights,
             None,
         );
-        serde_wasm_bindgen::to_value(&self.geometry_frame(b.total)).unwrap()
+        serde_wasm_bindgen::to_value(&self.geometry_frame(&b)).unwrap()
     }
 }
 
@@ -178,16 +184,16 @@ impl WasmOpt {
             &self.room_indices,
             &self.weights,
         );
-        let pre_step_loss = ctx.base_total();
+        let pre_step_breakdown = ctx.base_breakdown();
         let grads = ctx.gradients(&self.sites);
         self.opt.step(&mut self.sites, &grads);
         // geometry AFTER the step (matches the GIF frame-order fix in run.rs),
-        // tagged with the pre-step loss
-        self.geometry_frame(pre_step_loss)
+        // tagged with the pre-step loss breakdown (its .total is what the CLI logs)
+        self.geometry_frame(&pre_step_breakdown)
     }
 
-    /// Build a Frame from the current sites + a given loss value.
-    fn geometry_frame(&self, loss: f32) -> Frame {
+    /// Build a Frame from the current sites + a given loss breakdown.
+    fn geometry_frame(&self, bd: &loss::LossBreakdown) -> Frame {
         // render_cells keeps EVERY piece of each cell ∩ boundary, so a cell that
         // splits across a concave boundary notch renders all its pieces instead
         // of leaving an uncovered gap (matches the Python renderer). The loss
@@ -233,7 +239,11 @@ impl WasmOpt {
 
         Frame {
             iteration: self.iteration,
-            loss,
+            loss: bd.total,
+            wall: bd.wall,
+            area: bd.area,
+            lloyd: bd.lloyd,
+            topo: bd.topo,
             sites: self.sites.iter().map(|s| (s[0], s[1])).collect(),
             cells,
             walls,
@@ -303,7 +313,8 @@ mod tests {
             777,
             1e-2,
         );
-        let f = opt.geometry_frame(0.0);
+        let b = loss::floor_plan_loss(&opt.sites, &opt.boundary, &opt.target_areas, &opt.room_indices, &opt.weights, None);
+        let f = opt.geometry_frame(&b);
         assert!(!f.walls.is_empty(), "frame exposes no wall centerlines");
         for ring in &f.walls {
             assert!(ring.len() >= 4, "wall centerline ring too short: {}", ring.len());
