@@ -19,6 +19,19 @@ This project is a naive implementation of the paper [Free-form Floor Plan Design
   </i>
 </p>
 
+# In-browser demo
+
+A live WebAssembly build of the Rust optimizer — pick a boundary, tune the rooms and loss weights, and watch the Voronoi cells settle into rooms in real time, with each weighted loss term graphed live.
+
+<p align="center">
+    <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/web/preset-e-demo.gif" width="80%">
+</p>
+<p align="center" color="gray">
+  <i>
+  Preset E optimizing live in the browser (Rust compiled to WASM)
+  </i>
+</p>
+
 # Implementations
 
 | Directory | What it is |
