@@ -1,6 +1,8 @@
 import time
+import math
 import torch
 import shapely
+import numpy as np
 import multiprocessing
 
 from typing import List, Callable
@@ -22,7 +24,71 @@ def runtime_calculator(func: Callable) -> Callable:
 
 class FloorPlanLoss(torch.autograd.Function):
     @staticmethod
-    def compute_wall_loss(rooms_group: List[List[geometry.Polygon]], w_wall: float = 1.0):
+    def _nearest_boundary_direction(mx, my, boundary):
+        # Unit direction (cos φ, sin φ) of the boundary segment nearest (mx, my), as
+        # f32. Computed by division — not atan2/cos/sin — so the rotated-L1 below uses
+        # only IEEE-correctly-rounded ops and stays f32-portable, mirroring
+        # rust/src/loss.rs::nearest_boundary_direction. At an axis-aligned segment
+        # (cx, cy) is exactly (±1, 0)/(0, ±1), so the rotated sum reduces to the plain
+        # taxicab length. The search is f64; only the returned direction is f32.
+        best_d2 = float("inf")
+        cx = np.float32(1.0)  # φ = 0 default (no usable segment)
+        cy = np.float32(0.0)
+        coords = boundary.exterior.coords
+        for k in range(len(coords) - 1):
+            ax, ay = coords[k]
+            bx, by = coords[k + 1]
+            ex = bx - ax
+            ey = by - ay
+            len2 = ex * ex + ey * ey
+            if len2 == 0.0:
+                continue  # a zero-length segment carries no orientation — skip it
+            t = ((mx - ax) * ex + (my - ay) * ey) / len2
+            if t < 0.0:
+                t = 0.0
+            elif t > 1.0:
+                t = 1.0
+            px = ax + t * ex
+            py = ay + t * ey
+            d2 = (mx - px) * (mx - px) + (my - py) * (my - py)
+            if d2 < best_d2:
+                best_d2 = d2
+                l = math.sqrt(len2)
+                cx = np.float32(ex / l)
+                cy = np.float32(ey / l)
+        return cx, cy
+
+    @staticmethod
+    def _ring_wall_local_sum(coords, boundary):
+        # One ring's rotated-L1 wall length, mirroring rust ring_wall_local_sum:
+        # f32 edge deltas, f64 edge midpoint, f32 per-edge rotated sum accumulated
+        # left to right. `coords` excludes the closing duplicate vertex.
+        n = len(coords)
+        if n == 0:
+            return np.float32(0.0)
+        tx = [np.float32(c[0]) for c in coords]
+        ty = [np.float32(c[1]) for c in coords]
+        s = np.float32(0.0)
+        for i in range(n):
+            j = (i + 1) % n  # torch.roll(t1, -1, 0)
+            dx = tx[i] - tx[j]  # f32
+            dy = ty[i] - ty[j]  # f32
+            mx = (coords[i][0] + coords[j][0]) * 0.5  # f64 midpoint
+            my = (coords[i][1] + coords[j][1]) * 0.5
+            c, sn = FloorPlanLoss._nearest_boundary_direction(mx, my, boundary)
+            du = dx * c + dy * sn  # edge rotated by −φ (f32)
+            dv = -dx * sn + dy * c
+            s = s + (np.abs(du) + np.abs(dv))
+        return s
+
+    @staticmethod
+    def compute_wall_loss(rooms_group: List[List[geometry.Polygon]], boundary: geometry.Polygon, w_wall: float = 1.0):
+        # Wall loss in the local boundary frame: every room-boundary edge is a
+        # rotated taxicab length measured against the nearest domain-boundary
+        # segment's orientation (diagonal-friendly). On an axis-aligned boundary
+        # every φ ≡ 0 (mod 90°), so it reduces to the plain taxicab length. Mirrors
+        # the Rust compute_wall_local_loss f32-for-f32 so the golden traces stay
+        # Python↔Rust parity-clean.
         loss_wall = 0.0
         for room_group in rooms_group:
             room_union = ops.unary_union(room_group)
@@ -32,14 +98,9 @@ class FloorPlanLoss(torch.autograd.Function):
                 room_union = [room_union]
 
             for room in room_union:
-                t1 = torch.tensor(room.exterior.coords[:-1])
-                t2 = torch.roll(t1, shifts=-1, dims=0)
-                loss_wall += torch.abs(t1 - t2).sum().item()
-
+                loss_wall += float(FloorPlanLoss._ring_wall_local_sum(list(room.exterior.coords)[:-1], boundary))
                 for interior in room.interiors:
-                    t1 = torch.tensor(interior.coords[:-1])
-                    t2 = torch.roll(t1, shifts=-1, dims=0)
-                    loss_wall += torch.abs(t1 - t2).sum().item()
+                    loss_wall += float(FloorPlanLoss._ring_wall_local_sum(list(interior.coords)[:-1], boundary))
 
         loss_wall = torch.tensor(loss_wall)
         loss_wall *= w_wall
@@ -139,6 +200,13 @@ class FloorPlanLoss(torch.autograd.Function):
         w_cell: float,
         save: bool = True,
     ) -> torch.Tensor:
+        # NOTE: the Rust port (rust/src/loss.rs) carries one extra loss term,
+        # `wall_local` — a local-frame wall ALIGNMENT penalty — that has no
+        # counterpart here. It is a Rust-only experimental term, so Python<->Rust
+        # parity holds only when w_wall_local = 0 (every recorded parity trace is
+        # generated with it off). Porting it would mean mirroring Rust's rotated-L1
+        # `ring_wall_local_sum` f32-for-f32; until then, do not rely on parity for
+        # w_wall_local > 0.
         cells = []
         walls = []
 
@@ -174,7 +242,7 @@ class FloorPlanLoss(torch.autograd.Function):
 
         loss_wall = torch.tensor(0.0)
         if w_wall > 0:
-            loss_wall = FloorPlanLoss.compute_wall_loss(rooms_group, w_wall=w_wall)
+            loss_wall = FloorPlanLoss.compute_wall_loss(rooms_group, boundary_polygon, w_wall=w_wall)
 
         loss_area = torch.tensor(0.0)
         if w_area > 0:

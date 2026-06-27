@@ -6,12 +6,11 @@ import random
 import datetime
 import numpy as np
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src import shape
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src.loss import FloorPlanLoss
-from free_form_floor_plan_design_using_differentiable_voronoi_diagram.src.generator import FloorPlanGenerator
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src import shape
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src.loss import FloorPlanLoss
+from free_form_floor_plan_design_using_differentiable_voronoi_diagram.python.src.generator import FloorPlanGenerator
 
 
 seed = 777
@@ -20,9 +19,9 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 
 configs = {
-    "shape": shape.ShapeA(),
+    "shape": shape.ShapeC(),
     "num_sites": 40,
-    "area_ratio": [0.5, 0.3, 0.1, 0.1],
+    "area_ratio": [0.4, 0.3, 0.2, 0.1],
     "w_wall": 2.5,
     "w_area": 20.0,
     "w_lloyd": 2.1,
@@ -38,7 +37,7 @@ configs = {
         os.path.join(
             __file__,
             "../../runs",
-            "shape_a",
+            "shape_c",
             datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m-%d-%Y__%H-%M-%S"),
         )
     ),

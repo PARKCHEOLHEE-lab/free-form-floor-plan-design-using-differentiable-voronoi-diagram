@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <title>Floor Plan Generation with Voronoi Diagram</title>
+  <style>
+    /* Self-hosted PT Sans (vendored, no CDN) — matches the reference site's
+       design system: PT Sans, flat surfaces (border + tint, no shadows or
+       gradients), em-based spacing. Room/plot colors stay semantic. */
+    @font-face {
+      font-family: "PT Sans";
+      src: local("PT Sans"), local("PTSans-Regular"), url("./fonts/PTSans-Regular.woff") format("woff");
+      font-weight: normal; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "PT Sans";
+      src: local("PT Sans Bold"), local("PTSans-Bold"), url("./fonts/PTSans-Bold.woff") format("woff");
+      font-weight: bold; font-style: normal; font-display: swap;
+    }
+
+    :root {
+      --font: "PT Sans", -apple-system, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --dark: #000;
+      --light: #fff;
+      --text-dark: #000;   /* match the reference site: body text is pure black */
+      --link: #66a1ff;
+      --featured: #0011e3;
+      --bg-subtle: #f7f7f8;
+      --divider: #e5e5e6;
+      --reduce-14: rgba(128, 128, 128, 0.14);
+      --reduce-30: rgba(128, 128, 128, 0.30);
+      --reduce-90: rgba(128, 128, 128, 0.90);
+    }
+
+    * { box-sizing: border-box; }
+    html { overflow-x: clip; }
+    body {
+      margin: 0;
+      background: var(--light);
+      color: var(--dark);
+      font-family: var(--font);
+      font-size: calc(0.76rem + 0.2vw);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    /* the reference keeps backgrounds flat even in dark mode */
+    @media (prefers-color-scheme: dark) { body { background: var(--light); color: var(--dark); } }
+
+    .wrap { max-width: 940px; margin: 0 auto; padding: 2.8em clamp(1.2em, 4vw, 2.4em) 3.4em; }
+
+    /* one restrained, staggered load reveal */
+    @keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
+    header, .lede, .stage, footer { animation: rise .55s cubic-bezier(.2, .7, .2, 1) both; }
+    .lede { animation-delay: .08s; }   /* intro paragraph under the header */
+    .stage { animation-delay: .14s; }
+    footer { animation-delay: .26s; }
+    @media (prefers-reduced-motion: reduce) { header, .lede, .stage, footer { animation: none; } }
+
+    header { margin-bottom: 1.1em; }
+    h1 { font-size: 1.7em; font-weight: bold; letter-spacing: -0.015em; margin: 0 0 .15em; }
+    .sub { color: var(--text-dark); margin: 0; text-align: justify; }
+    .lede { color: var(--text-dark); margin: 0 0 1.6em; text-align: justify; }   /* intro paragraph under the header */
+    .lede p { margin: 0 0 .9em; }
+    .lede p:last-child { margin-bottom: 0; }
+    .lede strong { color: var(--dark); font-weight: bold; }
+
+    a { color: var(--link); text-decoration: inherit; }
+    a:hover { text-decoration: underline; }
+    code { font-family: var(--mono); background: var(--bg-subtle); padding: .05em .35em; border-radius: 3px; font-size: .92em; }
+
+    .stage { display: grid; grid-template-columns: minmax(0, 1fr) 268px; gap: 2em; align-items: start; }
+    @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
+
+    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--divider); border-radius: 8px; background: var(--light); touch-action: none; display: block; }
+    /* loss panel section subtitle (styled like LAYOUT / WALL / … via .label) */
+    .canvas-sub { margin-top: .9em; }
+    /* per-term loss graphs: one row each (label · own-scale sparkline); the
+       current value rides the playhead as a per-row tag (see .vtag below) */
+    .losspanel { margin-top: 0; position: relative; }   /* relative: the playhead spans the rows */
+    .lossrow { display: flex; align-items: center; gap: .7em; margin: .34em 0; }
+    .lossrow .lk { width: 3.4em; flex: none; color: var(--text-dark); }
+    .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--divider); border-radius: 6px; background: var(--light); display: block; }
+    .lossrow .spark polyline { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+    #sp_total { stroke: #66a1ff; } #sp_wall { stroke: #e08a5a; } #sp_area { stroke: #5aa469; }
+    #sp_lloyd { stroke: #8c7bd0; } #sp_topo { stroke: #c75d8f; }
+    /* vertical playhead marking the current iteration (replaces the plain iter text) */
+    .playhead { position: absolute; width: 0; border-left: 1px dotted rgba(20,20,20,.55); pointer-events: none; display: none; }
+    .playhead .tick { position: absolute; top: -2.15em; transform: translateX(-50%);
+      font-family: var(--mono); font-size: .76em; color: var(--light); background: var(--dark);
+      padding: .05em .45em; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .playhead .tick::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
+      border: 4px solid transparent; border-top-color: var(--dark); border-bottom: 0; }
+    /* per-row value tags ride the playhead, centered on the line (top set per row in JS);
+       each is a speech balloon with a downward tail in its own term colour (--c) */
+    .playhead .vtag { position: absolute; left: 0; transform: translate(-50%, -50%); color: var(--light); background: var(--c);
+      font-family: var(--mono); font-size: .72em; padding: .02em .34em; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .playhead .vtag::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
+      border: 4px solid transparent; border-top-color: var(--c); border-bottom: 0; }
+    #vt_total { --c: #66a1ff; } #vt_wall { --c: #e08a5a; } #vt_area { --c: #5aa469; }
+    #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
+
+    .controls { font-size: .96em; }
+    .group { margin-bottom: 1.5em; }
+    .label { font-weight: bold; font-size: .76em; text-transform: uppercase; letter-spacing: .07em; color: var(--reduce-90); margin-bottom: .6em; }
+
+    .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
+    .row > label { width: 3.4em; flex: none; color: var(--text-dark); }
+    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: .85em; color: var(--dark); font-variant-numeric: tabular-nums; }
+
+    /* thin track + link-colored thumb (the reference's scrubber) */
+    input[type=range] {
+      -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0;
+      height: 4px; border-radius: 3px; background: var(--reduce-30); outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: var(--link); cursor: pointer; transition: transform .1s;
+    }
+    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.18); }
+    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 50%; background: var(--link); cursor: pointer; }
+
+    input[type=number] {
+      font-family: var(--mono); font-size: .85em; width: 4.6em; padding: .3em .4em;
+      border: 1px solid var(--reduce-30); border-radius: 4px; background: var(--light); color: var(--dark);
+    }
+    input[type=number]:focus { outline: none; border-color: var(--featured); }
+
+    /* room-ratio rows reuse the .row grid so their slider tracks line up exactly
+       with sites/rooms/wall/loss; the colour swatch sits in the 3.4em label slot. */
+    .roomareas { margin: .1em 0 .2em; }
+    .roomareas .row { margin: .32em 0; }
+    .roomareas .raswatch { width: 3.4em; flex: none; display: flex; align-items: center; justify-content: center; }
+    .roomareas .sw { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--reduce-30); flex: none; }
+
+    .seg { display: flex; flex-wrap: wrap; gap: .35em; }
+    .seg button {
+      flex: 1 1 auto; padding: .42em .5em; border: 1px solid var(--reduce-30); background: transparent;
+      border-radius: 4px; font: inherit; font-size: .85em; color: var(--text-dark); cursor: pointer;
+      transition: background .12s, border-color .12s, color .12s;
+    }
+    .seg button:hover:not(.active) { background: var(--reduce-14); color: var(--dark); }
+    .seg button.active { background: var(--dark); border-color: var(--dark); color: var(--light); }
+
+
+    .actions { display: flex; gap: .4em; margin-bottom: 1.5em; }
+    .actions button {
+      flex: 1; padding: .62em; border: 1px solid var(--reduce-30); background: transparent; border-radius: 4px;
+      font: inherit; font-weight: bold; color: var(--dark); cursor: pointer;
+      transition: background .12s, border-color .12s, opacity .12s;
+    }
+    .actions button:hover:not(:disabled) { background: var(--reduce-14); }
+    .actions button.primary { background: var(--dark); border-color: var(--dark); color: var(--light); }
+    .actions button.primary:hover:not(:disabled) { background: var(--dark); }
+    .actions button:disabled { opacity: .4; cursor: default; }
+
+    footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Floor Plan Generation with Voronoi Diagram</h1>
+    <p class="sub">The Rust optimizer with central finite-difference gradients, ported by Claude and compiled to WASM, running live in browser</p>
+  </header>
+
+  <div class="lede">
+    <p>
+      Four weighted terms shape each plan: <strong>wall</strong> snaps every room edge to the
+      nearest boundary segment's angle (diagonal-friendly), <strong>area</strong> drives rooms
+      toward their target sizes, <strong>Lloyd</strong> keeps cells compact, and
+      <strong>topology</strong> keeps each room a single piece.
+    </p>
+  </div>
+
+  <div class="stage">
+    <div class="canvas-card">
+      <canvas id="plan" width="520" height="520"></canvas>
+      <div class="label canvas-sub">Loss</div>
+      <!-- status text is no longer shown (the playhead + buttons convey run state);
+           kept hidden so the existing state/error setters never hit a null node -->
+      <span id="status" hidden></span>
+      <div class="losspanel" id="losspanel">
+        <div class="lossrow"><span class="lk">total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
+        <div class="lossrow"><span class="lk">wall</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
+        <div class="lossrow"><span class="lk">area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
+        <div class="lossrow"><span class="lk">lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
+        <div class="lossrow"><span class="lk">topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
+        <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="actions">
+        <button id="run" class="primary">Run</button>
+        <button id="reset">Reset</button>
+      </div>
+
+      <div class="group">
+        <div class="label">Boundary</div>
+        <div class="seg" id="presets">
+          <button data-mode="shape_a">A</button>
+          <button data-mode="shape_b">B</button>
+          <button data-mode="shape_c">C</button>
+          <button data-mode="shape_d">D</button>
+          <button data-mode="shape_e" class="active">E</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="label">Layout</div>
+        <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
+        <div class="row"><label>rooms</label><input id="rooms" type="range" min="2" max="8" step="1" value="5"><span class="val" id="rooms_v">5</span></div>
+        <div class="roomareas" id="roomareas"></div>
+      </div>
+
+      <div class="group">
+        <div class="label">Wall</div>
+        <div class="row"><label>width</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+      </div>
+
+      <div class="group">
+        <div class="label">Loss weight (0–1)</div>
+        <div class="row"><label>wall</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="0.70"><span class="val" id="w_wall_v">0.70</span></div>
+        <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
+        <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
+        <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
+      </div>
+
+      <div class="group">
+        <div class="label">Optimization</div>
+        <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
+        <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
+        <div class="row"><label>seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module">
+// matplotlib Accent colormap blended 50% over white — opaque pastel room fills
+// matching the reference look (the native renderer uses Accent at alpha 0.5).
+const COLORS = ['#bfe4bf', '#ded7ea', '#fee0c2', '#ffffcc', '#9cb6d8', '#f881bf', '#dfad8b', '#b3b3b3'];
+const R = 1.18; // normalized boundaries fit within radius 1
+
+const plan = document.getElementById('plan');
+const pctx = plan.getContext('2d');
+const $ = id => document.getElementById(id);
+// per-term loss graphs: 'total' + the 4 weighted terms, each its own y-scale
+const LOSS_TERMS = ['total', 'wall', 'area', 'lloyd', 'topo'];
+
+let CW = 520, CH = 520;                        // plan-canvas CSS-pixel dims (set by fitCanvases)
+let lastFrame = null;                          // last rendered cell-frame, for resize redraw
+let wallWidth = 0.02;                          // wall thickness (normalized half-width); JS-only render param
+// per-frame fit transform: center the plan in the canvas and scale it to fill
+// ~70% of the square (computed in drawFrame from the cell bbox = the boundary).
+let fitS = 1, fitCx = 0, fitCy = 0;
+const nx = x => CW / 2 + (x - fitCx) * fitS;  // normalized -> canvas (centered fit)
+const ny = y => CH / 2 - (y - fitCy) * fitS;  // flip y
+
+// Size each canvas backing store to its displayed size x devicePixelRatio so the
+// render stays crisp on HiDPI screens and when the column is wider than 520px;
+// the 2D context is scaled so all drawing stays in CSS-pixel coordinates.
+function fitCanvases() {
+  const dpr = window.devicePixelRatio || 1;
+  CW = CH = Math.max(1, Math.round(plan.getBoundingClientRect().width));
+  plan.width = Math.round(CW * dpr);
+  plan.height = Math.round(CH * dpr);
+  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // the loss graphs are SVG (viewBox-scaled) — no DPR backing-store sizing needed
+}
+function redraw() {
+  fitCanvases();
+  if (lastFrame) drawFrame(lastFrame);
+  else clearPlan();
+  drawSparks();
+}
+let resizeTimer = 0;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
+
+let mode = 'shape_e';     // active preset shape
+let built = false;        // the worker holds an optimizer for the current params
+let running = false;
+let paused = false;
+let maxIters = 300;
+const hist = { total: [], wall: [], area: [], lloyd: [], topo: [] };
+const clearHist = () => { for (const t in hist) hist[t].length = 0; };
+let gen = 0, curGen = 0;  // build generation; frames from a superseded build are dropped
+
+// The optimizer lives in a Web Worker, so every wasm step runs OFF the main
+// thread; the UI stays responsive and only renders the frames it streams back.
+const worker = new Worker('./worker.js', { type: 'module' });
+
+// ---------- inputs ----------
+const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr','seed'];
+const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo']);
+// Shared slider -> readout formatter (used by the live listeners and applyPreset).
+function fmtVal(id, v) {
+  return (id === 'lr' || id === 'wall') ? (+v).toFixed(3)
+       : IMPORTANCE_IDS.has(id) ? (+v).toFixed(2)
+       : (+v % 1 ? (+v).toFixed(1) : String(+v));
+}
+for (const id of SLIDERS) {
+  const el = $(id), out = $(id + '_v');
+  el.addEventListener('input', () => { out.textContent = fmtVal(id, el.value); });
+}
+
+// The wall slider is a pure render parameter (canvas stroke width) — update the
+// JS value and redraw the last frame; no wasm round-trip.
+$('wall').addEventListener('input', () => {
+  wallWidth = +$('wall').value;
+  if (lastFrame) drawFrame(lastFrame);
+});
+
+// sites / rooms change the optimizer geometry (site count, room count), so rebuild
+// and preview live — no need to press Reset. Debounced so a drag rebuilds once on
+// settle (and stops any running optimization), not on every intermediate step.
+let rebuildTimer = 0;
+function rebuildPreviewSoon() {
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(() => {
+    stop();
+    $('status').textContent = mode + ' · building…';
+    sendBuild('preview');
+  }, 50);
+}
+$('sites').addEventListener('input', rebuildPreviewSoon);
+$('rooms').addEventListener('input', rebuildPreviewSoon);
+// seed reseeds the site initialization, so a committed seed change (Enter / blur /
+// spinner) rebuilds the preview too — no need to press Run or Reset.
+$('seed').addEventListener('change', rebuildPreviewSoon);
+
+// One 0..1 area-WEIGHT slider per room (regenerated when the room count changes).
+// roomRatios is the source of truth; params() normalizes weights -> shares, and
+// each row shows its live share %.
+let roomRatios = [];   // per-room area WEIGHT (0..1, independent); params() normalizes
+
+// One row per room: colour swatch (label slot) + a free 0..1 weight slider + a
+// readout of its live normalized share %. Sliders are independent — moving one
+// never moves another; only the share %s recompute.
+function renderRoomAreas() {
+  const k = +$('rooms').value;
+  roomRatios = Array.from({ length: k }, () => 1 / k);  // equal split to start
+  $('roomareas').innerHTML = Array.from({ length: k }, (_, i) =>
+    `<div class="row">` +
+    `<span class="raswatch"><i class="sw" style="background:${COLORS[i % COLORS.length]}"></i></span>` +
+    `<input id="area_${i}" type="range" min="0" max="1" step="0.01" value="${1 / k}">` +
+    `<span class="val" id="area_${i}_v">${Math.round(100 / k)}%</span></div>`
+  ).join('');
+  refreshRoomReadout();
+}
+
+// Refresh every room's normalized share %. Share is weight / sum(weights) — the
+// same value params() sends the optimizer — so editing any one slider updates
+// ALL the %s (display only; no slider moves).
+function refreshRoomReadout() {
+  const sum = roomRatios.reduce((a, b) => a + b, 0) || 1;
+  for (let i = 0; i < roomRatios.length; i++) {
+    const p = $('area_' + i + '_v');
+    if (p) p.textContent = Math.round(roomRatios[i] / sum * 100) + '%';
+  }
+}
+
+$('rooms').addEventListener('input', renderRoomAreas);
+renderRoomAreas();
+// delegated: each room slider sets only its own weight, then the %s refresh.
+$('roomareas').addEventListener('input', e => {
+  const el = e.target;
+  if (el.tagName !== 'INPUT' || !el.id.startsWith('area_')) return;
+  roomRatios[+el.id.slice(5)] = +el.value;
+  refreshRoomReadout();
+});
+
+// Per-term reference scales s_i = the iter-0 raw magnitude of each loss term
+// (measured with w=1, geomean over the 5 demo shapes x 8 seeds, 2026-06). They
+// turn the 0..1 sliders into relative IMPORTANCE knobs: the optimizer weight is
+// importance / s, so equal slider values give ~equal per-term contribution at the
+// start. wall is stable across shapes (x1.3), area is roughest (x2.7, because it
+// is a sum-then-square), and topo is never >0 in practice so its scale is a
+// judgment value (= one room split into two pieces).
+const LOSS_SCALES = { w_wall: 13.0, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0 };
+
+function params() {
+  const k = +$('rooms').value;
+  const weights = roomRatios.slice(0, k).map(r => Math.max(0, r));
+  const wsum = weights.reduce((a, b) => a + b, 0) || 1;
+  // Each loss slider is a 0..1 importance; divide by the per-term scale to get the
+  // raw weight the optimizer consumes. The default {0.70,0.10,0.12,0.06} ~back-maps
+  // to the old demo weights {5,20,2.1,1.5} (within slider rounding; the global
+  // factor is irrelevant under AdamW). bb, cell stay 0.
+  const imp = id => +$(id).value;
+  return {
+    sites: +$('sites').value,
+    ratios: Float64Array.from(weights, w => w / wsum),
+    w: [
+      imp('w_wall')  / LOSS_SCALES.w_wall,
+      imp('w_area')  / LOSS_SCALES.w_area,
+      imp('w_lloyd') / LOSS_SCALES.w_lloyd,
+      imp('w_topo')  / LOSS_SCALES.w_topo,
+      0, 0,
+    ],
+    iters: +$('iters').value,
+    lr: +$('lr').value,
+    seed: +$('seed').value | 0,
+  };
+}
+
+// Build (or rebuild) the optimizer for the selected preset in the worker.
+// `then` is what the worker does once built: 'preview' or 'start' (run).
+function sendBuild(then) {
+  const p = params();
+  maxIters = p.iters;
+  curGen = ++gen;
+  worker.postMessage({ cmd: 'build', gen: curGen, kind: 'shape', mode,
+    sites: p.sites, ratios: p.ratios, w: p.w, seed: p.seed, lr: p.lr, iters: p.iters, then });
+  return true;
+}
+
+// ---------- worker messages ----------
+worker.onmessage = (e) => {
+  const m = e.data;
+  // drop frames/results from a build that has since been superseded
+  if ((m.type === 'frame' || m.type === 'built' || m.type === 'done') && m.gen !== curGen) return;
+  switch (m.type) {
+    case 'ready':
+      break;
+    case 'error':
+      $('status').textContent = m.msg;
+      running = false; paused = false; setButtons();
+      break;
+    case 'built':
+      built = true;
+      break;
+    case 'frame':
+      lastFrame = m.frame;
+      if (m.mode === 'preview') {
+        $('status').textContent = mode + ' · ready to Run';
+        clearHist(); pushLoss(m.frame);   // seed the panel with iter-0 values (graphs fill on Run)
+      } else {
+        pushLoss(m.frame);
+      }
+      drawFrame(m.frame);                 // after pushLoss, so the playhead value tags read the current hist
+      break;
+    case 'done':
+      running = false; paused = false; setButtons();
+      $('status').textContent = 'done';
+      break;
+  }
+};
+
+// ---------- presets ----------
+// Per-boundary starting configuration. A boundary listed here loads that full
+// control set when selected (sites, rooms + per-room area shares, loss importance,
+// wall-alignment, optimization); a boundary with no entry only switches the shape
+// and keeps the current controls.
+const PRESETS = {
+  // A — orthogonal staircase boundary, 5 rooms tuned to fill each step (user preset, 2026-06).
+  shape_a: {
+    sites: 80, rooms: 5,
+    roomRatios: [0.13, 0.30, 0.23, 0.13, 0.21],  // normalized shares 13/30/23/13/21%
+    wall: 0.02,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    iters: 1000, lr: 0.005, seed: 777,
+  },
+  // B — orthogonal boundary, 7 rooms (user preset, 2026-06).
+  shape_b: {
+    sites: 80, rooms: 7,
+    roomRatios: [0.12, 0.12, 0.25, 0.16, 0.07, 0.12, 0.15],  // displayed shares 12/12/25/16/7/12/15%
+    wall: 0.02,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    iters: 500, lr: 0.005, seed: 4217,
+  },
+  // C — orthogonal boundary, 5 rooms (user preset, 2026-06).
+  shape_c: {
+    sites: 80, rooms: 5,
+    // displayed shares 12/27/32/12/19% — the image's integers sum to 102 (rounding),
+    // so the weights are normalized to sum 1.0 here to reproduce that exact readout.
+    roomRatios: [0.116, 0.266, 0.316, 0.116, 0.186],
+    wall: 0.02,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    iters: 500, lr: 0.005, seed: 3764,
+  },
+  // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
+  shape_d: {
+    sites: 80, rooms: 6,
+    roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
+    wall: 0.02,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    iters: 500, lr: 0.005, seed: 2153,
+  },
+  // E — orthogonal runs with two diagonal walls, 6 rooms (user preset, 2026-06).
+  shape_e: {
+    sites: 80, rooms: 6,
+    roomRatios: [0.13, 0.11, 0.21, 0.20, 0.11, 0.24],  // normalized shares 13/11/21/20/11/24%
+    wall: 0.02,
+    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    iters: 500, lr: 0.005, seed: 4971,
+  },
+};
+
+// Bulk-apply a boundary's preset to the controls (no-op + false when none). Sets
+// values + readouts directly (no synthetic input events) so the single sendBuild
+// in the click handler stays the only rebuild; rooms is special-cased because
+// changing the count regenerates the per-room sliders before the ratios can load.
+function applyPreset(mode) {
+  const p = PRESETS[mode];
+  if (!p) return false;
+  const set = (id, val) => { $(id).value = val; const o = $(id + '_v'); if (o) o.textContent = fmtVal(id, val); };
+  set('sites', p.sites);
+  set('wall', p.wall);
+  set('w_wall', p.w_wall); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
+  set('iters', p.iters); set('lr', p.lr);
+  set('seed', p.seed);
+  $('rooms').value = p.rooms; $('rooms_v').textContent = fmtVal('rooms', p.rooms);
+  renderRoomAreas();                  // regenerates area_i sliders + resets roomRatios to equal split
+  roomRatios = p.roomRatios.slice();  // override with the preset's per-room weights
+  p.roomRatios.forEach((r, i) => { const el = $('area_' + i); if (el) el.value = r; });
+  refreshRoomReadout();               // recompute share %s from the new roomRatios
+  return true;
+}
+
+$('presets').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  [...$('presets').children].forEach(x => x.classList.toggle('active', x === b));
+  mode = b.dataset.mode;
+  applyPreset(mode);  // load this boundary's preset, if it has one
+  stop();
+  $('status').textContent = mode + ' · building…';
+  sendBuild('preview');
+});
+
+// ---------- drawing ----------
+function clearPlan() { pctx.fillStyle = '#fff'; pctx.fillRect(0, 0, CW, CH); }
+
+function drawFrame(f) {
+  clearPlan();
+  // Center the plan in the canvas: the cells tile the whole boundary, so their
+  // bbox is the (stable) plan extent. Center it and scale to ~70% of the square.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const cell of f.cells) for (const [x, y] of cell.ring) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  if (minX <= maxX) {
+    fitCx = (minX + maxX) / 2; fitCy = (minY + maxY) / 2;
+    fitS = 0.70 * CW / (Math.max(maxX - minX, maxY - minY) || 1);
+  }
+  // 0) pastel room fills — each cell painted with its room colour (matplotlib
+  //    Accent over white); under the walls + gray cells.
+  for (const cell of f.cells) {
+    pctx.beginPath();
+    cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
+    pctx.closePath();
+    pctx.fillStyle = COLORS[cell.room % COLORS.length];
+    pctx.fill();
+  }
+  // 1) DOUBLE-LINE walls — stroke each room-boundary centerline black at the full
+  //    wall width (2·wallWidth), then white slightly narrower -> two black lines
+  //    with a white interior. The centerlines are CLOSED rings (only joins, no
+  //    caps), and the miter join renders the junctions cleanly.
+  // Wall stroke widths use a FIXED reference scale, not the per-preset fitS, so the
+  // same slider value renders at the same on-screen thickness for every boundary.
+  // (Each preset's plan fills ~70% of the canvas but has a different normalized
+  // bbox, so fitS varies and would make identical settings look thicker/thinner.)
+  // 1.45 ≈ the typical normalized plan extent across the demo presets.
+  const refS = 0.70 * CW / 1.45;
+  const fullPx = Math.max(1, 2 * wallWidth * refS);   // full wall width (2d) in CSS px
+  const lineP = 0.005 * refS;                          // black line thickness (0.005 normalized)
+  const strokeWalls = (style, w) => {
+    if (w <= 0) return;
+    pctx.strokeStyle = style; pctx.lineWidth = w;
+    for (const ring of (f.walls || [])) {
+      pctx.beginPath();
+      ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
+      pctx.closePath();
+      pctx.stroke();
+    }
+  };
+  pctx.lineJoin = 'miter'; pctx.miterLimit = 2; pctx.lineCap = 'butt';
+  strokeWalls('#111', fullPx);                  // outer = full wall width -> two black edges
+  strokeWalls('#fff', fullPx - 2 * lineP);      // inner white -> leaves the two black lines
+  // 2) faint gray Voronoi cells ON TOP — the centerline shows gray (same as the
+  //    cells) between the two black wall lines, plus the room subdivisions.
+  pctx.lineJoin = 'round'; pctx.lineCap = 'round';
+  pctx.strokeStyle = 'rgba(150,150,150,0.55)'; pctx.lineWidth = 0.7;
+  for (const cell of f.cells) {
+    pctx.beginPath();
+    cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
+    pctx.closePath();
+    pctx.stroke();
+  }
+  // 3) sites — tiny faint dots (the Voronoi generators)
+  pctx.fillStyle = 'rgba(0,0,0,0.4)';
+  for (const [x, y] of f.sites) { pctx.beginPath(); pctx.arc(nx(x), ny(y), 1.4, 0, 7); pctx.fill(); }
+  movePlayhead(f.iteration);   // the current-iteration playhead replaces the old iter/loss text
+}
+
+// Redraw every per-term sparkline. Each graph normalizes to its OWN min/max so
+// a small term (topo) still shows its shape next to a large one. (The current
+// value is shown by the per-row tags on the playhead — see movePlayhead.)
+function drawSparks() {
+  const den = Math.max(1, maxIters - 1);
+  for (const t of LOSS_TERMS) {
+    const h = hist[t], pl = $('sp_' + t);
+    if (h.length < 2) { pl.removeAttribute('points'); continue; }
+    const lo = Math.min(...h), hi = Math.max(...h), span = hi - lo || 1;
+    pl.setAttribute('points', h.map((v, i) => {
+      const x = i / den * 100;                 // viewBox is 0..100 wide
+      const y = 23 - (v - lo) / span * 22;     // 0..24 tall, 1px top/bottom pad
+      return x.toFixed(2) + ',' + y.toFixed(2);
+    }).join(' '));
+  }
+}
+// Record one frame's per-term losses (total + the 4 weighted terms) and redraw.
+function pushLoss(f) {
+  hist.total.push(f.loss);
+  hist.wall.push(f.wall);
+  hist.area.push(f.area);
+  hist.lloyd.push(f.lloyd);
+  hist.topo.push(f.topo);
+  drawSparks();
+}
+
+// Position the vertical playhead at the current iteration and label it. Reads the
+// spark boxes' live geometry, so it stays aligned across resizes / column widths.
+function movePlayhead(iter) {
+  const ph = $('playhead'), tick = $('tick');
+  const pr = $('losspanel').getBoundingClientRect();
+  const first = $('sp_total').closest('.spark').getBoundingClientRect();
+  const last = $('sp_topo').closest('.spark').getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, iter / Math.max(1, maxIters - 1)));
+  ph.style.display = 'block';
+  ph.style.left = (first.left - pr.left) + frac * first.width + 'px';
+  ph.style.top = (first.top - pr.top) + 'px';
+  ph.style.height = (last.bottom - first.top) + 'px';
+  tick.textContent = 'iter ' + iter;
+  clampBubble(tick, frac, first.width, false);
+  // value tags ride the line, one per row at its spark's vertical center, showing
+  // that term's current value; clamped to stay inside the graph (tail tracks the line)
+  for (const t of LOSS_TERMS) {
+    const tag = $('vt_' + t);
+    const r = $('sp_' + t).closest('.spark').getBoundingClientRect();
+    tag.style.top = (r.top + r.height / 2 - first.top) + 'px';
+    tag.textContent = hist[t].length ? hist[t][hist[t].length - 1].toFixed(3) : '';
+    clampBubble(tag, frac, first.width, true);
+  }
+}
+// Keep a speech bubble (centered on the line at playhead-local x=0) inside the graph
+// [0..w]: clamp its body to the nearest edge once it would overflow, and point its
+// tail (--tail-x) back at the line so only the tail moves past that point.
+function clampBubble(el, frac, w, vertical) {
+  const half = el.offsetWidth / 2;
+  const center = Math.max(-frac * w + half, Math.min((1 - frac) * w - half, 0));
+  const c = center - half;                       // px shift from the natural left:0 position
+  el.style.transform = vertical ? 'translate(' + c + 'px, -50%)' : 'translateX(' + c + 'px)';
+  // the tail tracks the line, but stays within the bubble (4px = the triangle's half-width)
+  // so it never hangs off the edge; once clamped it ends up flush in a bottom corner
+  el.style.setProperty('--tail-x', Math.max(4, Math.min(el.offsetWidth - 4, -c)) + 'px');
+  // square that bottom corner so the tail joins the bubble flush (no gap vs the rounding)
+  el.style.borderBottomLeftRadius = center > 0 ? '0' : '';
+  el.style.borderBottomRightRadius = center < 0 ? '0' : '';
+}
+function hidePlayhead() { $('playhead').style.display = 'none'; }
+
+// ---------- run loop ----------
+function stop() {
+  running = false; paused = false;
+  curGen = ++gen;                 // invalidate any in-flight frames from the prior build
+  worker.postMessage({ cmd: 'dispose' });
+  built = false;
+  lastFrame = null;
+  setButtons();
+}
+
+// One Run / Pause / Resume toggle (the separate Pause button is merged in here).
+function setButtons() {
+  $('run').textContent = running ? 'Pause' : (paused ? 'Resume' : 'Run');
+}
+
+$('run').onclick = () => {
+  if (running) {                         // running → pause
+    running = false; paused = true; setButtons();
+    $('status').textContent = 'paused';
+    worker.postMessage({ cmd: 'pause' });
+    return;
+  }
+  if (paused && built) {                 // paused → resume
+    paused = false; running = true; setButtons();
+    $('status').textContent = mode + ' · optimizing…';
+    worker.postMessage({ cmd: 'resume' });
+    return;
+  }
+  clearHist();                           // fresh run
+  if (!sendBuild('start')) return;
+  running = true; paused = false; setButtons();
+  $('status').textContent = mode + ' · optimizing…';
+};
+
+$('reset').onclick = () => {
+  stop();
+  clearHist(); drawSparks(); hidePlayhead();
+  $('status').textContent = mode + ' · building…';
+  sendBuild('preview');
+};
+
+fitCanvases();
+clearPlan();
+applyPreset(mode);  // load the default boundary's preset on first load (same as clicking it)
+$('status').textContent = mode + ' · building…';
+sendBuild('preview');
+</script>
+
+</body>
+</html>

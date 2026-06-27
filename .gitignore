@@ -3,3 +3,15 @@ __pycache__
 
 *.png
 runs/
+
+# agent session state
+.agents/
+
+# fixture-generation venv
+.venv-fixtures/
+
+# rust build artifacts
+**/target/
+
+# generated comparison artifacts (regenerate via comparison/README.md)
+free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/output/

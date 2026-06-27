@@ -1,0 +1,40 @@
+// Rust dev container — the second of two selectable configurations under
+// .devcontainer/ (VS Code shows a picker on "Dev Containers: Reopen in
+// Container"). Sibling: ../python/devcontainer.json
+//
+// The whole repo is bind-mounted (default workspace mount); the crate lives at
+// free_form_.../rust, pointed to via rust-analyzer.linkedProjects so the
+// extension loads it without re-rooting the workspace.
+{
+    "name": "voronoi-floorplan-rust",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    // No host bind mounts for gitconfig/ssh on purpose: VS Code copies the
+    // local .gitconfig into the container and forwards the running SSH agent
+    // automatically. That works on Windows/macOS/Linux without hardcoding a
+    // home path (no single env var covers all three) or a key filename (a
+    // bind mount of a missing ~/.ssh/id_rsa would block the container start).
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "editor.wordWrap": "wordWrapColumn",
+                "editor.wordWrapColumn": 120,
+                "terminal.integrated.shell.linux": "/bin/zsh",
+                "rust-analyzer.linkedProjects": [
+                    "free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/Cargo.toml"
+                ],
+                "rust-analyzer.check.command": "clippy"
+            },
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml",
+                "vadimcn.vscode-lldb",
+                "mhutchie.git-graph",
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    },
+    "postCreateCommand": "cargo fetch --manifest-path free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/Cargo.toml",
+    "remoteUser": "root"
+}

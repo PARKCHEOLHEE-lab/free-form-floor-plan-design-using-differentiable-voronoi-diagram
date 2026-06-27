@@ -1,0 +1,48 @@
+[package]
+name = "voronoi-floorplan"
+version = "0.1.0"
+edition = "2021"
+description = "Pure-Rust port of free-form floor plan design using a differentiable Voronoi diagram"
+license = "MIT"
+
+[lib]
+name = "voronoi_floorplan"
+
+[features]
+# `parallel` turns on rayon. Default-on so the native CLI/lib stay multi-threaded
+# as before. The in-browser wasm demo also enables it (the thread pool is
+# supplied by wasm-bindgen-rayon, see ../web), which fans the independent
+# gradient evaluations across Web Workers. A serial wasm build opts out with
+# --no-default-features.
+default = ["parallel"]
+parallel = ["dep:rayon"]
+
+# Cross-target dependencies — the geometry/optimization core, which also
+# compiles to wasm32 for the in-browser demo (see ../web).
+[dependencies]
+geo = "0.30"
+# Martinez-Rueda boolean ops in pure f64 (no coordinate re-quantization, so
+# clipped Voronoi neighbors keep bitwise-shared edges and unions weld exactly).
+# The 0.3.2 crates.io release pins geo-types 0.6; master moved to geo-types 0.7
+# but was never released, hence the pinned git rev.
+geo-booleanop = { git = "https://github.com/21re/rust-geo-booleanop", rev = "b9bbdbb34ebfa2aaeb99665842e64ede1696ed65" }
+rand = "0.8"
+rand_chacha = "0.3"
+serde_json = "1"
+voronoice = "0.2"
+# rayon powers the `parallel` feature on every target. On native it uses OS
+# threads; on wasm32 the thread pool is supplied by wasm-bindgen-rayon (../web)
+# and the build needs atomics + build-std.
+rayon = { version = "1", optional = true }
+
+# Native-only: the CLI binary and GIF/tfevents IO. The wasm build excludes these
+# and renders to a <canvas>, not a GIF.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = { version = "4", features = ["derive"] }
+crc32c = "0.6"
+gif = "0.13"
+tiny-skia = "0.11"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

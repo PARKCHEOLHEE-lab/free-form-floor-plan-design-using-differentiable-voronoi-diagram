@@ -4,10 +4,14 @@ repos:
     hooks:
       - id: black
         language_version: python3
+        # config no longer lives at the repo root, so point black/flake8 at it
+        # explicitly (pre-commit runs hooks from the repo root)
+        args: [--config, free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/pyproject.toml]
   - repo: https://github.com/pycqa/flake8
     rev: 7.0.0  # Use the latest version from their GitHub mirror
     hooks:
       - id: flake8
+        args: [--config, free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/.flake8]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
