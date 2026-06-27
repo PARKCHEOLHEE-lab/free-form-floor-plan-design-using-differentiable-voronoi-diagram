@@ -1,44 +1,44 @@
 # free-form-floor-plan-design-using-differentiable-voronoi-diagram
 
-This project is a naive implementation of the paper [Free-form Floor Plan Design using Differentiable Voronoi Diagram](https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&e=3&dl=0). The paper is based on the <b>differentiable Voronoi diagram</b>, but this repository uses `Shapely` and `Pytorch`. Specifically, PyTorch's autograd functionality for <b>numerical differentiation</b> is combined with Shapely's geometric operations to compute gradients. Also, the initialization method to assign room cells is different. I used the KMeans to converge the result faster than random initialization.
-<mark>The detailed process for this project is archived [__here__](https://parkcheolhee-lab.github.io/floor-plan-generation-with-voronoi-diagram/).</mark>
+Naive implementation of the paper [Free-form Floor Plan Design using Differentiable Voronoi Diagram](https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&e=3&dl=0). The paper differentiates the Voronoi diagram analytically; this repository approximates the gradients <b>numerically</b> instead (central finite differences) and seeds rooms with KMeans for faster convergence. The original ([`python/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/README.md)) pairs `Shapely` geometry with `PyTorch` autograd over those numerical gradients; a <b>pure-Rust port</b> ([`rust/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/README.md)) reproduces the same algorithm with hand-written finite differences verified equivalent and ~11× faster, and is compiled to <b>WebAssembly</b> for the live in-browser demo above ([`web/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/web/index.html)).
 
 <br>
 
-<div style="display: flex">
-    <p align="center">
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_a/11-26-2024__19-36-19/optimization-resized.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_b/11-26-2024__19-39-24/optimization-resized.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_c/11-26-2024__19-35-24/optimization-resized.gif" width=20%>　　
-        <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/runs/shape_duck/11-26-2024__19-34-06/optimization-resized.gif" width=20%>
-    </p>
-</div>
-<p align="center" color="gray">
-  <i>
-  Optimization processes for <br>shape_a.py · shape_b.py · shape_c.py · shape_duck
-  </i>
-</p>
-
-# In-browser demo
-
-A live WebAssembly build of the Rust optimizer — pick a boundary, tune the rooms and loss weights, and watch the Voronoi cells settle into rooms in real time, with each weighted loss term graphed live.
 
 <p align="center">
-    <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/web/preset-e-demo.gif" width="80%">
+    <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/web/preset-e-demo.gif" width="48%">
+    <img src="free_form_floor_plan_design_using_differentiable_voronoi_diagram/web/preset-b-demo.gif" width="48%">
 </p>
 <p align="center" color="gray">
   <i>
-  Preset E optimizing live in the browser (Rust compiled to WASM)
+  Optimizing live in the browser (Rust compiled to WASM)
   </i>
 </p>
 
-# Implementations
+# Structure
 
-| Directory | What it is |
-|---|---|
-| [`python/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/README.md) | The original implementation — PyTorch autograd over numerical differentiation + Shapely. |
-| [`rust/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/README.md) | A pure-Rust port — same algorithm, no GEOS/autograd, verified equivalent and ~11× faster. |
-| [`comparison/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/README.md) | Side-by-side timing and evolution-GIF comparison of the two. |
+```
+.
+├── .devcontainer/
+├── README.md
+└── free_form_floor_plan_design_using_differentiable_voronoi_diagram/
+    ├── python/
+    │   ├── src/
+    │   ├── examples/
+    │   └── runs/
+    ├── rust/
+    │   ├── src/
+    │   ├── examples/
+    │   ├── fixtures/
+    │   └── tests/
+    ├── web/
+    │   ├── src/
+    │   ├── index.html
+    │   └── worker.js
+    └── comparison/
+        ├── bench_python.py
+        └── make_html.py
+```
 
 # Installation
 
