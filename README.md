@@ -1,6 +1,6 @@
 # free-form-floor-plan-design-using-differentiable-voronoi-diagram
 
-Naive implementation of the paper [Free-form Floor Plan Design using Differentiable Voronoi Diagram](https://www.dropbox.com/scl/fi/culi7j1v14r9ax98rfmd6/2024_pg24_floorplan.pdf?rlkey=s5xwncuybrtsj5vyphhn61u0h&e=3&dl=0). The paper differentiates the Voronoi diagram analytically; this repository approximates the gradients <b>numerically</b> instead (central finite differences) and seeds rooms with KMeans for faster convergence. The original ([`python/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/README.md)) pairs `Shapely` geometry with `PyTorch` autograd over those numerical gradients; a <b>pure-Rust port</b> ([`rust/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/README.md)) reproduces the same algorithm with hand-written finite differences verified equivalent and ~11× faster, and is compiled to <b>WebAssembly</b> for the live in-browser demo above ([`web/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/web/index.html)).
+Naive implementation of the paper Free-form Floor Plan Design using Differentiable Voronoi Diagram. The paper differentiates the Voronoi diagram analytically; this approximates the gradients numerically instead (central finite-differences) and seeds rooms with KMeans for faster convergence. A Python implementation pairs `Shapely` geometry with `PyTorch` autograd over those numerical gradients; a Rust port reproduces the same algorithm with pure-Rust geometry (`geo` + `voronoice`) and no autograd — ~11× faster, compiled to <b>WASM</b> for the live [in-browser demo](https://parkcheolhee-lab.github.io/free-form-floor-plan-design-using-differentiable-voronoi-diagram/).
 
 <br>
 
@@ -11,34 +11,10 @@ Naive implementation of the paper [Free-form Floor Plan Design using Differentia
 </p>
 <p align="center" color="gray">
   <i>
-  Optimizing live in the browser (Rust compiled to WASM)
+  In-browser Demo
   </i>
 </p>
 
-# Structure
-
-```
-.
-├── .devcontainer/
-├── README.md
-└── free_form_floor_plan_design_using_differentiable_voronoi_diagram/
-    ├── python/
-    │   ├── src/
-    │   ├── examples/
-    │   └── runs/
-    ├── rust/
-    │   ├── src/
-    │   ├── examples/
-    │   ├── fixtures/
-    │   └── tests/
-    ├── web/
-    │   ├── src/
-    │   ├── index.html
-    │   └── worker.js
-    └── comparison/
-        ├── bench_python.py
-        └── make_html.py
-```
 
 # Installation
 
@@ -59,8 +35,3 @@ This repository ships **two** dev containers, selectable from the same "Reopen i
 4. When prompted at the bottom left on the VSCode, click `Reopen in Container` or use the command palette (F1) and select `Dev Containers: Reopen in Container`. VS Code lists both configurations — pick **voronoi-floorplan-python** or **voronoi-floorplan-rust**.
 5. VS Code will build the Docker container and set up the environment.
 6. Once the container is built and running, you're ready to start working with the project.
-
-See each implementation's own README for usage:
-[`python/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/python/README.md) ·
-[`rust/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/rust/README.md) ·
-[`comparison/`](free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/README.md)

@@ -1,0 +1,52 @@
+name: Deploy in-browser demo to Pages
+
+# Builds the WASM optimizer with wasm-pack and publishes web/ to GitHub Pages,
+# so the README's "in-browser demo" link is live. pkg/ is gitignored and built
+# here in CI (not committed). After merge to main it deploys automatically; to
+# preview from another branch run it manually (Actions → Run workflow, or
+# `gh workflow run pages.yml --ref <branch>`).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: free_form_floor_plan_design_using_differentiable_voronoi_diagram
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build the WASM demo
+        run: wasm-pack build web --target web --out-dir pkg
+      - name: Drop the build cache before publishing
+        run: rm -rf web/target
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: free_form_floor_plan_design_using_differentiable_voronoi_diagram/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
