@@ -6,7 +6,7 @@ fn anchors_stay_fixed_during_real_optimizer_steps() {
     let boundary = Polygon::new(LineString::from(vec![(-1.,-1.),(1.,-1.),(1.,1.),(-1.,1.),(-1.,-1.)]), vec![]);
     let mut opt = WasmOpt::build(boundary, 12, vec![0.5,0.5], LossWeights { w_lloyd: 1., ..Default::default() }, 777, 0.01);
     let circles = [[-0.7,0.,0.2],[0.6,0.1,0.4]];
-    opt.configure_program(&circles).unwrap();
+    opt.configure_program(&circles.concat(), &[], 0.1).unwrap();
     let fixed = [[-0.7_f32,0.],[0.6,0.1]];
     assert_eq!(&opt.sites[..2], &fixed, "the first site of each room must be its input center");
     assert_eq!(&opt.room_indices[..2], &[0,1]);
@@ -23,7 +23,9 @@ fn anchors_stay_fixed_during_real_optimizer_steps() {
     }
     assert_ne!(&opt.sites[2..], free_before, "free sites still optimize");
     for bad in [vec![], vec![[0.,0.,0.]], vec![[0.,0.,f64::NAN]], vec![[2.,0.,0.1]], vec![[0.9,0.,0.2]], vec![[0.,0.,0.1],[0.,0.,0.2]]] {
-        assert!(opt.configure_program(&bad).is_err(), "invalid input must be rejected: {bad:?}");
+        assert!(opt.configure_program(&bad.concat(), &[], 0.1).is_err(), "invalid input must be rejected: {bad:?}");
         assert_eq!(&opt.sites[..2], &fixed, "rejected input must leave the current optimizer intact");
     }
+    assert!(opt.configure_program(&[1.,2.], &[], 0.1).is_err());
+    assert!(opt.configure_program(&circles.concat(), &[0], 0.1).is_err());
 }

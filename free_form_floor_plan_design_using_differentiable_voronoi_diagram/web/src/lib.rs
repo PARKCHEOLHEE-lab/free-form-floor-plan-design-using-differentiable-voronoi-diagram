@@ -39,12 +39,13 @@ struct Frame {
     iteration: usize,
     /// loss at the sites *before* this step (matches the CLI/tensorboard log)
     loss: f32,
-    /// the four weighted per-term contributions that the demo graphs (they sum
-    /// to `loss`; the demo's bb/cell weights are 0 so those terms are omitted).
+    /// Legacy weighted contributions plus the room program's connection term.
+    /// The demo's bb/cell weights remain zero.
     wall: f32,
     area: f32,
     lloyd: f32,
     topo: f32,
+    connection: f32,
     sites: Vec<(f32, f32)>,
     cells: Vec<Cell>,
     /// wall centerlines — the simplified room-boundary rings. The canvas strokes
@@ -124,6 +125,11 @@ impl WasmOpt {
         serde_wasm_bindgen::to_value(&frame).unwrap()
     }
 
+    /// Install circles as x/y/r triples and dense room-index connection pairs.
+    pub fn set_program(&mut self, circles: &[f64], links: &[u32], door_width: f64) -> Result<(), JsValue> {
+        self.configure_program(circles, links, door_width).map_err(|e| JsValue::from_str(&e))
+    }
+
     /// The normalized boundary ring (`[[x,y],...]`) for drawing + canvas fit.
     pub fn boundary(&self) -> JsValue {
         let ring: Vec<(f64, f64)> = self.boundary.exterior().0.iter().map(|p| (p.x, p.y)).collect();
@@ -146,8 +152,12 @@ impl WasmOpt {
 }
 
 impl WasmOpt {
-    fn configure_program(&mut self, circles: &[[f64; 3]]) -> Result<(), String> {
-        let program = RoomProgram::new(&self.boundary, circles)?;
+    fn configure_program(&mut self, circles: &[f64], links: &[u32], door_width: f64) -> Result<(), String> {
+        if circles.len()%3!=0 || links.len()%2!=0 { return Err("Use complete x/y/r circles and room-index pairs.".into()); }
+        let circles: Vec<[f64;3]> = circles.chunks_exact(3).map(|c|[c[0],c[1],c[2]]).collect();
+        let links: Vec<[usize;2]> = links.chunks_exact(2).map(|c|[c[0] as usize,c[1] as usize]).collect();
+        let mut program = RoomProgram::new(&self.boundary, &circles)?;
+        program.set_connections(&links, door_width)?;
         let (sites, labels) = program.initialize(&self.boundary, self.sites.len(), self.seed)?;
         let area = self.boundary.unsigned_area();
         self.target_areas = program.ratios().iter().map(|r| area*r).collect();
@@ -267,6 +277,7 @@ impl WasmOpt {
             area: bd.area,
             lloyd: bd.lloyd,
             topo: bd.topo,
+            connection: bd.connection,
             sites: self.sites.iter().map(|s| (s[0], s[1])).collect(),
             cells,
             walls,

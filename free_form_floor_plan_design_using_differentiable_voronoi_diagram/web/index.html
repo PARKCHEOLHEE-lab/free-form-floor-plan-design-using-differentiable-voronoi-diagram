@@ -533,7 +533,7 @@ function sendBuild(then) {
 worker.onmessage = (e) => {
   const m = e.data;
   // drop frames/results from a build that has since been superseded
-  if ((m.type === 'frame' || m.type === 'built' || m.type === 'done') && m.gen !== curGen) return;
+  if (['frame','built','done','error'].includes(m.type) && m.gen !== undefined && m.gen !== curGen) return;
   switch (m.type) {
     case 'ready':
       break;

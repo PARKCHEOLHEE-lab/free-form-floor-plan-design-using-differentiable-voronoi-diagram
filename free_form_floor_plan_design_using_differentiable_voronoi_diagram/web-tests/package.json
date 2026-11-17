@@ -6,6 +6,7 @@
     "e2e": "node --test page.e2e.mjs"
   },
   "devDependencies": {
+    "monocart-coverage-reports": "3.2.1",
     "playwright": "1.59.1"
   }
 }

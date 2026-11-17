@@ -1,6 +1,6 @@
 //! User room intentions in the optimizer's boundary coordinates. Center sites are
 //! the first parameters and must be excluded from AdamW, including its decay.
-use geo::{Contains, Line, MultiPolygon, Point, Polygon, Simplify};
+use geo::{Area, ConvexHull, Contains, Line, MultiPoint, MultiPolygon, Point, Polygon, Simplify};
 
 pub struct RoomProgram {
     centers: Vec<[f32; 2]>,
@@ -106,6 +106,9 @@ impl RoomProgram {
                 return Err("Keep the whole circle inside the boundary.".into());
             }
             let center = [x as f32, y as f32];
+            if !boundary.contains(&Point::new(center[0] as f64,center[1] as f64)) {
+                return Err("Room center is too close to the boundary at engine precision.".into());
+            }
             if centers.contains(&center) {
                 return Err("Room centers must be distinct at engine precision.".into());
             }
@@ -146,6 +149,8 @@ impl RoomProgram {
                 .filter(|p| !self.centers.contains(p))
                 .take(count - self.centers.len()),
         );
+        let hull = MultiPoint::from(sites.iter().map(|p|(p[0] as f64,p[1] as f64)).collect::<Vec<_>>()).convex_hull();
+        if hull.unsigned_area()==0. { return Err("Use at least three non-collinear sites. Increase the site budget.".into()); }
         let labels = sites
             .iter()
             .map(|p| {
