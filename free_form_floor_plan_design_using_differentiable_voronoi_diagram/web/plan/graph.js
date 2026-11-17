@@ -4,6 +4,23 @@
 // work on this one structure, so two rooms that share a wall share its corners.
 import { openRing, segmentDistance, signedArea2 } from "./geom.js";
 
+/** Canonical corner edges and the room indices that own them. */
+export function wallEdges(g) {
+    const edges = new Map();
+    g.rooms.forEach((rings, room) => {
+        for (const ring of rings) for (let i=0;i<ring.length;i++) {
+            const x=ring[i], y=ring[(i+1)%ring.length];
+            if (x===y) continue;
+            const [a,b]=x<y?[x,y]:[y,x];
+            const key=`${a},${b}`;
+            if (!edges.has(key)) edges.set(key,{a,b,rooms:[]});
+            const edge=edges.get(key);
+            if (!edge.rooms.includes(room)) edge.rooms.push(room);
+        }
+    });
+    return [...edges.values()];
+}
+
 /**
  * Room outlines from optimizer cells. Cells of one room are welded by cancelling every edge
  * that two of its cells share, so the room keeps only its outline. Neighbouring cells share

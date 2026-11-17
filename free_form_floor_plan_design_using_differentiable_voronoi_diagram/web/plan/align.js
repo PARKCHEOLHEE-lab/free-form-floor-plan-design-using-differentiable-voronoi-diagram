@@ -1,18 +1,6 @@
 // Wall alignment, ported from voronoi/postprocess.py (after GSDiff's test-time post-process).
 import { openRing, segmentDistance } from "./geom.js";
-
-/** Every wall edge once, as a pair of corner ids. */
-function planEdges(g) {
-    const seen = new Map();
-    for (const rings of g.rooms)
-        for (const ring of rings)
-            for (let i = 0; i < ring.length; i++) {
-                const a = ring[i];
-                const b = ring[(i + 1) % ring.length];
-                if (a !== b) seen.set(a < b ? `${a},${b}` : `${b},${a}`, a < b ? [a, b] : [b, a]);
-            }
-    return [...seen.values()];
-}
+import { wallEdges } from "./graph.js";
 
 /** Orientation (mod 90 degrees) of the boundary segment nearest to `mid`, as the wall loss picks it. */
 function frameAngle(boundary, mid) {
@@ -35,7 +23,7 @@ function frameAngle(boundary, mid) {
 export function alignedShare(g, boundary) {
     let ok = 0;
     let total = 0;
-    for (const [a, b] of planEdges(g)) {
+    for (const {a, b} of wallEdges(g)) {
         const A = g.corners.get(a);
         const Bc = g.corners.get(b);
         const phi = frameAngle(boundary, [(A.x + Bc.x) / 2, (A.y + Bc.y) / 2]);
@@ -114,7 +102,7 @@ function cleanRing(ring) {
 
 function snapChains(g, boundary, tol) {
     const byFrame = new Map();
-    for (const [a, b] of planEdges(g)) {
+    for (const {a, b} of wallEdges(g)) {
         const A = g.corners.get(a);
         const B = g.corners.get(b);
         const phi = Math.round(frameAngle(boundary, [(A.x + B.x) / 2, (A.y + B.y) / 2]) * 1e6) / 1e6;
