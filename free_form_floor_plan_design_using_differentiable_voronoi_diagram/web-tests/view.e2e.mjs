@@ -106,3 +106,57 @@ test("top view: dragging pans the plan without turning it, and the wheel zooms b
         assert.equal((await camera(page)).zoom, 0.5, "zoom out stops at 0.5x");
     });
 });
+
+/** Pixels on the plan canvas in the light neutral greys of the 3D wall sides (205-250). */
+const wallSidePixels = (page) =>
+    page.evaluate(async () => {
+        const img = new Image();
+        img.src = document.getElementById("plan").toDataURL();
+        await img.decode();
+        const c = document.createElement("canvas");
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const px = ctx.getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 0; i < px.length; i += 4) {
+            const [r, g, b] = [px[i], px[i + 1], px[i + 2]];
+            if (Math.max(r, g, b) - Math.min(r, g, b) <= 2 && r >= 205 && r <= 250) n++;
+        }
+        return n;
+    });
+
+const near = (a, b, tol = 0.01) => Math.abs(a - b) <= tol;
+
+test("3D: the 3D icon turns the plan to isometric with standing walls, a drag rotates it, a double-click returns to isometric, and the icon goes back to the top view", { timeout: 120_000 }, async () => {
+    await withPage(async (page) => {
+        const flatGreys = await wallSidePixels(page);
+        await page.click("button[data-toggle='3d']");
+        let c = await camera(page);
+        assert.equal(c.view, "iso");
+        assert.ok(near(c.azimuth, -45) && near(c.elevation, 35.26), `isometric starts at ${c.azimuth}, ${c.elevation}`);
+        assert.equal(await page.$eval("button[data-toggle='3d']", (b) => b.getAttribute("aria-pressed")), "true");
+        // measured at 1145x820 on 2026-11-17: 6,850 such px in the top view (anti-aliased wall
+        // lines) and 71,560-75,086 in 3D; about 55% of the 3D count is the floor here
+        const standing = await wallSidePixels(page);
+        assert.ok(standing > 40_000 && standing > 4 * flatGreys, `wall sides: ${standing} grey px in 3D, ${flatGreys} in the top view`);
+
+        await page.mouse.move(600, 400);
+        await page.mouse.down();
+        await page.mouse.move(750, 400, { steps: 10 });
+        await page.mouse.up();
+        c = await camera(page);
+        assert.ok(Math.abs(c.azimuth + 45) > 30, `a 150 px drag turned the view only to azimuth ${c.azimuth}`);
+        for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -200);
+        assert.ok((await camera(page)).zoom > 1.5, "the wheel zooms in 3D too");
+
+        await page.mouse.dblclick(600, 400);
+        c = await camera(page);
+        assert.ok(near(c.azimuth, -45) && near(c.elevation, 35.26) && c.zoom === 1, `double-click left ${JSON.stringify(c)}`);
+
+        await page.click("button[data-toggle='3d']");
+        assert.deepEqual(await camera(page), { view: "plan", zoom: 1, azimuth: 0, elevation: 90 });
+        assert.equal(await page.$eval("button[data-toggle='3d']", (b) => b.getAttribute("aria-pressed")), "false");
+    });
+});

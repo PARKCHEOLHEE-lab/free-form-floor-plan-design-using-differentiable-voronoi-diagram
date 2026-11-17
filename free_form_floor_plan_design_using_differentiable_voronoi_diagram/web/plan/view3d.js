@@ -16,7 +16,7 @@ const TOP_POLAR = 1e-6;                         // straight down (OrbitControls 
 // at zoom 1, so one slider value looks equally thick on every boundary.
 const WALL_UNIT = 0.70 / (1.45 * FIT);          // wall unit in plan extents
 const WALL_LINE = 0.005;                        // each wall line's thickness, in wall units
-const WALL_HEIGHT = 0.1;                        // 3D wall height, in plan extents
+const WALL_HEIGHT = 0.05;                       // 3D wall height, in plan extents: cut low, so the rooms stay in view
 const CELL_LINE = { color: '#969696', opacity: 0.55 };
 const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
 

@@ -751,6 +751,12 @@ document.querySelector('button[data-toggle=losses]').addEventListener('click', e
   e.currentTarget.setAttribute('aria-pressed', String(!card.hidden));
   if (lastFrame) drawFrame(lastFrame);
 });
+// The 3D icon turns the plan to isometric (walls standing) and back to the top view; a
+// double-click on the plan returns to the mode's home view.
+document.querySelector('button[data-toggle="3d"]').addEventListener('click', e => {
+  view.setMode(view.mode === 'iso' ? 'plan' : 'iso');
+  e.currentTarget.setAttribute('aria-pressed', String(view.mode === 'iso'));
+});
 
 $('run').onclick = () => {
   if (running) {                         // running → pause
