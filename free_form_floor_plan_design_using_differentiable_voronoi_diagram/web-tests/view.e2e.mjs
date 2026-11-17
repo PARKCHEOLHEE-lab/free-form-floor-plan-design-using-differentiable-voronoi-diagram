@@ -214,3 +214,38 @@ test("gizmo: it sits in the top-right corner, its axes follow the camera, clicki
         assert.deepEqual(tip, { text: '"View from east"', opacity: 1 });
     });
 });
+
+test("gizmo drag: the gizmo has no background or border, a drag inside it rotates the view (also one that starts on an axis end), and a plain click on an end still turns the view", { timeout: 120_000 }, async () => {
+    await withPage(async (page) => {
+        const look = await page.$eval(".gizmo", (g) => {
+            const s = getComputedStyle(g);
+            return { background: s.backgroundColor, shadow: s.boxShadow, border: s.borderTopStyle };
+        });
+        assert.deepEqual(look, { background: "rgba(0, 0, 0, 0)", shadow: "none", border: "none" });
+
+        const g = await page.$eval(".gizmo", (e) => e.getBoundingClientRect().toJSON());
+        const [cx, cy] = [g.left + g.width / 2, g.top + g.height / 2];
+        const gizmoDrag = async ([x, y], [dx, dy]) => {
+            await page.mouse.move(x, y);
+            await page.mouse.down();
+            await page.mouse.move(x + dx, y + dy, { steps: 10 });
+            await page.mouse.up();
+        };
+        // in isometric no axis end sits at the centre
+        const start = await camera(page);
+        await gizmoDrag([cx, cy], [60, 0]);
+        let c = await camera(page);
+        assert.ok(Math.abs(c.azimuth - start.azimuth) > 15, `a 60 px drag in the gizmo turned the view to azimuth ${c.azimuth}`);
+
+        const e = await gizmoEnds(page);
+        const before = c;
+        await gizmoDrag([cx + e["+x"][0], cy + e["+x"][1]], [0, 40]);
+        c = await camera(page);
+        assert.ok(Math.abs(c.elevation - before.elevation) > 5, `a drag from the +X end left the elevation at ${c.elevation}`);
+        assert.ok(!near(c.azimuth, 90), "a drag that started on +X turned the view to the east instead of rotating it");
+
+        await page.click(".gizmo [data-axis='-y']");
+        c = await camera(page);
+        assert.ok(near(c.azimuth, 0) && near(c.elevation, 35.26), `a plain click on -Y gives ${JSON.stringify(c)}`);
+    });
+});

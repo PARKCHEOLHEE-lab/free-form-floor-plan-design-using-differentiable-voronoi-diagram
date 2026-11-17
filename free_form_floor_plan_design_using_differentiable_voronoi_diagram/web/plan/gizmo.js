@@ -21,13 +21,15 @@ const NAMES = {
     '+z': 'View from top',
 };
 const RADIUS = 28; // px from the gizmo's centre to an axis end
+const DRAG_START = 3; // px a pressed pointer moves before the press is a drag, not a click
 
 /**
  * Fill `el`, an empty box, with the gizmo: a line for each positive axis and a button for each
- * axis end (lettered for the positive ones). update(right, up, back) turns it to a camera, and a
- * click on an end calls onPick(axis).
+ * axis end (lettered for the positive ones). update(right, up, back) turns it to a camera. A
+ * click on an end calls onPick(axis); a drag anywhere in the gizmo, on an end too, calls
+ * onDrag(dx, dy) with the pointer's movement in px instead, as Blender's gizmo does.
  */
-export function createGizmo(el, { onPick }) {
+export function createGizmo(el, { onPick, onDrag }) {
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
     const half = el.clientWidth / 2;
@@ -51,6 +53,30 @@ export function createGizmo(el, { onPick }) {
         ends[axis] = end;
     }
     el.append(svg, ...Object.values(ends));
+
+    // A drag captures the pointer in `el`, so the click that ends it lands on `el`, not on an
+    // end (checked in Chromium 147, WebKit 26.4 and Firefox 148): a drag never turns the view.
+    let press = null; // { id, x, y, dragging } while a pointer is pressed in the gizmo
+    el.addEventListener('pointerdown', (e) => {
+        if (e.button === 0) press = { id: e.pointerId, x: e.clientX, y: e.clientY, dragging: false };
+    });
+    el.addEventListener('pointermove', (e) => {
+        if (press?.id !== e.pointerId) return;
+        const [dx, dy] = [e.clientX - press.x, e.clientY - press.y];
+        if (!press.dragging) {
+            if (Math.hypot(dx, dy) < DRAG_START) return;
+            press.dragging = true;
+            el.setPointerCapture(e.pointerId); // the drag goes on when the pointer leaves the gizmo
+        }
+        onDrag(dx, dy);
+        [press.x, press.y] = [e.clientX, e.clientY];
+    });
+    const release = (e) => {
+        if (press?.id === e.pointerId) press = null;
+    };
+    el.addEventListener('pointerup', release);
+    el.addEventListener('pointercancel', release);
+
     return {
         update(right, up, back) {
             axisTips(right, up, back, RADIUS).forEach((t, i) => {

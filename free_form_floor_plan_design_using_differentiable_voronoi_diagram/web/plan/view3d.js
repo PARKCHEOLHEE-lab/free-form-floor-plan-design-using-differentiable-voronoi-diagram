@@ -55,7 +55,7 @@ export function createPlanView(canvas, { gizmo } = {}) {
     let width = 1, height = 1;
     let fitted = null;                          // { cx, cy, extent } of the plan the camera is fitted to
     let lastPlan = null;
-    const axes = gizmo ? createGizmo(gizmo, { onPick: lookFrom }) : null;
+    const axes = gizmo ? createGizmo(gizmo, { onPick: lookFrom, onDrag: turn }) : null;
 
     const render = () => {
         renderer.render(scene, camera);
@@ -106,6 +106,13 @@ export function createPlanView(canvas, { gizmo } = {}) {
         renderer.setSize(width, height, false);
         frustum();
         render();
+    }
+
+    // A drag in the gizmo rotates the view as a right drag on the canvas does (OrbitControls'
+    // rate: a full turn per canvas height of pointer movement).
+    function turn(dx, dy) {
+        controls.rotateLeft((2 * Math.PI * dx) / canvas.clientHeight);
+        controls.rotateUp((2 * Math.PI * dy) / canvas.clientHeight);
     }
 
     // A gizmo click turns the view to that side, keeping the zoom: +Z looks straight down, the
