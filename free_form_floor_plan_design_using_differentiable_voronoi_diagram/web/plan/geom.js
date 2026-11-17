@@ -29,3 +29,14 @@ export function openRing(ring) {
     const n = ring.length;
     return n > 1 && ring[0][0] === ring[n - 1][0] && ring[0][1] === ring[n - 1][1] ? ring.slice(0, -1) : ring;
 }
+
+/** Whether point p lies inside the ring (ray casting). Shared with the plan renderer. */
+export function inside([px, py], ring) {
+    let hit = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i];
+        const [xj, yj] = ring[j];
+        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) hit = !hit;
+    }
+    return hit;
+}

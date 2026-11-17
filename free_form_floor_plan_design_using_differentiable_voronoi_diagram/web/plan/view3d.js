@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { strokeRing, strokeTriangles } from './stroke.js';
-import { signedArea2 } from './geom.js';
+import { signedArea2, inside } from './geom.js';
 import { createGizmo } from './gizmo.js';
 
 const MIN_ZOOM = 0.5, MAX_ZOOM = 8;
@@ -222,17 +222,6 @@ function fillTriangles(rings) {
             tris.push([all[i], all[j], all[k]]);
     }
     return tris;
-}
-
-/** Whether point p lies inside the ring (ray casting). */
-function inside([px, py], ring) {
-    let hit = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-        const [xi, yi] = ring[i];
-        const [xj, yj] = ring[j];
-        if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) hit = !hit;
-    }
-    return hit;
 }
 
 /** Centre and extent (the longer side) of the rings' bounding box, or null when empty. */
