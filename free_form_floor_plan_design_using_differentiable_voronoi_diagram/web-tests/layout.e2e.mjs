@@ -149,6 +149,37 @@ test("loss card: its 5 rows are in view at the start, and the Losses icon hides 
     }
 });
 
+test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s, Run's name follows Pause, and no browser title tooltip remains", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const tip = (el) =>
+                el.evaluate((b) => {
+                    const s = getComputedStyle(b, "::after");
+                    return { text: s.content, opacity: +s.opacity, left: parseFloat(s.left), width: b.getBoundingClientRect().width };
+                });
+            const tools = await page.$$(".tool");
+            assert.equal(tools.length, 9);
+            for (const tool of tools) {
+                const name = await tool.getAttribute("aria-label");
+                assert.equal((await tip(tool)).opacity, 0, `${name}: the tooltip shows before hover`);
+                await tool.hover();
+                await page.waitForTimeout(300);
+                const t = await tip(tool);
+                assert.equal(t.text, JSON.stringify(name), `${name}: tooltip reads ${t.text}`);
+                assert.equal(t.opacity, 1, `${name}: tooltip opacity ${t.opacity} after 0.3 s`);
+                assert.ok(t.left >= t.width, `${name}: tooltip starts at ${t.left}px, inside the ${t.width}px button`);
+                assert.equal(await tool.getAttribute("title"), null, `${name}: the browser's own title tooltip is still set`);
+            }
+            await page.click("#run");
+            await page.waitForTimeout(300);
+            assert.equal((await tip(await page.$("#run"))).text, '"Pause"', "Run's tooltip follows its label while running");
+        });
+    } finally {
+        proc.kill();
+    }
+});
+
 test("narrow: at 600px the toolbars, the loss card and each open panel stay inside the window", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {

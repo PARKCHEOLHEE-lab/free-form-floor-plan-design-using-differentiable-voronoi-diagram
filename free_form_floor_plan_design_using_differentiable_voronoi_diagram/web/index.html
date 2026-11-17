@@ -189,6 +189,13 @@
     .tool:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
     .tool.primary { background: var(--ui-fg); color: var(--light); }
     .tool.primary:hover { background: #262626; }
+    /* hover names: each icon's aria-label, shown to its right after a short pause (aria-label is
+       the one source, so Run's name follows Pause and Resume) */
+    .tool { position: relative; }
+    .tool::after { content: attr(aria-label); position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
+      padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light); font: 500 12px/1.2 var(--font);
+      white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
+    .tool:hover::after, .tool:focus-visible::after { opacity: 1; transition-delay: .12s; }
     .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
     .panel { display: none; top: 16px; left: 64px; width: min(300px, calc(100vw - 80px)); max-height: calc(100dvh - 32px);
@@ -257,17 +264,17 @@
 
     <!-- top-left: run controls, then one icon per settings panel -->
     <nav class="toolbar tl" aria-label="Run and settings">
-      <button id="run" class="tool primary" aria-label="Run" title="Run"><svg class="ic"><use href="#i-play"/></svg></button>
-      <button id="reset" class="tool" aria-label="Reset" title="Reset"><svg class="ic"><use href="#i-reset"/></svg></button>
+      <button id="run" class="tool primary" aria-label="Run"><svg class="ic"><use href="#i-play"/></svg></button>
+      <button id="reset" class="tool" aria-label="Reset"><svg class="ic"><use href="#i-reset"/></svg></button>
       <span class="sep"></span>
-      <button class="tool" data-open="boundary" aria-label="Boundary" title="Boundary"><svg class="ic"><use href="#i-boundary"/></svg></button>
-      <button class="tool" data-open="rooms" aria-label="Rooms" title="Rooms"><svg class="ic"><use href="#i-rooms"/></svg></button>
-      <button class="tool" data-open="weights" aria-label="Loss weights" title="Loss weights"><svg class="ic"><use href="#i-weights"/></svg></button>
-      <button class="tool" data-open="optimize" aria-label="Optimization" title="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
+      <button class="tool" data-open="boundary" aria-label="Boundary"><svg class="ic"><use href="#i-boundary"/></svg></button>
+      <button class="tool" data-open="rooms" aria-label="Rooms"><svg class="ic"><use href="#i-rooms"/></svg></button>
+      <button class="tool" data-open="weights" aria-label="Loss weights"><svg class="ic"><use href="#i-weights"/></svg></button>
+      <button class="tool" data-open="optimize" aria-label="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
       <span class="sep"></span>
-      <button class="tool" data-open="display" aria-label="Display" title="Display"><svg class="ic"><use href="#i-display"/></svg></button>
-      <button class="tool" data-toggle="3d" aria-label="3D view" title="3D view" aria-pressed="false"><svg class="ic"><use href="#i-3d"/></svg></button>
-      <button class="tool" data-toggle="losses" aria-label="Losses" title="Losses" aria-pressed="true"><svg class="ic"><use href="#i-losses"/></svg></button>
+      <button class="tool" data-open="display" aria-label="Display"><svg class="ic"><use href="#i-display"/></svg></button>
+      <button class="tool" data-toggle="3d" aria-label="3D view" aria-pressed="false"><svg class="ic"><use href="#i-3d"/></svg></button>
+      <button class="tool" data-toggle="losses" aria-label="Losses" aria-pressed="true"><svg class="ic"><use href="#i-losses"/></svg></button>
     </nav>
 
     <div class="controls">
@@ -728,8 +735,7 @@ function stop() {
 // One Run / Pause / Resume toggle (the separate Pause button is merged in here).
 function setButtons() {
   const label = running ? 'Pause' : (paused ? 'Resume' : 'Run');
-  $('run').setAttribute('aria-label', label);
-  $('run').title = label;
+  $('run').setAttribute('aria-label', label);   // also its hover name
   $('run').querySelector('use').setAttribute('href', running ? '#i-pause' : '#i-play');
 }
 
