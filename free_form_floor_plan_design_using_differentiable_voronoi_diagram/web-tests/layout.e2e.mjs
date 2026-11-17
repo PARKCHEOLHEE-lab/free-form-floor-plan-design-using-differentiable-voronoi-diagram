@@ -92,3 +92,27 @@ test("loss card: its 5 rows are in view at the start, and the Losses icon hides 
         proc.kill();
     }
 });
+
+test("narrow: at 600px the toolbars, the loss card and each open panel stay inside the window", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [600, 900], async (page) => {
+            const outside = (sel) =>
+                page.$$eval(sel, (es) =>
+                    es
+                        .filter((e) => e.getClientRects().length > 0)
+                        .map((e) => [e.className, e.getBoundingClientRect()])
+                        .filter(([, b]) => b.left < 0 || b.top < 0 || b.right > innerWidth || b.bottom > innerHeight)
+                        .map(([name, b]) => `${name} ${Math.round(b.left)},${Math.round(b.top)}-${Math.round(b.right)},${Math.round(b.bottom)}`),
+                );
+            assert.deepEqual(await outside(".toolbar, .losscard"), []);
+            for (const name of ["boundary", "rooms", "weights", "optimize", "display"]) {
+                await page.click(`button[data-open=${name}]`);
+                assert.deepEqual(await outside(".panel"), [], `${name} panel`);
+                await page.click(`button[data-open=${name}]`);
+            }
+        });
+    } finally {
+        proc.kill();
+    }
+});
