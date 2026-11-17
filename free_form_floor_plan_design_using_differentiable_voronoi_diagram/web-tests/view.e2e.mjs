@@ -86,21 +86,35 @@ const drawnCentre = (page) =>
         return [sx / n, sy / n];
     });
 
-test("top view: a right drag pans the plan without turning it, and the wheel zooms but stops at 0.5x and 8x", { timeout: 120_000 }, async () => {
+/** Drag on open canvas (away from the toolbar, the loss card and the gizmo) with one button. */
+async function drag(page, button, [dx, dy], { shift = false } = {}) {
+    if (shift) await page.keyboard.down("Shift");
+    await page.mouse.move(600, 400);
+    await page.mouse.down({ button });
+    await page.mouse.move(600 + dx, 400 + dy, { steps: 10 });
+    await page.mouse.up({ button });
+    if (shift) await page.keyboard.up("Shift");
+}
+
+test("mouse, as in Rhino: a left drag leaves the view alone, a right drag rotates, Shift and a right drag pans without turning, and the wheel zooms but stops at 0.5x and 8x", { timeout: 120_000 }, async () => {
     await withPage(async (page) => {
-        await page.click(".gizmo [data-axis='+z']");
-        assert.deepEqual(await camera(page), { zoom: 1, azimuth: 0, elevation: 90 });
-        // drag 100 px left and 50 px up, on open canvas (away from the toolbar and the loss card)
-        const before = await drawnCentre(page);
-        await page.mouse.move(600, 400);
-        await page.mouse.down({ button: "right" });
-        await page.mouse.move(500, 350, { steps: 10 });
-        await page.mouse.up({ button: "right" });
+        const start = await camera(page);
+        const startCentre = await drawnCentre(page);
+        await drag(page, "left", [100, 0]);
+        assert.deepEqual(await camera(page), start, "a left drag moved the view");
+        assert.deepEqual(await drawnCentre(page), startCentre, "a left drag moved the plan");
+
+        // Shift + right drag 100 px left and 50 px up: the plan follows the pointer
+        await drag(page, "right", [-100, -50], { shift: true });
         const after = await drawnCentre(page);
-        const [dx, dy] = [after[0] - before[0], after[1] - before[1]];
+        const [dx, dy] = [after[0] - startCentre[0], after[1] - startCentre[1]];
         assert.ok(Math.abs(dx + 100) < 3 && Math.abs(dy + 50) < 3, `the plan moved by ${dx.toFixed(1)}, ${dy.toFixed(1)} px`);
+        const panned = await camera(page);
+        assert.ok(panned.azimuth === start.azimuth && panned.elevation === start.elevation, `the pan turned the view to ${JSON.stringify(panned)}`);
+
+        await drag(page, "right", [150, 0]);
         const turned = await camera(page);
-        assert.ok(turned.azimuth === 0 && turned.elevation === 90, `the drag turned the view to ${JSON.stringify(turned)}`);
+        assert.ok(Math.abs(turned.azimuth - start.azimuth) > 30, `a 150 px right drag turned the view only to azimuth ${turned.azimuth}`);
 
         // each wheel step of 200 zooms by 1/0.95^2 (OrbitControls), so 40 steps would pass 60x
         for (let i = 0; i < 40; i++) await page.mouse.wheel(0, -200);
