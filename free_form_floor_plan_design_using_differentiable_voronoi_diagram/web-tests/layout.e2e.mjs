@@ -107,6 +107,26 @@ test("loss card toggle: the plan drawing stays the same, pixel for pixel", { tim
     }
 });
 
+test("panels: an open panel is see-through, so the plan shows behind it", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            for (const name of ["boundary", "rooms", "weights", "optimize", "display"]) {
+                await page.click(`button[data-open=${name}]`);
+                const alpha = await page.$eval(`.panel[data-panel=${name}]`, (p) => {
+                    const m = getComputedStyle(p).backgroundColor.match(/rgba?\(([^)]+)\)/);
+                    const parts = m ? m[1].split(",").map(Number) : [];
+                    return parts.length === 4 ? parts[3] : 1;
+                });
+                assert.ok(alpha >= 0.5 && alpha <= 0.85, `${name} panel background alpha is ${alpha}`);
+                await page.click(`button[data-open=${name}]`);
+            }
+        });
+    } finally {
+        proc.kill();
+    }
+});
+
 test("loss card: its 5 rows are in view at the start, and the Losses icon hides and shows it", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
