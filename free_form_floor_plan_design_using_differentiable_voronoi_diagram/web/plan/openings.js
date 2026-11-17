@@ -11,6 +11,11 @@ export function evaluatePlan(g, program, width, {finished=false,running=false}={
     if (g.rooms.length!==program.rooms.length) issues.push({kind:'rooms',message:'The generated room count does not match the bubbles.'});
     program.rooms.forEach((room,r)=>{
         if (!contains(r,room.center)) issues.push({kind:'center',room:r,message:`Room ${r+1} does not contain its bubble center.`});
+        const parts=rings[r]??[];
+        // Even nesting depth denotes an outer region; odd depth denotes a hole.
+        // Use containment rather than winding so reversed rings keep their meaning.
+        const components=parts.filter((ring,i)=>parts.filter((outer,j)=>i!==j&&ring.every(p=>inside(p,outer))).length%2===0).length;
+        if(components>1)issues.push({kind:'disconnected',room:r,message:`Room ${r+1} is split into ${components} separate regions.`});
     });
     const edges=wallEdges(g);
     for (const pair of program.links) {

@@ -3,6 +3,27 @@ import assert from 'node:assert/strict';
 import { wallEdges } from '../web/plan/graph.js';
 import { evaluatePlan } from '../web/plan/openings.js';
 
+test('disconnected regions are invalid while holes remain part of one room',()=>{
+    const square=(x,y,w)=>[[x,y],[x+w,y],[x+w,y+w],[x,y+w]];
+    const graph=rings=>{
+        const corners=new Map();
+        const ids=rings.map(ring=>ring.map(([x,y])=>{const id=corners.size;corners.set(id,{x,y});return id;}));
+        return {corners,rooms:[ids]};
+    };
+    const program={rooms:[{center:[0.5,0.5]}],links:[]};
+    for(const rings of [[square(0,0,1),square(2,0,1)],[square(0,0,1),square(1,1,1)]]){
+        const result=evaluatePlan(graph(rings),program,0.1,{finished:true});
+        assert.equal(result.valid,false,'separate or point-touching pieces cannot form one room');
+        assert.equal(result.state,'unmet');
+        assert.ok(result.issues.some(i=>i.kind==='disconnected'&&i.room===0));
+    }
+    const hole=[square(0,0,6),square(1,1,4)];
+    assert.equal(evaluatePlan(graph(hole),program,0.1,{finished:true}).state,'complete','an interior hole is not another room component');
+    assert.equal(evaluatePlan(graph(hole.map(r=>[...r].reverse())),program,0.1).valid,true,'component checking is independent of ring winding');
+    const island=[...hole,square(2,2,2)];
+    assert.equal(evaluatePlan(graph(island),program,0.1).valid,false,'an island inside a hole is a second component');
+});
+
 test('shared corner walls make only requested doors and expose center or wall violations', () => {
     const points = [[0,0],[1,0],[2,0],[2,1],[1,1],[0,1],[3,0],[3,1]];
     const g = { corners: new Map(points.map(([x,y],i) => [i,{x,y,fixed:true}])), rooms: [[[0,1,4,5]],[[1,2,3,4]],[[2,6,7,3]]] };
