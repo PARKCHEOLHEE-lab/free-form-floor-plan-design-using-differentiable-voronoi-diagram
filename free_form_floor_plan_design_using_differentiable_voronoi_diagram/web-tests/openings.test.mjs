@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { wallEdges } from '../web/plan/graph.js';
+import { wallEdges,fromCells } from '../web/plan/graph.js';
 import { evaluatePlan } from '../web/plan/openings.js';
 
 test('disconnected regions are invalid while holes remain part of one room',()=>{
@@ -17,6 +17,8 @@ test('disconnected regions are invalid while holes remain part of one room',()=>
         assert.equal(result.state,'unmet');
         assert.ok(result.issues.some(i=>i.kind==='disconnected'&&i.room===0));
     }
+    const touching=fromCells([square(0,0,1),square(1,1,1)].map(ring=>({room:0,ring})),square(-1,-1,4),{roomCount:1,simplifyTol:0});
+    assert.equal(evaluatePlan(touching,program,0.1).valid,false,'the actual corner graph can encode point contact inside a single repeated-corner ring');
     const hole=[square(0,0,6),square(1,1,4)];
     assert.equal(evaluatePlan(graph(hole),program,0.1,{finished:true}).state,'complete','an interior hole is not another room component');
     assert.equal(evaluatePlan(graph(hole.map(r=>[...r].reverse())),program,0.1).valid,true,'component checking is independent of ring winding');

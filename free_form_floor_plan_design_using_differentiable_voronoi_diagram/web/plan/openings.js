@@ -11,10 +11,22 @@ export function evaluatePlan(g, program, width, {finished=false,running=false}={
     if (g.rooms.length!==program.rooms.length) issues.push({kind:'rooms',message:'The generated room count does not match the bubbles.'});
     program.rooms.forEach((room,r)=>{
         if (!contains(r,room.center)) issues.push({kind:'center',room:r,message:`Room ${r+1} does not contain its bubble center.`});
-        const parts=rings[r]??[];
+        const parts=[];
+        // A walk through a corner shared by two lobes may contain several loops.
+        for(const ring of g.rooms[r]??[]){
+            const path=[];
+            for(const id of [...ring,ring[0]]){
+                const start=path.indexOf(id);
+                if(start>=0){
+                    const ids=path.splice(start);
+                    if(ids.length>=3)parts.push({ids,points:ids.map(id=>{const p=g.corners.get(id);return[p.x,p.y];})});
+                }
+                path.push(id);
+            }
+        }
         // Even nesting depth denotes an outer region; odd depth denotes a hole.
         // Use containment rather than winding so reversed rings keep their meaning.
-        const components=parts.filter((ring,i)=>parts.filter((outer,j)=>i!==j&&ring.every(p=>inside(p,outer))).length%2===0).length;
+        const components=parts.filter((ring,i)=>parts.filter((outer,j)=>i!==j&&ring.ids.every((id,k)=>outer.ids.includes(id)||inside(ring.points[k],outer.points))).length%2===0).length;
         if(components>1)issues.push({kind:'disconnected',room:r,message:`Room ${r+1} is split into ${components} separate regions.`});
     });
     const edges=wallEdges(g);
