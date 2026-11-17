@@ -13,6 +13,32 @@ fn rect(x: f64, y: f64, xx: f64, yy: f64) -> Polygon<f64> {
 }
 
 #[test]
+fn five_room_initialization_has_no_disconnected_islands() {
+    use geo::{Area, Contains, Point};
+    let boundary=voronoi_floorplan::shapes::by_name("shape_e").unwrap().polygon();
+    let circles=[[-0.48,0.35,0.11],[-0.2,-0.32,0.21],[0.3,0.25,0.12],[0.1,0.55,0.13],[-0.5,-0.1,0.08]];
+    let program=RoomProgram::new(&boundary,&circles).unwrap();
+    for seed in 0..32 {
+        let (sites,labels)=program.initialize(&boundary,80,seed).unwrap();
+        let cells=voronoi_floorplan::voronoi::render_cells(&sites,&boundary);
+        for (r,circle) in circles.iter().enumerate(){
+            let room=geo::algorithm::unary_union(cells.iter().filter(|(i,_)|labels[*i]==r).map(|(_,p)|p));
+            assert_eq!(room.0.len(),1,"seed {seed}, room {r} must not have disconnected islands");
+            assert!(room.contains(&Point::new(circle[0],circle[1])));
+            assert!((room.unsigned_area()/boundary.unsigned_area()-program.ratios()[r]).abs()<=0.05,"seed {seed}, room {r}: target area must remain within 5 percentage points");
+        }
+    }
+    // Existing multipart-cell fixture: one fixed site per room leaves no cell
+    // available to connect a split room. Do not certify site-graph connectivity.
+    let boundary=voronoi_floorplan::shapes::by_name("shape_b").unwrap().polygon();
+    let points=voronoi_floorplan::init::initialize_sites(&boundary,16,5);
+    let circles:Vec<_>=points.iter().map(|p|[p[0] as f64,p[1] as f64,1e-6]).collect();
+    let program=RoomProgram::new(&boundary,&circles).unwrap();
+    let error=program.initialize(&boundary,16,5).unwrap_err();
+    assert!(error.contains("connected rooms"),"multipart fixed cells cannot silently return disconnected rooms");
+}
+
+#[test]
 fn initial_room_areas_follow_circle_shares_before_optimization() {
     use geo::{Area, Contains, Point};
     use voronoi_floorplan::voronoi::render_cells;

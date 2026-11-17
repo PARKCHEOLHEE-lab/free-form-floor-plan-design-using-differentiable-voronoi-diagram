@@ -152,55 +152,88 @@ impl RoomProgram {
         );
         let hull = MultiPoint::from(sites.iter().map(|p|(p[0] as f64,p[1] as f64)).collect::<Vec<_>>()).convex_hull();
         if hull.unsigned_area()==0. { return Err("Use at least three non-collinear sites. Increase the site budget.".into()); }
-        let labels = self.initial_labels(&sites, boundary);
+        let labels = self.initial_labels(&sites, boundary)?;
         Ok((sites, labels))
     }
 
-    fn initial_labels(&self, sites: &[[f32;2]], boundary: &Polygon<f64>) -> Vec<usize> {
-        let k=self.centers.len();
-        // Log distance minus a weight is multiplicatively weighted distance.
-        // Unlike an additive squared-distance offset, it keeps each center at
-        // the heart of its region instead of requiring an isolated anchor cell.
-        let costs:Vec<Vec<f64>>=sites.iter().map(|p|self.centers.iter().map(|c|
-            ((p[0] as f64-c[0] as f64).powi(2)+(p[1] as f64-c[1] as f64).powi(2)).ln()
-        ).collect()).collect();
-        let mut weights=vec![0.;k];
-        let assign=|weights:&[f64]|costs.iter().enumerate().map(|(i,c)|{
-            if i<k {i} else {(0..k).min_by(|&a,&b|(c[a]-weights[a]).total_cmp(&(c[b]-weights[b]))).unwrap()}
-        }).collect::<Vec<_>>();
-        let mut best=assign(&weights);
-        if k==1 || sites.len()==k {return best;}
-        let mut cell_areas=vec![0.;sites.len()];
-        for (i,cell) in crate::voronoi::render_cells(sites,boundary) {cell_areas[i]+=cell.unsigned_area();}
-        let total=boundary.unsigned_area();
-        let mut best_error=f64::INFINITY;
-        // Each weight shifts one room's reach. Sort the points at which a free
-        // cell changes owner, then choose the cut nearest that room's target area.
-        // Anchor cells never change owner; exact shares can be unattainable.
-        for _ in 0..64 {
-            for r in 0..k {
-                let mut thresholds:Vec<_>=(k..sites.len()).map(|i|{
-                    let other=(0..k).filter(|&s|s!=r).map(|s|costs[i][s]-weights[s]).fold(f64::INFINITY,f64::min);
-                    (costs[i][r]-other,cell_areas[i])
-                }).collect();
-                thresholds.sort_by(|a,b|a.0.total_cmp(&b.0));
-                let target=self.ratios[r]*total;
-                let mut area=cell_areas[r];
-                let (mut cut,mut error)=(0,(area-target).abs());
-                for (i,(_,a)) in thresholds.iter().enumerate(){
-                    area+=a;
-                    if (area-target).abs()<error {cut=i+1;error=(area-target).abs();}
-                }
-                weights[r]=if cut==0 {thresholds[0].0-1.} else if cut==thresholds.len(){thresholds[cut-1].0+1.}
-                    else {(thresholds[cut-1].0+thresholds[cut].0)/2.};
-                let labels=assign(&weights);
-                let mut areas=vec![0.;k];
-                for (i,&room) in labels.iter().enumerate(){areas[room]+=cell_areas[i];}
-                let error=areas.iter().zip(&self.ratios).map(|(a,t)|(a/total-t).abs()).fold(0.,f64::max);
-                if error<best_error {best_error=error;best=labels;}
-                if best_error<=0.005 {return best;}
-            }
+    fn initial_labels(&self, sites: &[[f32;2]], boundary: &Polygon<f64>) -> Result<Vec<usize>,String> {
+        let (k,n)=(self.centers.len(),sites.len());
+        let mut pieces=vec![Vec::new();n];
+        for (i,cell) in crate::voronoi::render_cells(sites,boundary){pieces[i].push(cell);}
+        let cell_areas:Vec<f64>=pieces.iter().map(|parts|parts.iter().map(Area::unsigned_area).sum()).collect();
+        let connected=|labels:&[usize]|(0..k).all(|r|{
+            let cells:Vec<_>=pieces.iter().enumerate().filter(|(i,_)|labels[*i]==r).flat_map(|(_,p)|p.iter()).collect();
+            geo::algorithm::unary_union(cells).0.len()==1
+        });
+        let failure=||"Could not initialize connected rooms with these cells. Increase sites or adjust circles.".to_string();
+        if k==1 {return Ok(vec![0;n]);}
+        if n==k {
+            let labels:Vec<_>=(0..k).collect();
+            return if connected(&labels){Ok(labels)}else{Err(failure())};
         }
-        best
+        // Raw Voronoi neighbors may meet outside a concave boundary. Only an
+        // actual union across a shared clipped edge supplies a growth path.
+        let points:Vec<_>=sites.iter().map(|p|[p[0] as f64,p[1] as f64]).collect();
+        let neighbors=crate::voronoi::site_neighbors(&points,boundary);
+        let mut graph=vec![Vec::new();n];
+        let mut span:f64=0.;
+        for i in 0..n {for &j in &neighbors[i] {if j>i {
+            let cells:Vec<_>=pieces[i].iter().chain(&pieces[j]).collect();
+            if geo::algorithm::unary_union(cells).0.len()<pieces[i].len()+pieces[j].len(){
+                let distance=(points[i][0]-points[j][0]).hypot(points[i][1]-points[j][1]);
+                graph[i].push((j,distance));graph[j].push((i,distance));span=span.max(distance*n as f64);
+            }
+        }}}
+        // Multi-source shortest-path expansion: a cell can only join a room
+        // through a cell that already belongs to that room. Seeds cannot move.
+        let assign=|weights:&[f64]|->Option<Vec<usize>>{
+            let mut labels=vec![usize::MAX;n];
+            let mut arrival=vec![f64::INFINITY;n];
+            let mut owner=vec![usize::MAX;n];
+            for r in 0..k {
+                labels[r]=r;
+                for &(j,d) in &graph[r] {if j>=k && d-weights[r]<arrival[j]{arrival[j]=d-weights[r];owner[j]=r;}}
+            }
+            for _ in k..n {
+                let i=(k..n).filter(|&i|labels[i]==usize::MAX).min_by(|&a,&b|arrival[a].total_cmp(&arrival[b]))?;
+                if !arrival[i].is_finite(){return None;}
+                labels[i]=owner[i];
+                for &(j,d) in &graph[i] {if labels[j]==usize::MAX && arrival[i]+d<arrival[j]{arrival[j]=arrival[i]+d;owner[j]=labels[i];}}
+            }
+            Some(labels)
+        };
+        let areas=|labels:&[usize]|{
+            let mut out=vec![0.;k];
+            for (i,&r) in labels.iter().enumerate(){out[r]+=cell_areas[i];}
+            out
+        };
+        let total=boundary.unsigned_area();
+        let score=|areas:&[f64]|areas.iter().zip(&self.ratios).map(|(a,t)|(a/total-t).abs()).fold(0.,f64::max);
+        let mut weights=vec![0.;k];
+        let labels=assign(&weights).ok_or_else(failure)?;
+        let mut best_error=if connected(&labels){score(&areas(&labels))}else{f64::INFINITY};
+        let mut best=if best_error.is_finite(){Some(labels)}else{None};
+        // Calibrate against the connected assignment itself, not independent
+        // Euclidean thresholds, whose ownership can skip over another room.
+        for _ in 0..16 {for r in 0..k {
+            let current=assign(&weights).ok_or_else(failure)?;
+            let target=self.ratios[r]*total;
+            let mut local=((areas(&current)[r]-target).abs(),weights[r]);
+            let mut lo=weights.iter().copied().fold(f64::INFINITY,f64::min)-span;
+            let mut hi=weights.iter().copied().fold(f64::NEG_INFINITY,f64::max)+span;
+            for _ in 0..14 {
+                weights[r]=(lo+hi)/2.;
+                let labels=assign(&weights).ok_or_else(failure)?;
+                let a=areas(&labels);
+                let error=(a[r]-target).abs();
+                if error<local.0 {local=(error,weights[r]);}
+                let error=score(&a);
+                if error<best_error && connected(&labels){best_error=error;best=Some(labels);}
+                if a[r]<target {lo=weights[r];}else{hi=weights[r];}
+                if best_error<=0.01 {return best.ok_or_else(failure);}
+            }
+            weights[r]=local.1;
+        }}
+        best.ok_or_else(failure)
     }
 }
