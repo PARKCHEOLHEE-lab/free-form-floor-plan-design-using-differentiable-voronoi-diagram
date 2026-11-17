@@ -54,6 +54,7 @@ export function createPlanView(canvas, { gizmo } = {}) {
     const meshMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
     const lineMat = new THREE.LineBasicMaterial({ color: CELL_LINE.color, transparent: true, opacity: CELL_LINE.opacity });
     const pointMat = new THREE.PointsMaterial({ color: SITE.color, size: SITE.size, sizeAttenuation: false, transparent: true, opacity: SITE.opacity });
+    const doorMat = new THREE.LineBasicMaterial({color:'#111111'});
 
     let width = 1, height = 1;
     let fitted = null;                          // { cx, cy, extent } of the plan the camera is fitted to
@@ -169,7 +170,26 @@ export function createPlanView(canvas, { gizmo } = {}) {
             const white = new THREE.Color('#ffffff');
             for (const ring of plan.walls) for (const t of strokeTriangles(strokeRing(ring, hw - line))) tris.add(t, 2 * lift, white);
         }
+        const doorLines=[];
+        for(const {a,b,normal:n} of plan.doors??[]){
+            const offset=(p,d)=>[p[0]+n[0]*d,p[1]+n[1]*d];
+            const gap=[offset(a,hw+line),offset(b,hw+line),offset(b,-hw-line),offset(a,-hw-line)];
+            const white=new THREE.Color('#ffffff');
+            tris.add([gap[0],gap[1],gap[2]],5*lift,white);
+            tris.add([gap[0],gap[2],gap[3]],5*lift,white);
+            const dx=b[0]-a[0],dy=b[1]-a[1],w=Math.hypot(dx,dy);
+            const end=offset(a,w);
+            doorLines.push(a[0],6*lift,-a[1],end[0],6*lift,-end[1]);
+            for(let i=0;i<24;i++){
+                for(const k of [i,i+1]){
+                    const t=k*Math.PI/48;
+                    doorLines.push(a[0]+dx*Math.cos(t)+n[0]*w*Math.sin(t),6*lift,-a[1]-dy*Math.cos(t)-n[1]*w*Math.sin(t));
+                }
+            }
+        }
+        canvas.dataset.doors=String(plan.doors?.length??0);
         content.add(new THREE.Mesh(tris.geometry(), meshMat));
+        if(doorLines.length)content.add(new THREE.LineSegments(positions(doorLines),doorMat));
 
         if (plan.lines?.length) {
             const seg = [];

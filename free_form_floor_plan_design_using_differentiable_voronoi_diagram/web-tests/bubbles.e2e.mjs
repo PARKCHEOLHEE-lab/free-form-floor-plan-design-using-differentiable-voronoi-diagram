@@ -90,6 +90,60 @@ test('room circles draw move and resize on the plan while camera actions preserv
     }finally{await browser.close();proc.kill();}
 });
 
+test('generated plans keep centers and show only requested doors in raw and aligned views', {timeout:180000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('button[data-open=boundary]');await page.click('button[data-mode=shape_a]');
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-open=rooms]');await page.click('button[data-bubble-tool=draw]');
+        await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
+        await page.click('button[data-bubble-tool=link]');await page.mouse.click(550,530);await page.mouse.click(780,530);
+        await page.click('button[data-open=optimize]');await page.locator('#iters').focus();await page.keyboard.press('Home');
+        assert.equal(await page.locator('#iters').inputValue(),'50');
+        await page.click('#run');
+        await page.waitForFunction(()=>document.querySelector('#run').getAttribute('aria-label')==='Run',null,{timeout:120000});
+        assert.equal(await page.locator('#program-status').getAttribute('data-state'),'complete',await page.locator('#program-status').textContent());
+        assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),1,'the actual renderer builds the requested physical door');
+        await page.click('button[data-open=display]');await page.uncheck('#show-bubbles');
+        const colors=await page.$eval('#plan',async c=>{
+            const image=new Image();image.src=c.toDataURL();await image.decode();
+            const copy=document.createElement('canvas');copy.width=image.width;copy.height=image.height;
+            const ctx=copy.getContext('2d');ctx.drawImage(image,0,0);
+            return [[550,530,[191,228,191]],[780,530,[222,215,234]]].map(([x,y,color])=>{
+                let n=0;for(let i=0;i<8;i++){
+                    const a=i*Math.PI/4,px=ctx.getImageData(Math.round(x+5*Math.cos(a)),Math.round(y+5*Math.sin(a)),1,1).data;
+                    if(Math.abs(px[0]-color[0])+Math.abs(px[1]-color[1])+Math.abs(px[2]-color[2])<20)n++;
+                }return n;
+            });
+        });
+        assert.ok(colors.every(n=>n>=3),'each drawn center is inside its actual rendered room color, without the bubble overlay');
+        const withDoor=await page.$eval('#plan',c=>c.toDataURL());
+        await page.uncheck('#show-doors');
+        assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),0);
+        assert.notEqual(await page.$eval('#plan',c=>c.toDataURL()),withDoor,'the door is visible geometry, not only a result counter');
+        await page.check('#show-doors');await page.click('button[data-walls=aligned]');
+        assert.equal(await page.locator('#program-status').getAttribute('data-state'),'complete',await page.locator('#program-status').textContent());
+        assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),1,'aligned shared walls preserve the required door');
+        await mkdir(new URL('../../.agents/cache/screens/',import.meta.url),{recursive:true});
+        await page.screenshot({path:fileURLToPath(new URL('../../.agents/cache/screens/bubbles-result-top.png',import.meta.url))});
+        await page.click('.gizmo [data-axis="+x"]');
+        await page.screenshot({path:fileURLToPath(new URL('../../.agents/cache/screens/bubbles-result-3d.png',import.meta.url))});
+        await page.check('#show-bubbles');await page.click('button[data-open=rooms]');
+        await page.locator('.connection-row').click();await page.click('#bubble-delete');
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),0,'unlinked adjacent rooms have no door');
+        assert.notEqual(await page.locator('#program-status').getAttribute('data-state'),'complete','edited inputs do not inherit an old completion state');
+        if(process.env.VORONOI_COVERAGE_DIR){
+            const data=(await page.coverage.stopJSCoverage()).filter(e=>e.url===url||e.url.includes('/plan/'));
+            await mkdir(process.env.VORONOI_COVERAGE_DIR,{recursive:true});
+            await writeFile(join(process.env.VORONOI_COVERAGE_DIR,'bubbles-result.json'),JSON.stringify(data));
+        }
+    }finally{await browser.close();proc.kill();}
+});
+
 test('linking and deleting circles updates visible door links and keeps the remaining room identity', {timeout:90000},async()=>{
     const {url,proc}=await serve();const browser=await chromium.launch();
     try{

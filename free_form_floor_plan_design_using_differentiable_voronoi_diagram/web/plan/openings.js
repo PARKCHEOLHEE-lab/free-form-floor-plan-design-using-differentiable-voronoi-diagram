@@ -2,7 +2,7 @@ import { inside } from './geom.js';
 import { roomRings, wallEdges } from './graph.js';
 
 /** Check the actual output graph; a requested link needs one straight shared wall. */
-export function evaluatePlan(g, program, width) {
+export function evaluatePlan(g, program, width, {finished=false,running=false}={}) {
     if (!Number.isFinite(width) || width<=0) throw new RangeError('Door width must be positive and finite.');
     const issues=[], doors=[];
     const rings=g.rooms.map((_,r)=>roomRings(g,r));
@@ -30,5 +30,6 @@ export function evaluatePlan(g, program, width) {
         if (!contains(r,[center[0]+normal[0]*width/4,center[1]+normal[1]*width/4])) normal=normal.map(v=>-v);
         doors.push({rooms:[...pair],a:[center[0]-dx*width/2,center[1]-dy*width/2],b:[center[0]+dx*width/2,center[1]+dy*width/2],normal});
     }
-    return {valid:issues.length===0,doors,issues};
+    const valid=issues.length===0;
+    return {valid,doors,issues,state:finished?(valid?'complete':'unmet'):running?'running':'ready'};
 }

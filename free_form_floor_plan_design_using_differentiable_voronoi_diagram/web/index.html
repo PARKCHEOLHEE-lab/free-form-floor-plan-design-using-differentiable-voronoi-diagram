@@ -350,6 +350,8 @@
           <button data-walls="aligned">Aligned</button>
         </div>
         <div class="row"><label>aligned</label><span class="readout" id="align_v"></span></div>
+        <div class="row"><label for="show-doors">Doors</label><input type="checkbox" id="show-doors" checked></div>
+        <div class="row"><label for="show-bubbles">Room bubbles</label><input type="checkbox" id="show-bubbles" checked></div>
       </section>
 
       <section class="panel" data-panel="weights">
@@ -390,6 +392,7 @@ const $ = id => document.getElementById(id);
 // corners and snaps nearly parallel walls (voronoi/postprocess.py, after GSDiff).
 import { fromCells, roomRings } from './plan/graph.js';
 import { alignPlan, alignedShare } from './plan/align.js';
+import { evaluatePlan } from './plan/openings.js';
 const ALIGN_TOL = 0.02;      // postprocess.py's threshold, in the optimizer's unit-radius space
 const SIMPLIFY_TOL = 0.004;  // the kink tolerance web/src/lib.rs uses for room outlines
 let wallsMode = 'raw';
@@ -398,9 +401,10 @@ let boundaryRing = null;     // sent by the worker once the optimizer is built
 function alignFrame(f) {
   const n = roomCount();
   const g = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: SIMPLIFY_TOL });
+  const raw = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: 0 });
   const before = alignedShare(g, boundaryRing);
   alignPlan(g, boundaryRing, { tol: ALIGN_TOL });
-  return { rooms: Array.from({ length: n }, (_, r) => roomRings(g, r)), before, after: alignedShare(g, boundaryRing) };
+  return { raw, aligned:g, rooms: Array.from({ length: n }, (_, r) => roomRings(g, r)), before, after: alignedShare(g, boundaryRing) };
 }
 $('walls').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -428,6 +432,7 @@ let mode = 'shape_e';     // active preset shape
 let built = false;        // the worker holds an optimizer for the current params
 let running = false;
 let paused = false;
+let runFinished = false;
 let maxIters = 300;
 const hist = { total: [], wall: [], area: [], lloyd: [], topo: [] };
 const clearHist = () => { for (const t in hist) hist[t].length = 0; };
@@ -450,6 +455,7 @@ const editor = createBubbleEditor($('plan'),view,{
     if(!editingBubbles){editingBubbles=true;stop();}
     refreshRoomReadout();
     $('program-status').textContent=commit?'Updating plan...':'Editing rooms...';
+    $('program-status').dataset.state='editing';
     if(commit){editingBubbles=false;rebuildPreviewSoon();}
     setButtons();
   },
@@ -477,6 +483,8 @@ $('bubble-delete').addEventListener('click',()=>editor.deleteSelection());
 $('roomareas').addEventListener('click',e=>{const b=e.target.closest('[data-room-id]');if(b)editor.selectRoom(+b.dataset.roomId);});
 $('connections').addEventListener('click',e=>{const b=e.target.closest('[data-from]');if(b)editor.selectLink(+b.dataset.from,+b.dataset.to);});
 window.addEventListener('pagehide',()=>editor.dispose());
+$('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubbles').checked));
+$('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
 
 // ---------- inputs ----------
 const SLIDERS = ['sites','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr','seed'];
@@ -575,6 +583,7 @@ function params() {
 // `then` is what the worker does once built: 'preview' or 'start' (run).
 function sendBuild(then) {
   clearTimeout(rebuildTimer);rebuildTimer=0;
+  runFinished=false;
   const input=currentProgram()?.snapshot();
   if(input&&!input.rooms.length){$('status').textContent='Draw at least one room.';$('program-status').textContent='Draw at least one room.';clearHist();hidePlayhead();redraw();return false;}
   const p = params();
@@ -597,6 +606,7 @@ worker.onmessage = (e) => {
     case 'error':
       $('status').textContent = m.msg;
       if(currentProgram())$('program-status').textContent=m.msg;
+      $('program-status').dataset.state='error';
       running = false; paused = false; setButtons();
       break;
     case 'built':
@@ -617,7 +627,9 @@ worker.onmessage = (e) => {
       break;
     case 'done':
       running = false; paused = false; setButtons();
-      $('status').textContent = 'done';
+      runFinished=true;
+      if(lastFrame)drawFrame(lastFrame);
+      $('status').textContent = currentProgram()?$('program-status').textContent:'done';
       break;
   }
 };
@@ -710,6 +722,15 @@ function drawFrame(f) {
   const input=currentProgram()?.snapshot();
   const color=r=>input?colorForRoomId(input.rooms[r].id):COLORS[r%COLORS.length];
   const al = boundaryRing ? alignFrame(f) : null;
+  let doors=[];
+  if(input&&al){
+    const result=evaluatePlan(wallsMode==='aligned'?al.aligned:al.raw,input,DOOR_WIDTH,{finished:runFinished,running});
+    $('program-status').dataset.state=result.state;
+    $('program-status').textContent=result.state==='complete'?'Complete: all room centers and door links satisfied.':
+      result.state==='unmet'?'Unmet: '+result.issues.map(i=>i.message).join(' '):
+      (running?'Optimizing. ':'Ready to run. ')+result.issues.map(i=>i.message).join(' ');
+    if($('show-doors').checked)doors=result.doors;
+  }else{$('program-status').textContent='';delete $('program-status').dataset.state;}
   if (al) $('align_v').textContent = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
   if (wallsMode === 'aligned' && al) {
     view.draw({
@@ -717,6 +738,7 @@ function drawFrame(f) {
       rooms: al.rooms.map((rings, r) => ({ rings, color: color(r) })),
       walls: al.rooms.flat(),
       wall: wallWidth,
+      doors,
     });
   } else {
     view.draw({
@@ -726,6 +748,7 @@ function drawFrame(f) {
       lines: f.cells.map(cell => cell.ring),
       points: f.sites,
       wall: wallWidth,
+      doors,
     });
   }
   movePlayhead(f.iteration);   // the current-iteration playhead replaces the old iter/loss text
@@ -802,6 +825,8 @@ function hidePlayhead() { $('playhead').style.display = 'none'; }
 function stop() {
   clearTimeout(rebuildTimer);rebuildTimer=0;
   running = false; paused = false;
+  runFinished=false;
+  $('program-status').dataset.state='ready';
   curGen = ++gen;                 // invalidate any in-flight frames from the prior build
   worker.postMessage({ cmd: 'dispose' });
   built = false;

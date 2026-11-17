@@ -2,7 +2,7 @@ import {inside,segmentDistance} from './geom.js';
 
 /** Left-button room editing. The view owns projection and the program owns validity. */
 export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,onStatus}) {
-    let model=null,tool='select',selected=null,selectedLink=null,pendingLink=null,press=null,draft=null;
+    let model=null,tool='select',selected=null,selectedLink=null,pendingLink=null,press=null,draft=null,visible=true;
     const empty={rooms:[],links:[],ratios:[]};
     const snapshot=()=>model?model.snapshot():empty;
     const emit=commit=>onChange({commit,snapshot:snapshot()});
@@ -17,6 +17,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
         }
     }
     function refresh() {
+        if(!visible){view.drawBubbles([],null,null);labels.replaceChildren();return;}
         const s=snapshot();
         const selectedEdge=s.links.findIndex(([a,b])=>selectedLink&&s.rooms[a].id===selectedLink[0]&&s.rooms[b].id===selectedLink[1]);
         view.drawBubbles(s.rooms.map(r=>({...r,color:colorForRoomId(r.id)})),selected,draft?{...draft,color:'#dddddd'}:null,s.links,selectedEdge);
@@ -38,7 +39,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
         layout();
     }
     function down(e) {
-        if(e.button!==0||!model)return;
+        if(e.button!==0||!model||!visible)return;
         const p=view.pointOnPlan(e.clientX,e.clientY);if(!p)return;
         const s=snapshot();
         canvas.focus({preventScroll:true});
@@ -120,6 +121,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
         selected=null;selectedLink=null;pendingLink=null;emit(true);onStatus('');refresh();return true;
     }
     const key=e=>{
+        if(!visible)return;
         if(e.key==='Escape'){finish(true);pendingLink=null;selectedLink=null;onStatus('');refresh();}
         if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();deleteSelection();}
     };
@@ -131,6 +133,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
         get tool(){return tool;},
         get selected(){return selected;},
         get selectedLink(){return selectedLink?[...selectedLink]:null;},
+        setVisible(next){finish(true);visible=next;refresh();},
         setProgram(next){if(model===next)return;press=null;draft=null;selected=null;selectedLink=null;pendingLink=null;model=next;refresh();},
         setTool(next){finish(true);pendingLink=null;tool=next;canvas.style.cursor=next==='draw'||next==='link'?'crosshair':'default';onStatus(next==='link'?'Click two rooms to request a door.':'',false);refresh();},
         selectRoom(id){selected=id;selectedLink=null;pendingLink=null;selectionChanged();canvas.focus({preventScroll:true});refresh();},

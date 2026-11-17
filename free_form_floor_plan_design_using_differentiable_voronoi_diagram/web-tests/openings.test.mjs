@@ -28,6 +28,10 @@ test('shared corner walls make only requested doors and expose center or wall vi
     const short=evaluatePlan(g,program,1.1);
     assert.equal(short.valid,false,'a wall shorter than the door is not a connection');
     assert.equal(short.doors.length,0);
+    assert.equal(evaluatePlan(g,program,1.1,{finished:true}).state,'unmet','an iteration limit does not make an invalid plan complete');
+    assert.equal(evaluatePlan(g,program,0.2,{finished:true}).state,'complete');
+    assert.equal(evaluatePlan(g,program,0.2,{running:true}).state,'running');
+    assert.equal(evaluatePlan(g,program,0.2).state,'ready');
     assert.equal(evaluatePlan(g,program,1).valid,true,'a door can use the full available shared wall');
     const badCenter={...program,rooms:program.rooms.map((r,i) => i===0?{...r,center:[1.5,0.5]}:r)};
     assert.ok(evaluatePlan(g,badCenter,0.2).issues.some(i => i.kind==='center' && i.room===0));
