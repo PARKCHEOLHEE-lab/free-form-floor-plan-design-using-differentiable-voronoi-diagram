@@ -179,7 +179,7 @@ test("gizmo: it sits in the top-right corner, its axes follow the camera, clicki
     for (const size of [[1145, 820], [600, 900]])
         await withPage(async (page) => {
             const g = await page.$eval(".gizmo", (e) => ({ ...e.getBoundingClientRect().toJSON(), w: innerWidth }));
-            const corner = g.top >= 0 && g.top <= 24 && g.right <= g.w && g.right >= g.w - 24;
+            const corner = Math.abs(g.top - 32) < 1 && Math.abs(g.w - g.right - 32) < 1;
             const small = g.width >= 48 && g.width <= 120 && g.height >= 48 && g.height <= 120;
             assert.ok(corner && small, `${size}: gizmo at ${g.left},${g.top}-${g.right},${g.bottom}`);
         }, size);

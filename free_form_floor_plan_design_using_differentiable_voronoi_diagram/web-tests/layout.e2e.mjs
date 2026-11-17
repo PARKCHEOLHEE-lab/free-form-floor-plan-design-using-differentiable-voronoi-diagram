@@ -5,9 +5,40 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { mkdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
 
 const DESKTOP = [[1145, 820], [1440, 900]];
+
+test('floating controls keep 32px edge spacing and fit desktop and narrow windows',{timeout:120000},async()=>{
+    const {url,proc}=await serve();
+    try{
+        for(const size of [[1440,900],[600,900],[390,720]])await atSize(url,size,async page=>{
+            const rect=selector=>page.$eval(selector,e=>e.getBoundingClientRect().toJSON());
+            const toolbar=await rect('.toolbar'),gizmo=await rect('.gizmo'),loss=await rect('.losscard');
+            const near=(a,b)=>Math.abs(a-b)<1;
+            assert.ok(near(toolbar.left,32)&&near(toolbar.top,32),'toolbar has 32px outer spacing');
+            assert.ok(near(gizmo.top,32)&&near(size[0]-gizmo.right,32),'gizmo has matching top/right spacing');
+            assert.ok(near(loss.left,32)&&near(size[1]-loss.bottom,32),'loss card has matching left/bottom spacing');
+            assert.ok(loss.right<=size[0]-31,'loss card fits the narrow window');
+            for(const name of ['boundary','rooms','weights','optimize','display']){
+                await page.click(`button[data-open=${name}]`);
+                const panel=await rect(`.panel[data-panel=${name}]`);
+                assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
+                assert.ok(panel.right<=size[0]-31&&panel.bottom<=size[1]-31,`${name} stays inside the outer spacing`);
+                await page.click(`button[data-open=${name}]`);
+            }
+            const before=await page.$eval('#plan',c=>c.toDataURL());
+            await page.click('button[data-toggle=losses]');
+            assert.equal(await page.$eval('#plan',c=>c.toDataURL()),before,'loss visibility preserves plan pixels');
+            await page.click('button[data-toggle=losses]');
+            await page.click('button[data-open=rooms]');
+            const dir=new URL('../../.agents/cache/screens/',import.meta.url);await mkdir(dir,{recursive:true});
+            await page.screenshot({path:fileURLToPath(new URL(`ui-spacing-${size[0]}.png`,dir))});
+        });
+    }finally{proc.kill();}
+});
 
 /** Open the page at one window size, wait for the first preview, and run `fn(page)`. */
 async function atSize(url, [width, height], fn) {
