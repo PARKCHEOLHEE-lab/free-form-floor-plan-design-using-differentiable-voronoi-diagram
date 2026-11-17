@@ -9,6 +9,8 @@ export class BubbleProgram {
 
     constructor(boundary) { this.boundary = openRing(boundary).map(p => [...p]); }
 
+    canPlace(center, radius, id) { return this.#valid(center, radius, id); }
+
     #valid(center, radius, id) {
         if (!Array.isArray(center) || center.length !== 2 || !center.every(Number.isFinite) || !Number.isFinite(radius) || radius <= 0) {
             this.error = 'Draw a circle with a positive radius.';

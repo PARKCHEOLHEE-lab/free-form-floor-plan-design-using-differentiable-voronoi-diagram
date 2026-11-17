@@ -189,6 +189,7 @@
     .tool:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
     .tool.primary { background: var(--ui-fg); color: var(--light); }
     .tool.primary:hover { background: #262626; }
+    .tool:disabled { opacity:.4; cursor:default; }
     /* hover names: each icon's or gizmo end's aria-label, shown beside it after a short pause
        (aria-label is the one source, so Run's name follows Pause and Resume) */
     .tool { position: relative; }
@@ -234,7 +235,19 @@
     .seg button:hover:not(.active) { background: var(--ui-muted); }
     .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
     .panel .seg { margin-bottom: 4px; }
-  </style>
+  #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
+  .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
+  .bubble-label.selected { background:var(--ui-fg); color:white; }
+  .bubble-label.draft { background:white; color:var(--ui-muted-fg); }
+  .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
+  .bubble-tools { margin-bottom:10px; }
+  .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
+  .roomareas .row { justify-content:space-between; }
+  .roomareas .raswatch { justify-content:flex-start; gap:4px; }
+  #rooms_v { margin-left:auto; }
+  .bubble-help.error { color:#a12b2b; }
+  #program-status { font:11px/1.5 var(--font); margin-top:8px; }
+</style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
 </head>
@@ -242,7 +255,7 @@
 <div class="wrap">
   <div class="stage">
     <div class="canvas-card">
-      <div class="planbox"><canvas id="plan" width="520" height="520"></canvas></div>
+      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div></div>
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->
       <span id="status" hidden></span>
@@ -306,10 +319,17 @@
       </section>
 
       <section class="panel" data-panel="rooms">
-        <div class="label">Rooms</div>
-        <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
-        <div class="row"><label>rooms</label><input id="rooms" type="range" min="2" max="8" step="1" value="5"><span class="val" id="rooms_v">5</span></div>
+        <div class="label">Room bubbles</div>
+        <div class="seg bubble-tools">
+          <button type="button" data-bubble-tool="select" aria-pressed="true">Select</button>
+          <button type="button" data-bubble-tool="draw" aria-pressed="false">Draw room</button>
+        </div>
+        <p id="bubble-message" class="bubble-help" aria-live="polite">Drag inside the boundary to draw a room. Select a circle to move it or resize its round handle.</p>
+        <div class="row"><label>rooms</label><span class="val" id="rooms_v">6</span></div>
+        <div class="label">Target area</div>
         <div class="roomareas" id="roomareas"></div>
+        <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
+        <div id="program-status" role="status"></div>
       </section>
 
       <section class="panel" data-panel="display">
@@ -350,6 +370,8 @@ const R = 1.18; // normalized boundaries fit within radius 1
 // three.js draws the plan in 3D: it opens isometric with the plan flat on the floor, the wheel
 // zooms (0.5x to 8x), the mouse rotates and pans, and a double-click returns to isometric
 import { createPlanView } from './plan/view3d.js';
+import { BubbleProgram } from './plan/bubbles.js';
+import { createBubbleEditor } from './plan/bubble-editor.js';
 const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo') });
 const $ = id => document.getElementById(id);
 
@@ -364,7 +386,7 @@ let wallsMode = 'raw';
 let boundaryRing = null;     // sent by the worker once the optimizer is built
 // Align one frame; returns room rings and the aligned-wall share before and after.
 function alignFrame(f) {
-  const n = +$('rooms').value;
+  const n = roomCount();
   const g = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: SIMPLIFY_TOL });
   const before = alignedShare(g, boundaryRing);
   alignPlan(g, boundaryRing, { tol: ALIGN_TOL });
@@ -385,6 +407,7 @@ let wallWidth = 0.02;                          // wall thickness (normalized hal
 function redraw() {
   view.resize();                               // the loss graphs are SVG (viewBox-scaled), no resize needed
   if (lastFrame) drawFrame(lastFrame);
+  else if (boundaryRing && currentProgram()) view.draw({outline:boundaryRing,rooms:[],walls:[boundaryRing],lines:[boundaryRing],wall:wallWidth});
   else view.clear();
   drawSparks();
 }
@@ -403,9 +426,43 @@ let gen = 0, curGen = 0;  // build generation; frames from a superseded build ar
 // The optimizer lives in a Web Worker, so every wasm step runs OFF the main
 // thread; the UI stays responsive and only renders the frames it streams back.
 const worker = new Worker('./worker.js', { type: 'module' });
+const programs = new Map(); // retain each boundary's circles when switching presets
+const DOOR_WIDTH = 0.1;
+let editingBubbles = false;
+const currentProgram = () => programs.get(mode) ?? null;
+const roomCount = () => currentProgram()?.snapshot().rooms.length ?? roomRatios.length;
+const editor = createBubbleEditor($('plan'),view,{
+  labels:$('bubble-labels'),colors:COLORS,
+  onChange({commit}) {
+    if(!editingBubbles){editingBubbles=true;stop();}
+    refreshRoomReadout();
+    if(commit){editingBubbles=false;rebuildPreviewSoon();}
+    setButtons();
+  },
+  onStatus(message) {
+    $('bubble-message').textContent=message||'Drag inside the boundary to draw a room. Select a circle to move it or resize its round handle.';
+    $('bubble-message').classList.toggle('error',!!message);
+  }
+});
+function setBubbleTool(name) {
+  if(name==='draw'){
+    if(!boundaryRing)return;
+    if(!currentProgram()){
+      programs.set(mode,new BubbleProgram(boundaryRing));stop();
+      clearHist();hidePlayhead();redraw();
+      $('program-status').textContent='Draw at least one room.';
+    }
+    editor.setProgram(currentProgram());
+  }
+  editor.setTool(name);
+  document.querySelectorAll('[data-bubble-tool]').forEach(b=>{const active=b.dataset.bubbleTool===name;b.setAttribute('aria-pressed',String(active));b.classList.toggle('active',active);});
+  refreshRoomReadout();setButtons();
+}
+document.querySelectorAll('[data-bubble-tool]').forEach(b=>b.addEventListener('click',()=>setBubbleTool(b.dataset.bubbleTool)));
+window.addEventListener('pagehide',()=>editor.dispose());
 
 // ---------- inputs ----------
-const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr','seed'];
+const SLIDERS = ['sites','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr','seed'];
 const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo']);
 // Shared slider -> readout formatter (used by the live listeners and applyPreset).
 function fmtVal(id, v) {
@@ -432,57 +489,24 @@ let rebuildTimer = 0;
 function rebuildPreviewSoon() {
   clearTimeout(rebuildTimer);
   rebuildTimer = setTimeout(() => {
+    rebuildTimer = 0;
     stop();
     $('status').textContent = mode + ' · building…';
     sendBuild('preview');
   }, 50);
 }
 $('sites').addEventListener('input', rebuildPreviewSoon);
-$('rooms').addEventListener('input', rebuildPreviewSoon);
 // seed reseeds the site initialization, so a committed seed change (Enter / blur /
 // spinner) rebuilds the preview too — no need to press Run or Reset.
 $('seed').addEventListener('change', rebuildPreviewSoon);
 
-// One 0..1 area-WEIGHT slider per room (regenerated when the room count changes).
-// roomRatios is the source of truth; params() normalizes weights -> shares, and
-// each row shows its live share %.
-let roomRatios = [];   // per-room area WEIGHT (0..1, independent); params() normalizes
-
-// One row per room: colour swatch (label slot) + a free 0..1 weight slider + a
-// readout of its live normalized share %. Sliders are independent — moving one
-// never moves another; only the share %s recompute.
-function renderRoomAreas() {
-  const k = +$('rooms').value;
-  roomRatios = Array.from({ length: k }, () => 1 / k);  // equal split to start
-  $('roomareas').innerHTML = Array.from({ length: k }, (_, i) =>
-    `<div class="row">` +
-    `<span class="raswatch"><i class="sw" style="background:${COLORS[i % COLORS.length]}"></i></span>` +
-    `<input id="area_${i}" type="range" min="0" max="1" step="0.01" value="${1 / k}">` +
-    `<span class="val" id="area_${i}_v">${Math.round(100 / k)}%</span></div>`
-  ).join('');
-  refreshRoomReadout();
-}
-
-// Refresh every room's normalized share %. Share is weight / sum(weights) — the
-// same value params() sends the optimizer — so editing any one slider updates
-// ALL the %s (display only; no slider moves).
+let roomRatios = []; // legacy preset shares; edited inputs come only from BubbleProgram
 function refreshRoomReadout() {
-  const sum = roomRatios.reduce((a, b) => a + b, 0) || 1;
-  for (let i = 0; i < roomRatios.length; i++) {
-    const p = $('area_' + i + '_v');
-    if (p) p.textContent = Math.round(roomRatios[i] / sum * 100) + '%';
-  }
+  const weights=currentProgram()?.snapshot().ratios ?? roomRatios;
+  const sum=weights.reduce((a,b)=>a+b,0)||1;
+  $('rooms_v').textContent=String(weights.length);
+  $('roomareas').innerHTML=weights.map((v,i)=>`<div class="row"><span class="raswatch"><i class="sw" style="background:${COLORS[i%COLORS.length]}"></i> R${i+1}</span><span class="val">${Math.round(v/sum*100)}%</span></div>`).join('');
 }
-
-$('rooms').addEventListener('input', renderRoomAreas);
-renderRoomAreas();
-// delegated: each room slider sets only its own weight, then the %s refresh.
-$('roomareas').addEventListener('input', e => {
-  const el = e.target;
-  if (el.tagName !== 'INPUT' || !el.id.startsWith('area_')) return;
-  roomRatios[+el.id.slice(5)] = +el.value;
-  refreshRoomReadout();
-});
 
 // Per-term reference scales s_i = the iter-0 raw magnitude of each loss term
 // (measured with w=1, geomean over the 5 demo shapes x 8 seeds, 2026-06). They
@@ -494,8 +518,7 @@ $('roomareas').addEventListener('input', e => {
 const LOSS_SCALES = { w_wall: 13.0, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0 };
 
 function params() {
-  const k = +$('rooms').value;
-  const weights = roomRatios.slice(0, k).map(r => Math.max(0, r));
+  const weights = (currentProgram()?.snapshot().ratios ?? roomRatios).map(r => Math.max(0, r));
   const wsum = weights.reduce((a, b) => a + b, 0) || 1;
   // Each loss slider is a 0..1 importance; divide by the per-term scale to get the
   // raw weight the optimizer consumes. The default {0.70,0.10,0.12,0.06} ~back-maps
@@ -521,11 +544,15 @@ function params() {
 // Build (or rebuild) the optimizer for the selected preset in the worker.
 // `then` is what the worker does once built: 'preview' or 'start' (run).
 function sendBuild(then) {
+  clearTimeout(rebuildTimer);rebuildTimer=0;
+  const input=currentProgram()?.snapshot();
+  if(input&&!input.rooms.length){$('status').textContent='Draw at least one room.';$('program-status').textContent='Draw at least one room.';clearHist();hidePlayhead();redraw();return false;}
   const p = params();
   maxIters = p.iters;
   curGen = ++gen;
   worker.postMessage({ cmd: 'build', gen: curGen, kind: 'shape', mode,
-    sites: p.sites, ratios: p.ratios, w: p.w, seed: p.seed, lr: p.lr, iters: p.iters, then });
+    sites: p.sites, ratios: p.ratios, w: p.w, seed: p.seed, lr: p.lr, iters: p.iters, then,
+    ...(input?{program:{...input,doorWidth:DOOR_WIDTH}}:{}) });
   return true;
 }
 
@@ -539,16 +566,19 @@ worker.onmessage = (e) => {
       break;
     case 'error':
       $('status').textContent = m.msg;
+      if(currentProgram())$('program-status').textContent=m.msg;
       running = false; paused = false; setButtons();
       break;
     case 'built':
       built = true;
       boundaryRing = m.boundary;
+      editor.setProgram(currentProgram());
       break;
     case 'frame':
       lastFrame = m.frame;
       if (m.mode === 'preview') {
         $('status').textContent = mode + ' · ready to Run';
+        if(currentProgram())$('program-status').textContent='Ready to run.';
         clearHist(); pushLoss(m.frame);   // seed the panel with iter-0 values (graphs fill on Run)
       } else {
         pushLoss(m.frame);
@@ -625,11 +655,8 @@ function applyPreset(mode) {
   set('w_wall', p.w_wall); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
   set('iters', p.iters); set('lr', p.lr);
   set('seed', p.seed);
-  $('rooms').value = p.rooms; $('rooms_v').textContent = fmtVal('rooms', p.rooms);
-  renderRoomAreas();                  // regenerates area_i sliders + resets roomRatios to equal split
-  roomRatios = p.roomRatios.slice();  // override with the preset's per-room weights
-  p.roomRatios.forEach((r, i) => { const el = $('area_' + i); if (el) el.value = r; });
-  refreshRoomReadout();               // recompute share %s from the new roomRatios
+  roomRatios = p.roomRatios.slice();
+  refreshRoomReadout();
   return true;
 }
 
@@ -637,6 +664,7 @@ $('presets').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   [...$('presets').children].forEach(x => x.classList.toggle('active', x === b));
   mode = b.dataset.mode;
+  editor.setProgram(null);setBubbleTool('select');editingBubbles=false;
   applyPreset(mode);  // load this boundary's preset, if it has one
   stop();
   $('status').textContent = mode + ' · building…';
@@ -753,6 +781,7 @@ function setButtons() {
   const label = running ? 'Pause' : (paused ? 'Resume' : 'Run');
   $('run').setAttribute('aria-label', label);   // also its hover name
   $('run').querySelector('use').setAttribute('href', running ? '#i-pause' : '#i-play');
+  $('run').disabled=editingBubbles||!!(currentProgram()&&!roomCount());
 }
 
 // ---------- toolbars ----------

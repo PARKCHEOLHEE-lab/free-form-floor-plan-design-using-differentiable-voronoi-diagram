@@ -39,6 +39,9 @@ export function createPlanView(canvas, { gizmo } = {}) {
     const scene = new THREE.Scene();
     const content = new THREE.Group();
     scene.add(content);
+    const input = new THREE.Group();
+    scene.add(input);
+    const listeners = new Set();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
     const controls = new OrbitControls(camera, canvas);
     Object.assign(controls, { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, zoomToCursor: true, screenSpacePanning: true });
@@ -68,6 +71,7 @@ export function createPlanView(canvas, { gizmo } = {}) {
         d.zoom = String(+camera.zoom.toFixed(4));
         d.azimuth = String(+THREE.MathUtils.radToDeg(controls.getAzimuthalAngle()).toFixed(2));
         d.elevation = String(+(90 - THREE.MathUtils.radToDeg(controls.getPolarAngle())).toFixed(2));
+        for (const fn of listeners) fn();
     };
     controls.addEventListener('change', render);
 
@@ -179,7 +183,33 @@ export function createPlanView(canvas, { gizmo } = {}) {
         if (plan.points?.length) content.add(new THREE.Points(positions(plan.points.flatMap(([x, y]) => [x, 4 * lift, -y])), pointMat));
     }
 
-    return { draw, clear, resize, home };
+    function screenPoint([x,y]) {
+        camera.updateMatrixWorld();
+        const p=new THREE.Vector3(x,0,-y).project(camera), r=canvas.getBoundingClientRect();
+        return [r.left+(p.x+1)*r.width/2,r.top+(1-p.y)*r.height/2];
+    }
+    function pointOnPlan(x,y) {
+        const r=canvas.getBoundingClientRect(), ray=new THREE.Raycaster();
+        camera.updateMatrixWorld();
+        ray.setFromCamera(new THREE.Vector2((x-r.left)/r.width*2-1,1-(y-r.top)/r.height*2),camera);
+        const p=ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());
+        return p?[p.x,-p.z]:null;
+    }
+    // Input is retained separately from frame geometry and never changes camera fit.
+    function drawBubbles(rooms,selected,draft) {
+        for(const o of input.children){o.geometry.dispose();o.material.dispose();}
+        input.clear();
+        for(const r of draft?[...rooms,draft]:rooms){
+            const fill=new THREE.MeshBasicMaterial({color:r.color,transparent:true,opacity:0.28,side:THREE.DoubleSide,depthTest:false,depthWrite:false});
+            const circle=new THREE.Mesh(new THREE.CircleGeometry(r.radius,64).rotateX(-Math.PI/2),fill);
+            circle.position.set(r.center[0],0,-r.center[1]);circle.renderOrder=20;input.add(circle);
+            const points=Array.from({length:64},(_,i)=>new THREE.Vector3(r.center[0]+r.radius*Math.cos(i*Math.PI/32),0,-r.center[1]-r.radius*Math.sin(i*Math.PI/32)));
+            const line=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:r.id===selected?'#111111':'#555555',transparent:true,depthTest:false,depthWrite:false}));
+            line.renderOrder=21;input.add(line);
+        }
+        render();
+    }
+    return { draw, clear, resize, home, screenPoint, pointOnPlan, drawBubbles, onChange(fn){listeners.add(fn);return()=>listeners.delete(fn);} };
 }
 
 /** Triangles with one colour each, gathered into one geometry. */
