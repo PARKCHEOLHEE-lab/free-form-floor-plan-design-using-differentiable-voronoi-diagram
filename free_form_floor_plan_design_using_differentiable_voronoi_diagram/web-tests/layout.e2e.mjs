@@ -47,3 +47,26 @@ test("desktop: the canvas covers the window, the page does not scroll, and there
         proc.kill();
     }
 });
+
+/** The panels on screen, by name. */
+const openPanels = (page) =>
+    page.$$eval(".panel", (ps) => ps.filter((p) => p.getClientRects().length > 0).map((p) => p.dataset.panel));
+
+test("toolbar: an icon opens only its panel, another icon swaps it, the same icon closes it", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1440, 900], async (page) => {
+            assert.deepEqual(await openPanels(page), [], "no panel is open at the start");
+            await page.click("button[data-open=rooms]");
+            assert.deepEqual(await openPanels(page), ["rooms"]);
+            await page.click("button[data-open=weights]");
+            assert.deepEqual(await openPanels(page), ["weights"]);
+            await page.click("button[data-open=weights]");
+            assert.deepEqual(await openPanels(page), []);
+            await page.click("button[data-open=display]");
+            assert.deepEqual(await openPanels(page), ["display"]);
+        });
+    } finally {
+        proc.kill();
+    }
+});

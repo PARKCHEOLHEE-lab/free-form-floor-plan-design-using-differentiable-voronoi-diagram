@@ -160,14 +160,58 @@
     footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
 
     /* Canvas UI: the plan canvas covers the window (fitCanvases reads its width and height)
-       and every control floats over it. */
+       and every control floats over it: icon toolbars in the corners, one settings panel at
+       a time beside its toolbar, and the loss card at the bottom left. The plan's own look
+       (pastel cells, double-line walls, sites, loss colours) is unchanged. */
+    @font-face {
+      font-family: "Geist"; src: url("./fonts/Geist-Variable.woff2") format("woff2");
+      font-weight: 100 900; font-style: normal; font-display: swap;
+    }
+    :root {
+      --font: "Geist", -apple-system, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+      --ui-fg: #0a0a0a; --ui-muted: #f5f5f5; --ui-muted-fg: #737373; --ui-border: #e5e5e5;
+      --ui-card-shadow: 0 0 0 1px rgba(10, 10, 10, .1), 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -4px rgba(0, 0, 0, .1);
+    }
     html, body { height: 100%; overflow: hidden; }
+    body { font-size: 14px; color: var(--ui-fg); }
     .wrap { max-width: none; padding: 0; }
-    .stage, .canvas-card { display: contents; }
+    .stage, .canvas-card, .controls { display: contents; }
     .planbox { position: fixed; inset: 0; }
     .planbox canvas#plan { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; }
-    .losscard { position: fixed; left: 16px; bottom: 16px; width: min(420px, calc(100vw - 32px)); }
-    .controls { position: fixed; top: 16px; right: 16px; bottom: 16px; width: 300px; overflow-y: auto; }
+
+    .toolbar, .panel, .losscard { position: fixed; background: var(--light); border-radius: 14px; box-shadow: var(--ui-card-shadow); }
+    .toolbar { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; z-index: 2; }
+    .toolbar.tl { top: 16px; left: 16px; }
+    .toolbar.br { right: 16px; bottom: 16px; }
+    .toolbar .sep { width: 20px; height: 1px; margin: 3px 0; background: var(--ui-border); }
+    .tool { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px;
+      background: transparent; color: var(--ui-fg); cursor: pointer; transition: background .12s; }
+    .tool:hover, .tool[aria-pressed=true] { background: var(--ui-muted); }
+    .tool:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
+    .tool.primary { background: var(--ui-fg); color: var(--light); }
+    .tool.primary:hover { background: #262626; }
+    .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    .panel { display: none; top: 16px; left: 64px; width: min(300px, calc(100vw - 80px)); max-height: calc(100dvh - 32px);
+      overflow-y: auto; padding: 14px 16px; z-index: 1; }
+    .panel.open { display: block; }
+    .panel.br-panel { top: auto; left: auto; right: 64px; bottom: 16px; }
+    .panel .label, .losscard .label { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ui-fg); margin-bottom: 8px; }
+    .losscard { left: 16px; bottom: 16px; width: min(420px, calc(100vw - 96px)); padding: 12px 14px 10px; }
+    .losscard .canvas-sub { margin-top: 0; }
+    .lossrow { margin: 2px 0; }
+    .lossrow .lk { color: var(--ui-muted-fg); font-size: 12px; }
+    .lossrow .spark { height: 20px; border-color: var(--ui-border); }
+
+    .row > label { color: var(--ui-muted-fg); }
+    .row .val, .readout { font-size: 12px; color: var(--ui-fg); }
+    input[type=range] { background: var(--ui-border); }
+    input[type=range]::-webkit-slider-thumb { background: var(--light); border: 1.5px solid var(--ui-fg); }
+    input[type=range]::-moz-range-thumb { background: var(--light); border: 1.5px solid var(--ui-fg); }
+    .seg button { border-color: var(--ui-border); border-radius: 8px; color: var(--ui-fg); }
+    .seg button:hover:not(.active) { background: var(--ui-muted); }
+    .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
+    .panel .seg { margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -191,13 +235,39 @@
       </div>
     </div>
 
-    <div class="controls">
-      <div class="actions">
-        <button id="run" class="primary">Run</button>
-        <button id="reset">Reset</button>
-      </div>
+    <!-- Icons: Lucide (lucide.dev), ISC License, Copyright (c) for portions of Lucide are held by
+         Cole Bemis 2013-2022 as part of Feather (MIT); all other copyright (c) for Lucide are held
+         by Lucide Contributors 2022. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+        <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+        <symbol id="i-boundary" viewBox="0 0 24 24"><path d="M3.5 8.7c-.7.5-1 1.4-.7 2.2l2.8 8.7c.3.8 1 1.4 1.9 1.4h9.1c.9 0 1.6-.6 1.9-1.4l2.8-8.7c.3-.8 0-1.7-.7-2.2l-7.4-5.3a2.1 2.1 0 0 0-2.4 0Z"/></symbol>
+        <symbol id="i-rooms" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+        <symbol id="i-weights" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+        <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+        <symbol id="i-display" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+      </defs>
+    </svg>
 
-      <div class="group">
+    <!-- top-left: run controls, then one icon per settings panel -->
+    <nav class="toolbar tl" aria-label="Run and settings">
+      <button id="run" class="tool primary" aria-label="Run" title="Run"><svg class="ic"><use href="#i-play"/></svg></button>
+      <button id="reset" class="tool" aria-label="Reset" title="Reset"><svg class="ic"><use href="#i-reset"/></svg></button>
+      <span class="sep"></span>
+      <button class="tool" data-open="boundary" aria-label="Boundary" title="Boundary"><svg class="ic"><use href="#i-boundary"/></svg></button>
+      <button class="tool" data-open="rooms" aria-label="Rooms" title="Rooms"><svg class="ic"><use href="#i-rooms"/></svg></button>
+      <button class="tool" data-open="weights" aria-label="Loss weights" title="Loss weights"><svg class="ic"><use href="#i-weights"/></svg></button>
+      <button class="tool" data-open="optimize" aria-label="Optimization" title="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
+    </nav>
+    <!-- bottom-right: how the plan is drawn -->
+    <nav class="toolbar br" aria-label="View">
+      <button class="tool" data-open="display" aria-label="Display" title="Display"><svg class="ic"><use href="#i-display"/></svg></button>
+    </nav>
+
+    <div class="controls">
+      <section class="panel" data-panel="boundary">
         <div class="label">Boundary</div>
         <div class="seg" id="presets">
           <button data-mode="shape_a">A</button>
@@ -206,39 +276,39 @@
           <button data-mode="shape_d">D</button>
           <button data-mode="shape_e" class="active">E</button>
         </div>
-      </div>
+      </section>
 
-      <div class="group">
-        <div class="label">Layout</div>
+      <section class="panel" data-panel="rooms">
+        <div class="label">Rooms</div>
         <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
         <div class="row"><label>rooms</label><input id="rooms" type="range" min="2" max="8" step="1" value="5"><span class="val" id="rooms_v">5</span></div>
         <div class="roomareas" id="roomareas"></div>
-      </div>
+      </section>
 
-      <div class="group">
-        <div class="label">Wall</div>
-        <div class="row"><label>width</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+      <section class="panel br-panel" data-panel="display">
+        <div class="label">Display</div>
+        <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
         <div class="seg" id="walls">
           <button data-walls="raw" class="active">Raw</button>
           <button data-walls="aligned">Aligned</button>
         </div>
         <div class="row"><label>aligned</label><span class="readout" id="align_v"></span></div>
-      </div>
+      </section>
 
-      <div class="group">
+      <section class="panel" data-panel="weights">
         <div class="label">Loss weight (0–1)</div>
         <div class="row"><label>wall</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="0.70"><span class="val" id="w_wall_v">0.70</span></div>
         <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
         <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
         <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
-      </div>
+      </section>
 
-      <div class="group">
+      <section class="panel" data-panel="optimize">
         <div class="label">Optimization</div>
         <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
         <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
         <div class="row"><label>seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
-      </div>
+      </section>
     </div>
   </div>
 
@@ -725,8 +795,22 @@ function stop() {
 
 // One Run / Pause / Resume toggle (the separate Pause button is merged in here).
 function setButtons() {
-  $('run').textContent = running ? 'Pause' : (paused ? 'Resume' : 'Run');
+  const label = running ? 'Pause' : (paused ? 'Resume' : 'Run');
+  $('run').setAttribute('aria-label', label);
+  $('run').title = label;
+  $('run').querySelector('use').setAttribute('href', running ? '#i-pause' : '#i-play');
 }
+
+// ---------- toolbars ----------
+// One settings panel at a time: an icon opens its panel, another icon swaps it, the same
+// icon closes it.
+let openPanel = null;
+function showPanel(name) {
+  openPanel = openPanel === name ? null : name;
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('open', p.dataset.panel === openPanel));
+  document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));
+}
+document.querySelectorAll('button[data-open]').forEach(b => b.addEventListener('click', () => showPanel(b.dataset.open)));
 
 $('run').onclick = () => {
   if (running) {                         // running → pause
