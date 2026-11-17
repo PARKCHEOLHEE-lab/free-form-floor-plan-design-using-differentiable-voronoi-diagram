@@ -59,3 +59,14 @@ test("desktop: the canvas fills its column, as wide as the loss rows and at leas
         proc.kill();
     }
 });
+
+test("narrow: at 600px the page stays stacked, with the square canvas across the width", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        const m = await measure(url, [600, 900]);
+        assert.ok(m.canvas.width >= 0.9 * 600, `canvas ${m.canvas.width}px wide, under 90% of 600`);
+        assert.ok(Math.abs(m.canvas.width - m.canvas.height) <= 2, `canvas ${m.canvas.width}x${m.canvas.height} is not square`);
+    } finally {
+        proc.kill();
+    }
+});
