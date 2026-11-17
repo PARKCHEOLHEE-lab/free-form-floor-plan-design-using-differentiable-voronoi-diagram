@@ -260,18 +260,20 @@ pub struct LossBreakdown {
     pub topo: f32,
     pub bb: f32,
     pub cell: f32,
+    pub connection: f32,
 }
 
 /// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
 /// each component only when its weight is positive (Python's `if w > 0`
 /// guards), and sums the six f32 scalars left to right.
-pub fn floor_plan_loss(
+pub fn floor_plan_loss_with_program(
     sites: &[[f32; 2]],
     boundary: &Polygon<f64>,
     target_areas: &[f64],
     room_indices: &[usize],
     w: &LossWeights,
     hint: Option<&crate::voronoi::GeosOrderHint>,
+    program: Option<&crate::program::RoomProgram>,
 ) -> LossBreakdown {
     let geom = crate::voronoi::compute_cells(sites, boundary, hint);
     let groups = rooms_group(&geom.cells_sorted, room_indices);
@@ -281,7 +283,7 @@ pub fn floor_plan_loss(
     // Compute it once per group here and share it (it used to be recomputed
     // inside each component). The result is identical, so the f32 losses are
     // bitwise unchanged; this only removes the duplicate boolean ops.
-    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 {
+    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 || program.is_some_and(|p| p.has_connections()) {
         groups.iter().map(|g| union_group(g)).collect()
     } else {
         Vec::new()
@@ -320,7 +322,8 @@ pub fn floor_plan_loss(
         0.0
     };
     // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
-    let total = wall + area + lloyd + topo + bb + cell;
+    let connection = program.map_or(0., |p| p.connection_loss(&unions));
+    let total = wall + area + lloyd + topo + bb + cell + connection;
     LossBreakdown {
         total,
         wall,
@@ -329,8 +332,16 @@ pub fn floor_plan_loss(
         topo,
         bb,
         cell,
+        connection,
     }
 }
+
+/// The legacy loss API keeps exactly the same terms when no program is supplied.
+pub fn floor_plan_loss(
+    sites: &[[f32; 2]], boundary: &Polygon<f64>, target_areas: &[f64],
+    room_indices: &[usize], w: &LossWeights,
+    hint: Option<&crate::voronoi::GeosOrderHint>,
+) -> LossBreakdown { floor_plan_loss_with_program(sites, boundary, target_areas, room_indices, w, hint, None) }
 
 #[cfg(test)]
 mod wall_local_tests {

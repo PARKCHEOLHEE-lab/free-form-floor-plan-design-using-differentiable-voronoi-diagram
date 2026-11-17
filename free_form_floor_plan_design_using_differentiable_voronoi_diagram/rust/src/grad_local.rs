@@ -22,6 +22,7 @@ use crate::loss::{
 };
 use crate::voronoi::{compute_cells, site_neighbors};
 use geo::{MultiPolygon, Polygon};
+use crate::program::RoomProgram;
 
 /// The six per-term loss components from already-built geometry, mirroring
 /// `floor_plan_loss`'s guards and summation order so the result is identical.
@@ -34,6 +35,7 @@ fn breakdown_from(
     room_indices: &[usize],
     w: &LossWeights,
     boundary: &Polygon<f64>,
+    program: Option<&RoomProgram>,
 ) -> LossBreakdown {
     let wall = if w.w_wall > 0.0 { compute_wall_local_loss(unions, boundary, w.w_wall) } else { 0.0 };
     let area = if w.w_area > 0.0 { compute_area_loss(cells, target_areas, room_indices, w.w_area) } else { 0.0 };
@@ -41,8 +43,9 @@ fn breakdown_from(
     let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
     let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
-    let total = wall + area + lloyd + topo + bb + cell;
-    LossBreakdown { total, wall, area, lloyd, topo, bb, cell }
+    let connection = program.map_or(0., |p| p.connection_loss(unions));
+    let total = wall + area + lloyd + topo + bb + cell + connection;
+    LossBreakdown { total, wall, area, lloyd, topo, bb, cell, connection }
 }
 
 /// Sum the six loss components from already-built geometry. Thin wrapper over
@@ -57,8 +60,9 @@ fn total_from(
     room_indices: &[usize],
     w: &LossWeights,
     boundary: &Polygon<f64>,
+    program: Option<&RoomProgram>,
 ) -> f32 {
-    breakdown_from(cells, groups, unions, sites, target_areas, room_indices, w, boundary).total
+    breakdown_from(cells, groups, unions, sites, target_areas, room_indices, w, boundary, program).total
 }
 
 /// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
@@ -91,6 +95,7 @@ pub struct LocalGradContext<'a> {
     target_areas: &'a [f64],
     room_indices: &'a [usize],
     w: &'a LossWeights,
+    program: Option<&'a RoomProgram>,
     /// Voronoi neighbor site indices per site (stable under a 1e-6 perturbation).
     neighbors: Vec<Vec<usize>>,
     /// Base clipped cells (site order) and per-room unions, reused for the
@@ -110,10 +115,15 @@ impl<'a> LocalGradContext<'a> {
         target_areas: &'a [f64],
         room_indices: &'a [usize],
         w: &'a LossWeights,
+    ) -> Self { Self::new_with_program(sites,boundary,target_areas,room_indices,w,None) }
+
+    pub fn new_with_program(
+        sites: &[[f32; 2]], boundary: &'a Polygon<f64>, target_areas: &'a [f64],
+        room_indices: &'a [usize], w: &'a LossWeights, program: Option<&'a RoomProgram>,
     ) -> Self {
         let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let base_cells = compute_cells(sites, boundary, None).cells_sorted;
-        let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0;
+        let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 || program.is_some_and(|p| p.has_connections());
         let (n_rooms, base_unions, base_breakdown) = {
             let groups = rooms_group(&base_cells, room_indices);
             let n_rooms = groups.len();
@@ -124,11 +134,11 @@ impl<'a> LocalGradContext<'a> {
             } else {
                 Vec::new()
             };
-            let bd = breakdown_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary);
+            let bd = breakdown_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary, program);
             (n_rooms, unions, bd)
         };
         let neighbors = site_neighbors(&sites_f64, boundary);
-        LocalGradContext { boundary, target_areas, room_indices, w, neighbors, base_cells, base_unions, n_rooms, base_breakdown }
+        LocalGradContext { boundary, target_areas, room_indices, w, program, neighbors, base_cells, base_unions, n_rooms, base_breakdown }
     }
 
     /// Total loss at the base (unperturbed) sites — must equal the global
@@ -254,7 +264,7 @@ impl<'a> LocalGradContext<'a> {
         // union required bitwise-shared edges and a snap pass; i_overlay does not).
         let groups = rooms_group(&cells, self.room_indices);
 
-        let need_unions = self.w.w_wall > 0.0 || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
+        let need_unions = self.w.w_wall > 0.0 || self.w.w_topo > 0.0 || self.w.w_bb > 0.0 || self.program.is_some_and(|p| p.has_connections());
         let unions: Vec<MultiPolygon<f64>> = if need_unions {
             (0..self.n_rooms)
                 .map(|r| {
@@ -268,7 +278,7 @@ impl<'a> LocalGradContext<'a> {
         } else {
             Vec::new()
         };
-        total_from(&cells, &groups, &unions, perturbed_sites, self.target_areas, self.room_indices, self.w, self.boundary)
+        total_from(&cells, &groups, &unions, perturbed_sites, self.target_areas, self.room_indices, self.w, self.boundary, self.program)
     }
 }
 

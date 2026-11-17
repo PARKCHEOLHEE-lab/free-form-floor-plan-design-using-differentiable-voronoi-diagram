@@ -132,13 +132,14 @@ impl WasmOpt {
 
     /// Current geometry without advancing — for previewing the initial layout.
     pub fn current(&self) -> JsValue {
-        let b = loss::floor_plan_loss(
+        let b = loss::floor_plan_loss_with_program(
             &self.sites,
             &self.boundary,
             &self.target_areas,
             &self.room_indices,
             &self.weights,
             None,
+            self.program.as_ref(),
         );
         serde_wasm_bindgen::to_value(&self.geometry_frame(&b)).unwrap()
     }
@@ -197,12 +198,13 @@ impl WasmOpt {
         // it; its base total is the pre-step loss (what the CLI logs), and its
         // gradients reuse that geometry — ~2.4x faster than the global path and
         // bit-identical to it. (See ../rust grad_local.rs.)
-        let ctx = grad_local::LocalGradContext::new(
+        let ctx = grad_local::LocalGradContext::new_with_program(
             &self.sites,
             &self.boundary,
             &self.target_areas,
             &self.room_indices,
             &self.weights,
+            self.program.as_ref(),
         );
         let pre_step_breakdown = ctx.base_breakdown();
         let grads = ctx.gradients(&self.sites);
