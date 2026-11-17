@@ -18,6 +18,8 @@ test("preset E run to the end: Aligned walls show a higher aligned-wall share th
         await page.waitForFunction(() => document.getElementById("status").textContent === "done", null, { timeout: 90_000 });
         if (SHOTS) await page.screenshot({ path: `${SHOTS}/raw.png` });
 
+        // the wall switch lives in the Display panel, opened from the bottom-right toolbar
+        await page.locator("button[data-open=display]").click();
         await page.locator("#walls button[data-walls=aligned]").click();
         const text = await page.locator("#align_v").textContent();
         if (SHOTS) await page.screenshot({ path: `${SHOTS}/aligned.png` });
