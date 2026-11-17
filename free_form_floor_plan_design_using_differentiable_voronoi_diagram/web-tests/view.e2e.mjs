@@ -160,3 +160,55 @@ test("3D: the 3D icon turns the plan to isometric with standing walls, a drag ro
         assert.equal(await page.$eval("button[data-toggle='3d']", (b) => b.getAttribute("aria-pressed")), "false");
     });
 });
+
+/** Each gizmo axis end's centre, in px from the gizmo's centre (x right, y down). */
+const gizmoEnds = (page) =>
+    page.$$eval(".gizmo [data-axis]", (ends) => {
+        const g = document.querySelector(".gizmo").getBoundingClientRect();
+        const centre = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+        const [cx, cy] = centre(g);
+        return Object.fromEntries(ends.map((e) => [e.dataset.axis, centre(e.getBoundingClientRect()).map((v, i) => v - [cx, cy][i])]));
+    });
+
+test("gizmo: it sits in the top-right corner, its axes follow the camera, clicking +X, -Y or +Z turns the view, and an axis end names its view on hover", { timeout: 180_000 }, async () => {
+    for (const size of [[1145, 820], [600, 900]])
+        await withPage(async (page) => {
+            const g = await page.$eval(".gizmo", (e) => ({ ...e.getBoundingClientRect().toJSON(), w: innerWidth }));
+            const corner = g.top >= 0 && g.top <= 24 && g.right <= g.w && g.right >= g.w - 24;
+            const small = g.width >= 48 && g.width <= 120 && g.height >= 48 && g.height <= 120;
+            assert.ok(corner && small, `${size}: gizmo at ${g.left},${g.top}-${g.right},${g.bottom}`);
+        }, size);
+
+    await withPage(async (page) => {
+        let e = await gizmoEnds(page);
+        assert.deepEqual(Object.keys(e).sort(), ["+x", "+y", "+z", "-x", "-y"]);
+        assert.ok(e["+x"][0] > 10 && Math.abs(e["+x"][1]) < 2, `top view: +X at ${e["+x"]}`);
+        assert.ok(e["+y"][1] < -10 && Math.abs(e["+y"][0]) < 2, `top view: +Y at ${e["+y"]}`);
+        assert.ok(Math.hypot(...e["+z"]) < 2, `top view: +Z at ${e["+z"]}`);
+        await page.click("button[data-toggle='3d']");
+        e = await gizmoEnds(page);
+        assert.ok(e["+z"][1] < -10 && Math.abs(e["+z"][0]) < 2, `3D: +Z at ${e["+z"]}`);
+        assert.ok(e["+x"][0] > 5 && e["+x"][1] < 0 && e["+y"][0] < -5 && e["+y"][1] < 0, `3D: +X at ${e["+x"]}, +Y at ${e["+y"]}`);
+        await page.click("button[data-toggle='3d']");
+
+        const pressed = () => page.$eval("button[data-toggle='3d']", (b) => b.getAttribute("aria-pressed"));
+        await page.click(".gizmo [data-axis='+x']");
+        let c = await camera(page);
+        assert.ok(c.view === "iso" && near(c.azimuth, 90) && near(c.elevation, 35.26), `+X gives ${JSON.stringify(c)}`);
+        assert.equal(await pressed(), "true");
+        await page.click(".gizmo [data-axis='-y']");
+        c = await camera(page);
+        assert.ok(c.view === "iso" && near(c.azimuth, 0) && near(c.elevation, 35.26), `-Y gives ${JSON.stringify(c)}`);
+        await page.click(".gizmo [data-axis='+z']");
+        assert.deepEqual(await camera(page), { view: "plan", zoom: 1, azimuth: 0, elevation: 90 });
+        assert.equal(await pressed(), "false");
+
+        await page.hover(".gizmo [data-axis='+x']");
+        await page.waitForTimeout(300);
+        const tip = await page.$eval(".gizmo [data-axis='+x']", (b) => {
+            const s = getComputedStyle(b, "::after");
+            return { text: s.content, opacity: +s.opacity };
+        });
+        assert.deepEqual(tip, { text: '"View from east"', opacity: 1 });
+    });
+});

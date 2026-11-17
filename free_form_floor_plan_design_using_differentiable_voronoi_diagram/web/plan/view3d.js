@@ -6,8 +6,10 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { strokeRing, strokeTriangles } from './stroke.js';
 import { signedArea2 } from './geom.js';
+import { createGizmo } from './gizmo.js';
 
 const MIN_ZOOM = 0.5, MAX_ZOOM = 8;
+const SIDE_AZIMUTH = { '+x': 90, '-x': -90, '+y': 180, '-y': 0 }; // degrees: the camera east, west, north or south
 const FIT = 0.80;                               // zoom 1 fits the plan's extent into 80% of the shorter window side
 const ISO_ELEVATION = Math.atan(1 / Math.SQRT2); // 35.26 degrees: the true isometric angle
 const ISO_AZIMUTH = -Math.PI / 4;               // camera to the south-west, looking north-east
@@ -30,8 +32,9 @@ const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
  *   wall   half wall width, in the 2D canvas's wall units
  * The camera fits the plan when its outline changes, and otherwise keeps the user's view.
  * The canvas carries data-view, data-zoom, data-azimuth and data-elevation (degrees).
+ * `gizmo`, an empty box, becomes the view gizmo; `onMode(mode)` hears every change of mode.
  */
-export function createPlanView(canvas) {
+export function createPlanView(canvas, { gizmo, onMode } = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     renderer.setClearColor(0xffffff, 1);
     const scene = new THREE.Scene();
@@ -49,9 +52,15 @@ export function createPlanView(canvas) {
     let width = 1, height = 1;
     let fitted = null;                          // { cx, cy, extent } of the plan the camera is fitted to
     let lastPlan = null;
+    const axes = gizmo ? createGizmo(gizmo, { onPick: lookFrom }) : null;
 
     const render = () => {
         renderer.render(scene, camera);
+        if (axes) {
+            // the camera's right, up and back directions are the first three columns of its world matrix
+            const m = camera.matrixWorld.elements;
+            axes.update([m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]);
+        }
         const d = canvas.dataset;
         d.view = mode;
         d.zoom = String(+camera.zoom.toFixed(4));
@@ -69,8 +78,9 @@ export function createPlanView(canvas) {
         camera.far = 10 * extent();
         camera.updateProjectionMatrix();
     }
-    // Point the camera along this mode's view direction, keeping the target and the zoom.
-    function orient() {
+    // Point the camera along this mode's view direction, keeping the target and the zoom. In 3D
+    // the camera sits at `azimuth` around the plan (OrbitControls' angle: 0 is the south side).
+    function orient(azimuth = ISO_AZIMUTH) {
         const top = mode === 'plan';
         controls.enableRotate = !top;
         controls.maxPolarAngle = top ? TOP_POLAR : THREE.MathUtils.degToRad(85);
@@ -78,7 +88,7 @@ export function createPlanView(canvas) {
         controls.mouseButtons = { LEFT: drag, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
         controls.touches = { ONE: top ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
         const phi = top ? TOP_POLAR : Math.PI / 2 - ISO_ELEVATION;
-        const theta = top ? 0 : ISO_AZIMUTH;
+        const theta = top ? 0 : azimuth;
         camera.position.copy(controls.target).add(new THREE.Vector3().setFromSphericalCoords(5 * extent(), phi, theta));
         camera.lookAt(controls.target);
         controls.update();
@@ -104,11 +114,19 @@ export function createPlanView(canvas) {
         render();
     }
 
-    function setMode(next) {
+    function setMode(next, azimuth) {
         mode = next;
         if (lastPlan) build(lastPlan);
-        orient();
+        orient(azimuth);
         render();
+        onMode?.(mode);
+    }
+
+    // A gizmo click: +Z is the top view; the other ends look from that side in 3D, at the
+    // isometric height (the camera stays above the floor).
+    function lookFrom(axis) {
+        if (axis === '+z') setMode('plan');
+        else setMode('iso', THREE.MathUtils.degToRad(SIDE_AZIMUTH[axis]));
     }
 
     function clear() {
