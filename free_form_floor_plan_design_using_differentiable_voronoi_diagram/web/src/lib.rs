@@ -10,6 +10,7 @@
 use geo::{Area, LineString, MultiPolygon, Polygon, Simplify};
 use serde::Serialize;
 use voronoi_floorplan::loss::LossWeights;
+use voronoi_floorplan::program::RoomProgram;
 use voronoi_floorplan::{grad_local, init, loss, optim::AdamW, shapes, voronoi};
 use wasm_bindgen::prelude::*;
 
@@ -63,6 +64,9 @@ pub struct WasmOpt {
     iteration: usize,
     lr_modified: f64,
     iter_to_modify_lr: usize,
+    program: Option<RoomProgram>,
+    seed: u64,
+    initial_lr: f64,
 }
 
 #[wasm_bindgen]
@@ -141,6 +145,19 @@ impl WasmOpt {
 }
 
 impl WasmOpt {
+    fn configure_program(&mut self, circles: &[[f64; 3]]) -> Result<(), String> {
+        let program = RoomProgram::new(&self.boundary, circles)?;
+        let (sites, labels) = program.initialize(&self.boundary, self.sites.len(), self.seed)?;
+        let area = self.boundary.unsigned_area();
+        self.target_areas = program.ratios().iter().map(|r| area*r).collect();
+        self.opt = AdamW::new(sites.len()-program.fixed_count(), self.initial_lr);
+        self.sites = sites;
+        self.room_indices = labels;
+        self.program = Some(program);
+        self.iteration = 0;
+        Ok(())
+    }
+
     fn build(
         boundary: Polygon<f64>,
         num_sites: usize,
@@ -165,6 +182,9 @@ impl WasmOpt {
             // the bundled configs drop the LR to 0.8x at iteration 300
             lr_modified: lr * 0.8,
             iter_to_modify_lr: 300,
+            program: None,
+            seed,
+            initial_lr: lr,
         }
     }
 
@@ -186,7 +206,8 @@ impl WasmOpt {
         );
         let pre_step_breakdown = ctx.base_breakdown();
         let grads = ctx.gradients(&self.sites);
-        self.opt.step(&mut self.sites, &grads);
+        let fixed = self.program.as_ref().map_or(0, RoomProgram::fixed_count);
+        self.opt.step(&mut self.sites[fixed..], &grads[fixed..]);
         // geometry AFTER the step (matches the GIF frame-order fix in run.rs),
         // tagged with the pre-step loss breakdown (its .total is what the CLI logs)
         self.geometry_frame(&pre_step_breakdown)
@@ -250,6 +271,9 @@ impl WasmOpt {
         }
     }
 }
+
+#[cfg(test)]
+mod program_tests;
 
 #[cfg(test)]
 mod tests {

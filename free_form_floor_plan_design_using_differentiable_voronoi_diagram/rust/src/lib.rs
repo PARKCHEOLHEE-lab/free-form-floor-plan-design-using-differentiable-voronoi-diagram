@@ -5,6 +5,7 @@ pub mod grad_local;
 pub mod init;
 pub mod loss;
 pub mod optim;
+pub mod program;
 pub mod shapes;
 pub mod voronoi;
 pub mod walls;
