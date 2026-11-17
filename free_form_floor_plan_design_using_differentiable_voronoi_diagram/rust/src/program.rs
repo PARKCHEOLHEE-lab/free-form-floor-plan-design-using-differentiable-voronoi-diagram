@@ -132,7 +132,8 @@ impl RoomProgram {
     }
 
     /// Preserve the existing seeded site cloud, excluding duplicates of fixed
-    /// centers. Each remaining site starts in the nearest user-specified room.
+    /// centers. Assign the remaining cells near their room centers while fitting
+    /// the requested shares, measured from every displayed clipped piece.
     pub fn initialize(
         &self,
         boundary: &Polygon<f64>,
@@ -151,20 +152,52 @@ impl RoomProgram {
         );
         let hull = MultiPoint::from(sites.iter().map(|p|(p[0] as f64,p[1] as f64)).collect::<Vec<_>>()).convex_hull();
         if hull.unsigned_area()==0. { return Err("Use at least three non-collinear sites. Increase the site budget.".into()); }
-        let labels = sites
-            .iter()
-            .map(|p| {
-                self.centers
-                    .iter()
-                    .enumerate()
-                    .min_by(|(_, a), (_, b)| {
-                        let distance = |q: &[f32; 2]| (p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2);
-                        distance(a).total_cmp(&distance(b))
-                    })
-                    .unwrap()
-                    .0
-            })
-            .collect();
+        let labels = self.initial_labels(&sites, boundary);
         Ok((sites, labels))
+    }
+
+    fn initial_labels(&self, sites: &[[f32;2]], boundary: &Polygon<f64>) -> Vec<usize> {
+        let k=self.centers.len();
+        let costs:Vec<Vec<f64>>=sites.iter().map(|p|self.centers.iter().map(|c|
+            (p[0] as f64-c[0] as f64).powi(2)+(p[1] as f64-c[1] as f64).powi(2)
+        ).collect()).collect();
+        let mut weights=vec![0.;k];
+        let assign=|weights:&[f64]|costs.iter().enumerate().map(|(i,c)|{
+            if i<k {i} else {(0..k).min_by(|&a,&b|(c[a]-weights[a]).total_cmp(&(c[b]-weights[b]))).unwrap()}
+        }).collect::<Vec<_>>();
+        let mut best=assign(&weights);
+        if k==1 || sites.len()==k {return best;}
+        let mut cell_areas=vec![0.;sites.len()];
+        for (i,cell) in crate::voronoi::render_cells(sites,boundary) {cell_areas[i]+=cell.unsigned_area();}
+        let total=boundary.unsigned_area();
+        let mut best_error=f64::INFINITY;
+        // Each weight shifts one room's reach. Sort the points at which a free
+        // cell changes owner, then choose the cut nearest that room's target area.
+        // Anchor cells never change owner; exact shares can be unattainable.
+        for _ in 0..64 {
+            for r in 0..k {
+                let mut thresholds:Vec<_>=(k..sites.len()).map(|i|{
+                    let other=(0..k).filter(|&s|s!=r).map(|s|costs[i][s]-weights[s]).fold(f64::INFINITY,f64::min);
+                    (costs[i][r]-other,cell_areas[i])
+                }).collect();
+                thresholds.sort_by(|a,b|a.0.total_cmp(&b.0));
+                let target=self.ratios[r]*total;
+                let mut area=cell_areas[r];
+                let (mut cut,mut error)=(0,(area-target).abs());
+                for (i,(_,a)) in thresholds.iter().enumerate(){
+                    area+=a;
+                    if (area-target).abs()<error {cut=i+1;error=(area-target).abs();}
+                }
+                weights[r]=if cut==0 {thresholds[0].0-1.} else if cut==thresholds.len(){thresholds[cut-1].0+1.}
+                    else {(thresholds[cut-1].0+thresholds[cut].0)/2.};
+                let labels=assign(&weights);
+                let mut areas=vec![0.;k];
+                for (i,&room) in labels.iter().enumerate(){areas[room]+=cell_areas[i];}
+                let error=areas.iter().zip(&self.ratios).map(|(a,t)|(a/total-t).abs()).fold(0.,f64::max);
+                if error<best_error {best_error=error;best=labels;}
+                if best_error<=0.005 {return best;}
+            }
+        }
+        best
     }
 }

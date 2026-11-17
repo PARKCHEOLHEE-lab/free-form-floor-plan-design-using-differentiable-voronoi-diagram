@@ -13,6 +13,42 @@ fn rect(x: f64, y: f64, xx: f64, yy: f64) -> Polygon<f64> {
 }
 
 #[test]
+fn initial_room_areas_follow_circle_shares_before_optimization() {
+    use geo::{Area, Contains, Point};
+    use voronoi_floorplan::voronoi::render_cells;
+    let concave=Polygon::new(LineString::from(vec![(-1.,-1.),(1.,-1.),(1.,0.),(0.,0.),(0.,1.),(-1.,1.),(-1.,-1.)]),vec![]);
+    let cases=vec![
+        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.1],[0.5,0.,0.2]]),
+        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.2],[0.5,0.,0.1]]),
+        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.15],[0.5,0.,0.15]]),
+        (concave,vec![[-0.6,-0.4,0.1],[0.6,-0.5,0.23],[-0.6,0.6,0.14]]),
+    ];
+    let mut shares=Vec::new();
+    for (boundary,circles) in cases {
+        let p=RoomProgram::new(&boundary,&circles).unwrap();
+        let (sites,labels)=p.initialize(&boundary,80,777).unwrap();
+        assert_eq!(p.initialize(&boundary,80,777).unwrap(),(sites.clone(),labels.clone()),"initialization remains deterministic");
+        assert_eq!(sites.len(),80);
+        assert_eq!(&labels[..circles.len()],(0..circles.len()).collect::<Vec<_>>());
+        let cells=render_cells(&sites,&boundary);
+        let mut areas=vec![0.;circles.len()];
+        for (i,cell) in &cells {areas[labels[*i]]+=cell.unsigned_area();}
+        let total=boundary.unsigned_area();
+        assert!((areas.iter().sum::<f64>()-total).abs()<1e-7,"all displayed pieces cover the boundary");
+        for (r,circle) in circles.iter().enumerate(){
+            assert_eq!(sites[r],[circle[0] as f32,circle[1] as f32]);
+            assert!(cells.iter().any(|(i,cell)|labels[*i]==r && cell.contains(&Point::new(circle[0],circle[1]))),"each initial room keeps its input center");
+            assert!((areas[r]/total-p.ratios()[r]).abs()<=0.05,"room {r}: initial displayed share {} must approach target {}",areas[r]/total,p.ratios()[r]);
+        }
+        shares.push(areas[0]/total);
+    }
+    assert!(shares[1]>shares[0]+0.4,"swapping radii swaps actual initial area, not just targets");
+    let boundary=rect(-1.,-1.,1.,1.);
+    let p=RoomProgram::new(&boundary,&[[-0.5,-0.5,0.1],[0.5,-0.5,0.1],[0.,0.5,0.4]]).unwrap();
+    assert_eq!(p.initialize(&boundary,3,777).unwrap().1,vec![0,1,2],"with no free sites, fixed centers take priority over unattainable area targets");
+}
+
+#[test]
 fn requested_links_change_local_loss_and_gradients_without_legacy_weights() {
     let boundary = rect(-1., -1., 1., 1.);
     let mut p = RoomProgram::new(
