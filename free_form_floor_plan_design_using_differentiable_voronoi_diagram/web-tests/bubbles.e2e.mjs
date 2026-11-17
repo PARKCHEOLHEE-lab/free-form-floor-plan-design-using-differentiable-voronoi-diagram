@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
+import {join} from 'node:path';
 import {serve} from './serve.mjs';
 import {inside,segmentDistance} from '../web/plan/geom.js';
 
@@ -84,7 +85,70 @@ test('room circles draw move and resize on the plan while camera actions preserv
         if(process.env.VORONOI_COVERAGE_DIR){
             const data=(await page.coverage.stopJSCoverage()).filter(e=>e.url===url||e.url.includes('/plan/'));
             await mkdir(process.env.VORONOI_COVERAGE_DIR,{recursive:true});
-            await writeFile(new URL('bubbles-edit.json',`file://${process.env.VORONOI_COVERAGE_DIR}/`),JSON.stringify(data));
+            await writeFile(join(process.env.VORONOI_COVERAGE_DIR,'bubbles-edit.json'),JSON.stringify(data));
+        }
+    }finally{await browser.close();proc.kill();}
+});
+
+test('linking and deleting circles updates visible door links and keeps the remaining room identity', {timeout:90000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('button[data-open=boundary]');await page.click('button[data-mode=shape_a]');
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-open=rooms]');await page.click('button[data-bubble-tool=draw]');
+        await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
+        assert.equal((await labels(page)).length,2);
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        const rooms=await labels(page);
+        const strip=()=>page.$eval('#plan',async c=>{
+            const image=new Image();image.src=c.toDataURL();await image.decode();
+            const copy=document.createElement('canvas');copy.width=image.width;copy.height=image.height;
+            const ctx=copy.getContext('2d');ctx.drawImage(image,0,0);
+            const px=ctx.getImageData(610,528,110,5).data;let count=0;
+            for(let i=0;i<px.length;i+=4)if(px[i]<140&&px[i+1]<140&&px[i+2]<140)count++;
+            return count;
+        });
+        const before=await strip();
+        await page.click('button[data-bubble-tool=link]');
+        await page.mouse.click(550,530);await page.mouse.click(780,530);
+        assert.equal(await page.locator('.connection-row').count(),1,'clicking two circles creates their door connection');
+        assert.ok(await strip()>before+30,'the connection is drawn in the actual plan canvas');
+        const edge=page.locator('.connection-row');
+        assert.equal(+await edge.getAttribute('data-from'),rooms[0].id);
+        assert.equal(+await edge.getAttribute('data-to'),rooms[1].id);
+        await mkdir(new URL('../../.agents/cache/screens/',import.meta.url),{recursive:true});
+        await page.screenshot({path:fileURLToPath(new URL('../../.agents/cache/screens/bubbles-linked.png',import.meta.url))});
+        await page.mouse.click(550,530);await page.mouse.click(780,530);
+        assert.equal(await edge.count(),1,'the same pair cannot acquire duplicate door links');
+        await edge.click();
+        assert.equal(await page.locator('#bubble-delete').isEnabled(),true,'the sidebar selects a link too');
+        await page.click('button[data-bubble-tool=select]');await page.mouse.click(1050,650);
+        assert.equal(await page.locator('#bubble-delete').isDisabled(),true);
+        await page.mouse.click(665,530);
+        assert.equal(await page.locator('#bubble-delete').isEnabled(),true,'clicking the rendered line selects it');
+        await page.click('#bubble-delete');
+        assert.equal(await edge.count(),0,'the selected connection can be deleted without deleting its rooms');
+        assert.equal((await labels(page)).length,2);
+        await page.click('button[data-bubble-tool=link]');await page.mouse.click(550,530);await page.mouse.click(780,530);
+        assert.equal(await edge.count(),1);
+        const remainingColor=await page.locator(`.room-row[data-room-id="${rooms[1].id}"] .sw`).evaluate(e=>getComputedStyle(e).backgroundColor);
+        await page.locator(`.room-row[data-room-id="${rooms[0].id}"]`).click();await page.click('#bubble-delete');
+        assert.equal(await edge.count(),0,'deleting a room removes all of its links');
+        const remaining=await labels(page);
+        assert.equal(remaining.length,1);assert.equal(remaining[0].id,rooms[1].id);
+        assert.equal(remaining[0].ratio,1);
+        assert.equal(await page.locator('.bubble-label:not(.draft)').textContent(),`R${rooms[1].id}`,'room names do not change after deleting another room');
+        assert.equal(await page.locator(`.room-row[data-room-id="${rooms[1].id}"] .sw`).evaluate(e=>getComputedStyle(e).backgroundColor),remainingColor);
+        await page.mouse.click(...await middle(page.locator('.bubble-label:not(.draft)')));await page.keyboard.press('Delete');
+        assert.equal((await labels(page)).length,0);assert.equal(await page.locator('#run').isDisabled(),true);
+        assert.equal(await page.locator('#rooms_v').textContent(),'0');
+        if(process.env.VORONOI_COVERAGE_DIR){
+            const data=(await page.coverage.stopJSCoverage()).filter(e=>e.url===url||e.url.includes('/plan/'));
+            await mkdir(process.env.VORONOI_COVERAGE_DIR,{recursive:true});
+            await writeFile(join(process.env.VORONOI_COVERAGE_DIR,'bubbles-links.json'),JSON.stringify(data));
         }
     }finally{await browser.close();proc.kill();}
 });

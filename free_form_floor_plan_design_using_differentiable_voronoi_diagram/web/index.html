@@ -247,6 +247,12 @@
   #rooms_v { margin-left:auto; }
   .bubble-help.error { color:#a12b2b; }
   #program-status { font:11px/1.5 var(--font); margin-top:8px; }
+  .panel[data-panel=rooms] { max-height:calc(100vh - 32px); overflow:auto; }
+  .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 0; border:0; border-radius:4px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
+  .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
+  .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
+  .bubble-actions { margin-bottom:10px; }
+  .bubble-tools button:disabled, .bubble-actions button:disabled { opacity:.45; cursor:default; }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -323,11 +329,15 @@
         <div class="seg bubble-tools">
           <button type="button" data-bubble-tool="select" aria-pressed="true">Select</button>
           <button type="button" data-bubble-tool="draw" aria-pressed="false">Draw room</button>
+          <button type="button" data-bubble-tool="link" aria-pressed="false">Link rooms</button>
         </div>
+        <div class="seg bubble-actions"><button type="button" id="bubble-delete">Delete selected</button></div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag inside the boundary to draw a room. Select a circle to move it or resize its round handle.</p>
         <div class="row"><label>rooms</label><span class="val" id="rooms_v">6</span></div>
         <div class="label">Target area</div>
         <div class="roomareas" id="roomareas"></div>
+        <div class="label">Door links</div>
+        <div id="connections"></div>
         <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
         <div id="program-status" role="status"></div>
       </section>
@@ -431,17 +441,21 @@ const DOOR_WIDTH = 0.1;
 let editingBubbles = false;
 const currentProgram = () => programs.get(mode) ?? null;
 const roomCount = () => currentProgram()?.snapshot().rooms.length ?? roomRatios.length;
+const colorForRoomId = id => COLORS[(id-1)%COLORS.length];
+const bubbleHelp = $('bubble-message').textContent;
 const editor = createBubbleEditor($('plan'),view,{
-  labels:$('bubble-labels'),colors:COLORS,
-  onChange({commit}) {
+  labels:$('bubble-labels'),colorForRoomId,
+  onChange({commit,selectionOnly}) {
+    if(selectionOnly){refreshRoomReadout();return;}
     if(!editingBubbles){editingBubbles=true;stop();}
     refreshRoomReadout();
+    $('program-status').textContent=commit?'Updating plan...':'Editing rooms...';
     if(commit){editingBubbles=false;rebuildPreviewSoon();}
     setButtons();
   },
-  onStatus(message) {
-    $('bubble-message').textContent=message||'Drag inside the boundary to draw a room. Select a circle to move it or resize its round handle.';
-    $('bubble-message').classList.toggle('error',!!message);
+  onStatus(message,error=!!message) {
+    $('bubble-message').textContent=message||bubbleHelp;
+    $('bubble-message').classList.toggle('error',error);
   }
 });
 function setBubbleTool(name) {
@@ -459,6 +473,9 @@ function setBubbleTool(name) {
   refreshRoomReadout();setButtons();
 }
 document.querySelectorAll('[data-bubble-tool]').forEach(b=>b.addEventListener('click',()=>setBubbleTool(b.dataset.bubbleTool)));
+$('bubble-delete').addEventListener('click',()=>editor.deleteSelection());
+$('roomareas').addEventListener('click',e=>{const b=e.target.closest('[data-room-id]');if(b)editor.selectRoom(+b.dataset.roomId);});
+$('connections').addEventListener('click',e=>{const b=e.target.closest('[data-from]');if(b)editor.selectLink(+b.dataset.from,+b.dataset.to);});
 window.addEventListener('pagehide',()=>editor.dispose());
 
 // ---------- inputs ----------
@@ -488,6 +505,7 @@ $('wall').addEventListener('input', () => {
 let rebuildTimer = 0;
 function rebuildPreviewSoon() {
   clearTimeout(rebuildTimer);
+  $('status').textContent=mode+' · building...';
   rebuildTimer = setTimeout(() => {
     rebuildTimer = 0;
     stop();
@@ -502,10 +520,22 @@ $('seed').addEventListener('change', rebuildPreviewSoon);
 
 let roomRatios = []; // legacy preset shares; edited inputs come only from BubbleProgram
 function refreshRoomReadout() {
-  const weights=currentProgram()?.snapshot().ratios ?? roomRatios;
+  const input=currentProgram()?.snapshot();
+  const weights=input?.ratios ?? roomRatios;
   const sum=weights.reduce((a,b)=>a+b,0)||1;
   $('rooms_v').textContent=String(weights.length);
-  $('roomareas').innerHTML=weights.map((v,i)=>`<div class="row"><span class="raswatch"><i class="sw" style="background:${COLORS[i%COLORS.length]}"></i> R${i+1}</span><span class="val">${Math.round(v/sum*100)}%</span></div>`).join('');
+  $('roomareas').innerHTML=weights.map((v,i)=>{
+    const id=input?input.rooms[i].id:i+1;
+    const content=`<span class="raswatch"><i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i> R${id}</span><span class="val">${Math.round(v/sum*100)}%</span>`;
+    return input?`<button type="button" class="room-row${editor.selected===id?' selected':''}" data-room-id="${id}" aria-label="Select room R${id}">${content}</button>`:`<div class="row">${content}</div>`;
+  }).join('');
+  const selected=editor.selectedLink;
+  $('connections').innerHTML=(input?.links??[]).map(([a,b])=>{
+    const x=input.rooms[a].id,y=input.rooms[b].id;
+    return `<button type="button" class="connection-row${selected&&selected[0]===x&&selected[1]===y?' selected':''}" data-from="${x}" data-to="${y}" aria-label="Select door link R${x} to R${y}">R${x} / R${y}</button>`;
+  }).join('');
+  $('bubble-delete').disabled=!input||(editor.selected===null&&editor.selectedLink===null);
+  document.querySelector('[data-bubble-tool=link]').disabled=!input||input.rooms.length<2;
 }
 
 // Per-term reference scales s_i = the iter-0 raw magnitude of each loss term
@@ -677,19 +707,21 @@ $('presets').addEventListener('click', e => {
 // sites. Aligned shows the welded and snapped rooms, each filled even-odd with its holes.
 // The camera fits the boundary, so switching Raw and Aligned keeps the zoom and pan.
 function drawFrame(f) {
+  const input=currentProgram()?.snapshot();
+  const color=r=>input?colorForRoomId(input.rooms[r].id):COLORS[r%COLORS.length];
   const al = boundaryRing ? alignFrame(f) : null;
   if (al) $('align_v').textContent = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
   if (wallsMode === 'aligned' && al) {
     view.draw({
       outline: boundaryRing,
-      rooms: al.rooms.map((rings, r) => ({ rings, color: COLORS[r % COLORS.length] })),
+      rooms: al.rooms.map((rings, r) => ({ rings, color: color(r) })),
       walls: al.rooms.flat(),
       wall: wallWidth,
     });
   } else {
     view.draw({
       outline: boundaryRing,
-      rooms: f.cells.map(cell => ({ rings: [cell.ring], color: COLORS[cell.room % COLORS.length] })),
+      rooms: f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) })),
       walls: f.walls || [],
       lines: f.cells.map(cell => cell.ring),
       points: f.sites,
@@ -768,6 +800,7 @@ function hidePlayhead() { $('playhead').style.display = 'none'; }
 
 // ---------- run loop ----------
 function stop() {
+  clearTimeout(rebuildTimer);rebuildTimer=0;
   running = false; paused = false;
   curGen = ++gen;                 // invalidate any in-flight frames from the prior build
   worker.postMessage({ cmd: 'dispose' });

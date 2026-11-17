@@ -196,7 +196,7 @@ export function createPlanView(canvas, { gizmo } = {}) {
         return p?[p.x,-p.z]:null;
     }
     // Input is retained separately from frame geometry and never changes camera fit.
-    function drawBubbles(rooms,selected,draft) {
+    function drawBubbles(rooms,selected,draft,links=[],selectedEdge=-1) {
         for(const o of input.children){o.geometry.dispose();o.material.dispose();}
         input.clear();
         for(const r of draft?[...rooms,draft]:rooms){
@@ -207,6 +207,11 @@ export function createPlanView(canvas, { gizmo } = {}) {
             const line=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:r.id===selected?'#111111':'#555555',transparent:true,depthTest:false,depthWrite:false}));
             line.renderOrder=21;input.add(line);
         }
+        links.forEach(([a,b],i)=>{
+            const points=[rooms[a].center,rooms[b].center].map(([x,y])=>new THREE.Vector3(x,0,-y));
+            const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:i===selectedEdge?'#111111':'#555555',transparent:true,depthTest:false,depthWrite:false}));
+            line.renderOrder=22;input.add(line);
+        });
         render();
     }
     return { draw, clear, resize, home, screenPoint, pointOnPlan, drawBubbles, onChange(fn){listeners.add(fn);return()=>listeners.delete(fn);} };
