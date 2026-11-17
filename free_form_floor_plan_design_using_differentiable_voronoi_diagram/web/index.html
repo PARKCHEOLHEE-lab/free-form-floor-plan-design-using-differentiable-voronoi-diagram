@@ -647,11 +647,10 @@ function drawFrame(f) {
   }
   if (minX <= maxX) {
     fitCx = (minX + maxX) / 2; fitCy = (minY + maxY) / 2;
-    // fit into the window above the loss card (when it shows), so the card never covers the plan
-    const card = $('losscard');
-    const freeH = card.hidden ? CH : Math.max(CH * 0.5, card.getBoundingClientRect().top - 16);
-    viewCx = CW / 2; viewCy = freeH / 2;
-    fitS = 0.80 * Math.min(CW, freeH) / (Math.max(maxX - minX, maxY - minY) || 1);
+    // fit to the whole window; the floating cards may cover part of the plan, and showing or
+    // hiding them never moves or resizes it
+    viewCx = CW / 2; viewCy = CH / 2;
+    fitS = 0.80 * Math.min(CW, CH) / (Math.max(maxX - minX, maxY - minY) || 1);
   }
   const al = boundaryRing ? alignFrame(f) : null;
   if (al) $('align_v').textContent = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
@@ -814,7 +813,8 @@ function showPanel(name) {
   document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));
 }
 document.querySelectorAll('button[data-open]').forEach(b => b.addEventListener('click', () => showPanel(b.dataset.open)));
-// The loss card shows by default; its icon hides and shows it, and the plan refits.
+// The loss card shows by default; its icon hides and shows it. The redraw only re-places the
+// playhead tags (they measure the card), the plan itself does not move.
 document.querySelector('button[data-toggle=losses]').addEventListener('click', e => {
   const card = $('losscard');
   card.hidden = !card.hidden;

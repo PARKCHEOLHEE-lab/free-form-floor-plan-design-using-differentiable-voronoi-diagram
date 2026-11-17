@@ -91,6 +91,22 @@ test("one toolbar: every icon sits in the top-left toolbar, and the Display pane
     }
 });
 
+test("loss card toggle: the plan drawing stays the same, pixel for pixel", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const pixels = () => page.$eval("#plan", (c) => c.toDataURL());
+            const shown = await pixels();
+            await page.click("button[data-toggle=losses]");
+            assert.ok((await pixels()) === shown, "the plan changed when the loss card was hidden");
+            await page.click("button[data-toggle=losses]");
+            assert.ok((await pixels()) === shown, "the plan changed when the loss card came back");
+        });
+    } finally {
+        proc.kill();
+    }
+});
+
 test("loss card: its 5 rows are in view at the start, and the Losses icon hides and shows it", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
