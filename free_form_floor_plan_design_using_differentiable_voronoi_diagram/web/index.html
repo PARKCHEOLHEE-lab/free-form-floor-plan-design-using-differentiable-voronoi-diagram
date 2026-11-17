@@ -220,6 +220,11 @@
       <div class="group">
         <div class="label">Wall</div>
         <div class="row"><label>width</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+        <div class="seg" id="walls">
+          <button data-walls="raw" class="active">Raw</button>
+          <button data-walls="aligned">Aligned</button>
+        </div>
+        <div class="row"><label>aligned</label><span class="readout" id="align_v"></span></div>
       </div>
 
       <div class="group">
@@ -250,6 +255,30 @@ const R = 1.18; // normalized boundaries fit within radius 1
 const plan = document.getElementById('plan');
 const pctx = plan.getContext('2d');
 const $ = id => document.getElementById(id);
+
+// ---------- wall alignment (web/plan) ----------
+// Raw draws the optimizer's cells as they are; Aligned welds them into rooms that share
+// corners and snaps nearly parallel walls (voronoi/postprocess.py, after GSDiff).
+import { fromCells, roomRings } from './plan/graph.js';
+import { alignPlan, alignedShare } from './plan/align.js';
+const ALIGN_TOL = 0.02;      // postprocess.py's threshold, in the optimizer's unit-radius space
+const SIMPLIFY_TOL = 0.004;  // the kink tolerance web/src/lib.rs uses for room outlines
+let wallsMode = 'raw';
+let boundaryRing = null;     // sent by the worker once the optimizer is built
+// Align one frame; returns room rings and the aligned-wall share before and after.
+function alignFrame(f) {
+  const n = +$('rooms').value;
+  const g = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: SIMPLIFY_TOL });
+  const before = alignedShare(g, boundaryRing);
+  alignPlan(g, boundaryRing, { tol: ALIGN_TOL });
+  return { rooms: Array.from({ length: n }, (_, r) => roomRings(g, r)), before, after: alignedShare(g, boundaryRing) };
+}
+$('walls').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  [...$('walls').children].forEach(x => x.classList.toggle('active', x === b));
+  wallsMode = b.dataset.walls;
+  if (lastFrame) drawFrame(lastFrame);
+});
 // per-term loss graphs: 'total' + the 4 weighted terms, each its own y-scale
 const LOSS_TERMS = ['total', 'wall', 'area', 'lloyd', 'topo'];
 
@@ -434,6 +463,7 @@ worker.onmessage = (e) => {
       break;
     case 'built':
       built = true;
+      boundaryRing = m.boundary;
       break;
     case 'frame':
       lastFrame = m.frame;
@@ -548,6 +578,22 @@ function drawFrame(f) {
   if (minX <= maxX) {
     fitCx = (minX + maxX) / 2; fitCy = (minY + maxY) / 2;
     fitS = 0.70 * CW / (Math.max(maxX - minX, maxY - minY) || 1);
+  }
+  const al = boundaryRing ? alignFrame(f) : null;
+  if (al) $('align_v').textContent = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
+  if (wallsMode === 'aligned' && al) {
+    // aligned rooms: one fill per room (its rings, holes included), then double-line walls on the outlines
+    const path = rings => { pctx.beginPath(); for (const ring of rings) { ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y))); pctx.closePath(); } };
+    al.rooms.forEach((rings, r) => { path(rings); pctx.fillStyle = COLORS[r % COLORS.length]; pctx.fill('evenodd'); });
+    const refS = 0.70 * CW / 1.45, fullPx = Math.max(1, 2 * wallWidth * refS), lineP = 0.005 * refS;
+    pctx.lineJoin = 'miter'; pctx.miterLimit = 2; pctx.lineCap = 'butt';
+    for (const [style, w] of [['#111', fullPx], ['#fff', fullPx - 2 * lineP]]) {
+      if (w <= 0) continue;
+      pctx.strokeStyle = style; pctx.lineWidth = w;
+      for (const rings of al.rooms) { path(rings); pctx.stroke(); }
+    }
+    movePlayhead(f.iteration);
+    return;
   }
   // 0) pastel room fills — each cell painted with its room colour (matplotlib
   //    Accent over white); under the walls + gray cells.

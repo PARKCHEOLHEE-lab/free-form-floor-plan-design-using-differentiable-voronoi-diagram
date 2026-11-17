@@ -7,7 +7,7 @@
 // Protocol
 //   main -> worker : {cmd:'build', mode, sites, ratios, w[6], seed, lr, iters, then:'preview'|'start'}
 //                    {cmd:'dispose'}
-//   worker -> main : {type:'ready'} | {type:'built'} | {type:'error', msg}
+//   worker -> main : {type:'ready'} | {type:'built', boundary} | {type:'error', msg}
 //                    {type:'frame', frame, mode:'preview'|'step'} | {type:'done'}
 import init, { WasmOpt } from './pkg/voronoi_floorplan_web.js';
 
@@ -61,7 +61,7 @@ onmessage = async (e) => {
   switch (msg.cmd) {
     case 'build':
       if (build(msg)) {
-        postMessage({ type: 'built', gen });
+        postMessage({ type: 'built', gen, boundary: opt.boundary() });
         if (msg.then === 'preview' && opt) {
           postMessage({ type: 'frame', frame: opt.current(), mode: 'preview', gen });
         } else if (msg.then === 'start') {

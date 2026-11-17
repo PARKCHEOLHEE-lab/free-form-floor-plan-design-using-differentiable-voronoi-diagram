@@ -15,3 +15,6 @@ runs/
 
 # generated comparison artifacts (regenerate via comparison/README.md)
 free_form_floor_plan_design_using_differentiable_voronoi_diagram/comparison/output/
+
+# browser test dependencies
+node_modules/

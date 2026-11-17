@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "e2e": "node --test page.e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.59.1"
+  }
+}
