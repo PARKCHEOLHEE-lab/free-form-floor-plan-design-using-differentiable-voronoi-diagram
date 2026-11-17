@@ -1,9 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {serve} from './serve.mjs';
+import {fromCells} from '../web/plan/graph.js';
+import {evaluatePlan} from '../web/plan/openings.js';
+import {ringArea} from '../web/plan/geom.js';
 
 async function drag(page,a,b){
     await page.mouse.move(...a);await page.mouse.down();await page.mouse.move(...b,{steps:12});await page.mouse.up();
@@ -21,6 +24,65 @@ const filledShares=page=>page.$eval('#plan',async c=>{
         if(Math.abs(pixels[i]-color[0])+Math.abs(pixels[i+1]-color[1])+Math.abs(pixels[i+2]-color[2])<20)counts[r]++;
     });
     return {pixels:counts,shares:counts.map(n=>n/(counts[0]+counts[1]))};
+});
+
+test('five drawn rooms keep one region each in raw and aligned initial views',{timeout:120000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        // Observe messages from the actual production worker without replacing
+        // its optimizer or changing the main page's message handler.
+        await page.addInitScript(()=>{
+            const Original=Worker;
+            window.__planCapture={};
+            window.Worker=class extends Original{
+                constructor(...args){super(...args);this.addEventListener('message',e=>{
+                    if(e.data.type==='built')window.__planCapture.boundary=e.data.boundary;
+                    if(e.data.type==='frame')window.__planCapture.frame=e.data.frame;
+                });}
+            };
+        });
+        if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
+        await page.goto(url);await ready(page);
+        await page.click('button[data-open=optimize]');await page.locator('#seed').focus();await page.keyboard.press('Home');await ready(page);
+        assert.equal(await page.locator('#seed').inputValue(),'0');
+        await page.click('button[data-open=optimize]');await page.click('.gizmo [data-axis="+z"]');
+        await page.click('button[data-open=rooms]');await page.click('button[data-bubble-tool=draw]');await page.click('button[data-open=rooms]');
+        const {boundary}=JSON.parse(await readFile(new URL('./fixtures/shape_e.json',import.meta.url),'utf8'));
+        const xs=boundary.map(p=>p[0]),ys=boundary.map(p=>p[1]);
+        const cx=(Math.max(...xs)+Math.min(...xs))/2,cy=(Math.max(...ys)+Math.min(...ys))/2;
+        const scale=Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys))/(0.8*820);
+        const screen=([x,y])=>[1145/2+(x-cx)/scale,820/2-(y-cy)/scale];
+        for(const [x,y,r] of [[-.48,.35,.11],[-.2,-.32,.21],[.3,.25,.12],[.1,.55,.13],[-.5,-.1,.08]]){
+            await drag(page,screen([x,y]),screen([x+r,y]));await ready(page);
+        }
+        const input=await page.$$eval('.bubble-label:not(.draft)',els=>els.map(e=>({center:[+e.dataset.x,+e.dataset.y],radius:+e.dataset.radius,ratio:+e.dataset.ratio})));
+        assert.equal(input.length,5);
+        const capture=await page.evaluate(()=>window.__planCapture);
+        assert.equal(capture.frame.iteration,0);
+        const pose=await camera(page);
+        await page.click('button[data-open=display]');await page.uncheck('#show-bubbles');await page.click('button[data-open=display]');
+        await page.click('button[data-toggle=losses]');
+        const dir=new URL('../../.agents/cache/screens/',import.meta.url);await mkdir(dir,{recursive:true});
+        await page.screenshot({path:fileURLToPath(new URL('five-room-connectivity-raw.png',dir))});
+        const graph=fromCells(capture.frame.cells,capture.boundary,{roomCount:5,simplifyTol:0});
+        const checked=evaluatePlan(graph,{rooms:input,links:[]},0.1);
+        assert.equal(checked.valid,true,JSON.stringify(checked.issues));
+        const areas=[0,0,0,0,0];
+        for(const cell of capture.frame.cells)areas[cell.room]+=ringArea(cell.ring);
+        const total=ringArea(capture.boundary);
+        areas.forEach((a,r)=>assert.ok(Math.abs(a/total-input[r].ratio)<=0.05,`room ${r+1} keeps its target area`));
+        assert.equal((await page.locator('#program-status').textContent()).trim(),'Ready to run.');
+        await page.click('button[data-open=display]');await page.click('button[data-walls=aligned]');await page.click('button[data-open=display]');
+        assert.equal((await page.locator('#program-status').textContent()).trim(),'Ready to run.','alignment preserves one connected region per room');
+        assert.deepEqual(await camera(page),pose);
+        await page.screenshot({path:fileURLToPath(new URL('five-room-connectivity-aligned.png',dir))});
+        await writeFile(new URL('five-room-connectivity.json',dir),JSON.stringify({input,shares:areas.map(a=>a/total),issues:checked.issues},null,2));
+        if(process.env.VORONOI_COVERAGE_DIR){
+            await mkdir(process.env.VORONOI_COVERAGE_DIR,{recursive:true});
+            await writeFile(new URL('five-room-browser-coverage.json',dir),JSON.stringify(await page.coverage.stopJSCoverage()));
+        }
+    }finally{await browser.close();proc.kill();}
 });
 
 test('resizing a circle changes actual initial room areas before Run without moving the camera',{timeout:90000},async()=>{
