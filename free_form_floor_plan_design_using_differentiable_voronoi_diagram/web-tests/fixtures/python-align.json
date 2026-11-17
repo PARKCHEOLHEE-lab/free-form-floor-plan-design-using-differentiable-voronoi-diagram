@@ -1,0 +1,32 @@
+{
+ "shape_a": {
+  "before": 0.622,
+  "after": 0.8049,
+  "corners": 57,
+  "same_graph_after": 0.8302
+ },
+ "shape_b": {
+  "before": 0.5655,
+  "after": 0.8996,
+  "corners": 63,
+  "same_graph_after": 0.9386
+ },
+ "shape_c": {
+  "before": 0.6608,
+  "after": 0.8178,
+  "corners": 58,
+  "same_graph_after": 0.8122
+ },
+ "shape_d": {
+  "before": 0.5841,
+  "after": 0.6964,
+  "corners": 68,
+  "same_graph_after": 0.6321
+ },
+ "shape_e": {
+  "before": 0.5897,
+  "after": 0.7926,
+  "corners": 58,
+  "same_graph_after": 0.7964
+ }
+}
