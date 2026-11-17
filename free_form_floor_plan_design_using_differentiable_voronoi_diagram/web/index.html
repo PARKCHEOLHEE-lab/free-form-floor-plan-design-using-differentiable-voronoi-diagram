@@ -160,9 +160,9 @@
     footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
 
     /* Desktop: one screen, no page scroll. The header and intro shrink to a band, the plan
-       takes the height that is left (square, as large as fits), the loss rows sit under it,
-       and only the settings column scrolls when it runs long. Narrow screens keep the
-       stacked page above. */
+       canvas fills the width and height that are left (fitCanvases reads both), the loss
+       rows sit under it, and only the settings column scrolls when it runs long. Narrow
+       screens keep the stacked page above, with a square canvas. */
     @media (min-width: 901px) {
       .wrap { max-width: none; height: 100vh; display: flex; flex-direction: column; padding: 1.2em clamp(1.2em, 3vw, 2.4em); }
       header { margin-bottom: .5em; }
@@ -170,8 +170,8 @@
       .lede { font-size: .88em; margin-bottom: 1em; max-width: 140ch; }
       .stage { flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(0, 1fr) 300px; align-items: stretch; }
       .canvas-card { display: flex; flex-direction: column; min-height: 0; }
-      .planbox { flex: 1 1 auto; min-height: 0; display: flex; justify-content: center; container-type: size; }
-      .planbox canvas#plan { width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); aspect-ratio: auto; }
+      .planbox { flex: 1 1 auto; min-height: 0; }
+      .planbox canvas#plan { width: 100%; height: 100%; aspect-ratio: auto; }
       .canvas-sub { margin-top: .6em; }
       .lossrow { margin: .18em 0; }
       .lossrow .spark { height: 20px; }
@@ -315,7 +315,10 @@ const ny = y => CH / 2 - (y - fitCy) * fitS;  // flip y
 // the 2D context is scaled so all drawing stays in CSS-pixel coordinates.
 function fitCanvases() {
   const dpr = window.devicePixelRatio || 1;
-  CW = CH = Math.max(1, Math.round(plan.getBoundingClientRect().width));
+  // square on narrow screens (CSS aspect-ratio), the whole free area on desktop
+  const r = plan.getBoundingClientRect();
+  CW = Math.max(1, Math.round(r.width));
+  CH = Math.max(1, Math.round(r.height));
   plan.width = Math.round(CW * dpr);
   plan.height = Math.round(CH * dpr);
   pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -596,7 +599,7 @@ function drawFrame(f) {
   }
   if (minX <= maxX) {
     fitCx = (minX + maxX) / 2; fitCy = (minY + maxY) / 2;
-    fitS = 0.70 * CW / (Math.max(maxX - minX, maxY - minY) || 1);
+    fitS = 0.70 * Math.min(CW, CH) / (Math.max(maxX - minX, maxY - minY) || 1);
   }
   const al = boundaryRing ? alignFrame(f) : null;
   if (al) $('align_v').textContent = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
@@ -604,7 +607,7 @@ function drawFrame(f) {
     // aligned rooms: one fill per room (its rings, holes included), then double-line walls on the outlines
     const path = rings => { pctx.beginPath(); for (const ring of rings) { ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y))); pctx.closePath(); } };
     al.rooms.forEach((rings, r) => { path(rings); pctx.fillStyle = COLORS[r % COLORS.length]; pctx.fill('evenodd'); });
-    const refS = 0.70 * CW / 1.45, fullPx = Math.max(1, 2 * wallWidth * refS), lineP = 0.005 * refS;
+    const refS = 0.70 * Math.min(CW, CH) / 1.45, fullPx = Math.max(1, 2 * wallWidth * refS), lineP = 0.005 * refS;
     pctx.lineJoin = 'miter'; pctx.miterLimit = 2; pctx.lineCap = 'butt';
     for (const [style, w] of [['#111', fullPx], ['#fff', fullPx - 2 * lineP]]) {
       if (w <= 0) continue;
@@ -632,7 +635,7 @@ function drawFrame(f) {
   // (Each preset's plan fills ~70% of the canvas but has a different normalized
   // bbox, so fitS varies and would make identical settings look thicker/thinner.)
   // 1.45 ≈ the typical normalized plan extent across the demo presets.
-  const refS = 0.70 * CW / 1.45;
+  const refS = 0.70 * Math.min(CW, CH) / 1.45;
   const fullPx = Math.max(1, 2 * wallWidth * refS);   // full wall width (2d) in CSS px
   const lineP = 0.005 * refS;                          // black line thickness (0.005 normalized)
   const strokeWalls = (style, w) => {

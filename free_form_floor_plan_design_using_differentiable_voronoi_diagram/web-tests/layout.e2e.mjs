@@ -21,6 +21,7 @@ async function measure(url, [width, height]) {
                 run: box(document.getElementById("run")),
                 canvas: box(document.getElementById("plan")),
                 lossRows: [...document.querySelectorAll(".lossrow")].map(box),
+                lossPanel: box(document.getElementById("losspanel")),
             };
         });
     } finally {
@@ -39,6 +40,20 @@ test("desktop: the page fits one screen, with Run, the canvas and every loss row
             assert.ok(inView(m.canvas), `${w}x${h}: canvas is out of view`);
             assert.equal(m.lossRows.length, 5);
             m.lossRows.forEach((r, i) => assert.ok(inView(r), `${w}x${h}: loss row ${i} is out of view (bottom ${r.bottom})`));
+        }
+    } finally {
+        proc.kill();
+    }
+});
+
+test("desktop: the canvas fills its column, as wide as the loss rows and at least 60% of the window height", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        for (const [w, h] of DESKTOP) {
+            const m = await measure(url, [w, h]);
+            assert.ok(Math.abs(m.canvas.width - m.lossPanel.width) <= 2, `${w}x${h}: canvas ${m.canvas.width}px wide, loss rows ${m.lossPanel.width}px`);
+            assert.ok(Math.abs(m.canvas.left - m.lossPanel.left) <= 2, `${w}x${h}: canvas starts at ${m.canvas.left}, loss rows at ${m.lossPanel.left}`);
+            assert.ok(m.canvas.height >= 0.6 * h, `${w}x${h}: canvas ${m.canvas.height}px tall, under 60% of ${h}`);
         }
     } finally {
         proc.kill();
