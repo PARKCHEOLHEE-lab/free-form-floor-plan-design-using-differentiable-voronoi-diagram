@@ -159,7 +159,7 @@ test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s
                     return { text: s.content, opacity: +s.opacity, left: parseFloat(s.left), width: b.getBoundingClientRect().width };
                 });
             const tools = await page.$$(".tool");
-            assert.equal(tools.length, 9);
+            assert.equal(tools.length, 8);
             for (const tool of tools) {
                 const name = await tool.getAttribute("aria-label");
                 assert.equal((await tip(tool)).opacity, 0, `${name}: the tooltip shows before hover`);

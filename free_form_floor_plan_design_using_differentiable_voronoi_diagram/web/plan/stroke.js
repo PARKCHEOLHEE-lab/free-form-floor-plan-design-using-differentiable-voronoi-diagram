@@ -1,7 +1,6 @@
 // Wall bands: a closed outline stroked like a canvas line with miter joins (lineJoin 'miter').
 // The plan view stacks two bands per outline, a dark one at the full wall width and a white one
-// a little narrower, which leaves the two thin wall lines the 2D canvas drew; the 3D view lifts
-// the same band into a wall.
+// a little narrower, which leaves the two thin wall lines the 2D canvas drew.
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];

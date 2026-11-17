@@ -1,7 +1,7 @@
-// The plan view, drawn with three.js: a top view that keeps the 2D canvas's look, and an
-// isometric 3D view with the walls lifted. One orthographic camera serves both; OrbitControls
-// zooms (0.5x to 8x of the fitted plan), pans, and in 3D rotates. Plan point (x, y) at height h
-// sits at world (x, h, -y), so the top view shows plan +y as screen up.
+// The plan view, drawn with three.js in 3D: it opens isometric, with the plan flat on the floor
+// in the 2D canvas's look (walls stay flat until a user extrudes them). One orthographic camera;
+// OrbitControls zooms (0.5x to 8x of the fitted plan), pans and rotates. Plan point (x, y) at
+// height h sits at world (x, h, -y), so looking straight down shows plan +y as screen up.
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { strokeRing, strokeTriangles } from './stroke.js';
@@ -18,7 +18,6 @@ const TOP_POLAR = 1e-6;                         // straight down (OrbitControls 
 // at zoom 1, so one slider value looks equally thick on every boundary.
 const WALL_UNIT = 0.70 / (1.45 * FIT);          // wall unit in plan extents
 const WALL_LINE = 0.005;                        // each wall line's thickness, in wall units
-const WALL_HEIGHT = 0.05;                       // 3D wall height, in plan extents: cut low, so the rooms stay in view
 const CELL_LINE = { color: '#969696', opacity: 0.55 };
 const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
 
@@ -31,10 +30,10 @@ const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
  *   points [[x, y]]            Voronoi sites (optional)
  *   wall   half wall width, in the 2D canvas's wall units
  * The camera fits the plan when its outline changes, and otherwise keeps the user's view.
- * The canvas carries data-view, data-zoom, data-azimuth and data-elevation (degrees).
- * `gizmo`, an empty box, becomes the view gizmo; `onMode(mode)` hears every change of mode.
+ * The canvas carries data-zoom, data-azimuth and data-elevation (degrees).
+ * `gizmo`, an empty box, becomes the view gizmo.
  */
-export function createPlanView(canvas, { gizmo, onMode } = {}) {
+export function createPlanView(canvas, { gizmo } = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     renderer.setClearColor(0xffffff, 1);
     const scene = new THREE.Scene();
@@ -43,12 +42,12 @@ export function createPlanView(canvas, { gizmo, onMode } = {}) {
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
     const controls = new OrbitControls(camera, canvas);
     Object.assign(controls, { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, zoomToCursor: true, screenSpacePanning: true });
+    controls.maxPolarAngle = THREE.MathUtils.degToRad(85); // the camera stays above the floor
 
     const meshMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
     const lineMat = new THREE.LineBasicMaterial({ color: CELL_LINE.color, transparent: true, opacity: CELL_LINE.opacity });
     const pointMat = new THREE.PointsMaterial({ color: SITE.color, size: SITE.size, sizeAttenuation: false, transparent: true, opacity: SITE.opacity });
 
-    let mode = 'plan';
     let width = 1, height = 1;
     let fitted = null;                          // { cx, cy, extent } of the plan the camera is fitted to
     let lastPlan = null;
@@ -62,7 +61,6 @@ export function createPlanView(canvas, { gizmo, onMode } = {}) {
             axes.update([m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]);
         }
         const d = canvas.dataset;
-        d.view = mode;
         d.zoom = String(+camera.zoom.toFixed(4));
         d.azimuth = String(+THREE.MathUtils.radToDeg(controls.getAzimuthalAngle()).toFixed(2));
         d.elevation = String(+(90 - THREE.MathUtils.radToDeg(controls.getPolarAngle())).toFixed(2));
@@ -78,22 +76,14 @@ export function createPlanView(canvas, { gizmo, onMode } = {}) {
         camera.far = 10 * extent();
         camera.updateProjectionMatrix();
     }
-    // Point the camera along this mode's view direction, keeping the target and the zoom. In 3D
-    // the camera sits at `azimuth` around the plan (OrbitControls' angle: 0 is the south side).
-    function orient(azimuth = ISO_AZIMUTH) {
-        const top = mode === 'plan';
-        controls.enableRotate = !top;
-        controls.maxPolarAngle = top ? TOP_POLAR : THREE.MathUtils.degToRad(85);
-        const drag = top ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
-        controls.mouseButtons = { LEFT: drag, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-        controls.touches = { ONE: top ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-        const phi = top ? TOP_POLAR : Math.PI / 2 - ISO_ELEVATION;
-        const theta = top ? 0 : azimuth;
-        camera.position.copy(controls.target).add(new THREE.Vector3().setFromSphericalCoords(5 * extent(), phi, theta));
+    // Turn the camera to look from `azimuth` (OrbitControls' angle: 0 is the south side) and
+    // `polar` (0 is straight down), keeping the target and the zoom; isometric by default.
+    function orient(azimuth = ISO_AZIMUTH, polar = Math.PI / 2 - ISO_ELEVATION) {
+        camera.position.copy(controls.target).add(new THREE.Vector3().setFromSphericalCoords(5 * extent(), polar, azimuth));
         camera.lookAt(controls.target);
         controls.update();
     }
-    // The home view of the current mode: centred on the plan, zoom 1.
+    // The home view: isometric, centred on the plan, zoom 1.
     function home() {
         const { cx = 0, cy = 0 } = fitted ?? {};
         controls.target.set(cx, 0, -cy);
@@ -114,19 +104,12 @@ export function createPlanView(canvas, { gizmo, onMode } = {}) {
         render();
     }
 
-    function setMode(next, azimuth) {
-        mode = next;
-        if (lastPlan) build(lastPlan);
-        orient(azimuth);
-        render();
-        onMode?.(mode);
-    }
-
-    // A gizmo click: +Z is the top view; the other ends look from that side in 3D, at the
-    // isometric height (the camera stays above the floor).
+    // A gizmo click turns the view to that side, keeping the zoom: +Z looks straight down, the
+    // other ends look from the east, west, north or south at the isometric height.
     function lookFrom(axis) {
-        if (axis === '+z') setMode('plan');
-        else setMode('iso', THREE.MathUtils.degToRad(SIDE_AZIMUTH[axis]));
+        if (axis === '+z') orient(0, TOP_POLAR);
+        else orient(THREE.MathUtils.degToRad(SIDE_AZIMUTH[axis]));
+        render();
     }
 
     function clear() {
@@ -156,8 +139,6 @@ export function createPlanView(canvas, { gizmo, onMode } = {}) {
         const lift = 1e-3 * e;                  // layer gap; invisible from above, keeps the depth order
         const hw = plan.wall * WALL_UNIT * e;
         const line = WALL_LINE * WALL_UNIT * e;
-        const iso = mode === 'iso';
-        const wallTop = iso ? WALL_HEIGHT * e : 0;
         const tris = new TriangleBuffer();
 
         const fill = new THREE.Color();
@@ -165,26 +146,13 @@ export function createPlanView(canvas, { gizmo, onMode } = {}) {
             fill.set(room.color);
             for (const t of fillTriangles(room.rings)) tris.add(t, 0, fill);
         }
-        const bands = plan.walls.map((ring) => strokeRing(ring, hw));
-        if (iso) {
-            const side = new THREE.Color();
-            for (const pairs of bands)
-                for (let i = 0; i < pairs.length; i++) {
-                    const [l0, r0] = pairs[i];
-                    const [l1, r1] = pairs[(i + 1) % pairs.length];
-                    // each face over a-b faces right of a->b: outward is left of the ring on the
-                    // left edge and right of it on the right edge
-                    tris.addWall(l1, l0, wallTop, sideShade(side, l1, l0));
-                    tris.addWall(r0, r1, wallTop, sideShade(side, r0, r1));
-                }
-        }
         if (hw > 0) {
             const black = new THREE.Color('#111111');
-            for (const pairs of bands) for (const t of strokeTriangles(pairs)) tris.add(t, wallTop + lift, black);
+            for (const ring of plan.walls) for (const t of strokeTriangles(strokeRing(ring, hw))) tris.add(t, lift, black);
         }
         if (hw - line > 0) {
             const white = new THREE.Color('#ffffff');
-            for (const ring of plan.walls) for (const t of strokeTriangles(strokeRing(ring, hw - line))) tris.add(t, wallTop + 2 * lift, white);
+            for (const ring of plan.walls) for (const t of strokeTriangles(strokeRing(ring, hw - line))) tris.add(t, 2 * lift, white);
         }
         content.add(new THREE.Mesh(tris.geometry(), meshMat));
 
@@ -200,7 +168,7 @@ export function createPlanView(canvas, { gizmo, onMode } = {}) {
         if (plan.points?.length) content.add(new THREE.Points(positions(plan.points.flatMap(([x, y]) => [x, 4 * lift, -y])), pointMat));
     }
 
-    return { draw, clear, resize, setMode, home, get mode() { return mode; } };
+    return { draw, clear, resize, home };
 }
 
 /** Triangles with one colour each, gathered into one geometry. */
@@ -214,14 +182,6 @@ class TriangleBuffer {
             this.col.push(c.r, c.g, c.b);
         }
     }
-    /** An upright wall face over the plan segment a-b, from the floor to height h. */
-    addWall(a, b, h, c) {
-        const [a0, b0, a1, b1] = [[a, 0], [b, 0], [a, h], [b, h]].map(([[x, y], z]) => [x, z, -y]);
-        for (const p of [a0, b0, b1, a0, b1, a1]) {
-            this.pos.push(...p);
-            this.col.push(c.r, c.g, c.b);
-        }
-    }
     geometry() {
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
@@ -231,15 +191,6 @@ class TriangleBuffer {
 }
 
 const positions = (flat) => new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
-
-// Wall sides have no lights to shade them, so each face gets a grey from where it faces:
-// lightest to the south, darkest to the north. The face over a-b faces right of a->b.
-const LIGHT = new THREE.Vector2(0.3, -1).normalize();
-function sideShade(c, a, b) {
-    const n = new THREE.Vector2(b[1] - a[1], a[0] - b[0]).normalize();
-    const v = 0.86 + 0.1 * n.dot(LIGHT);
-    return c.setRGB(v, v, v, THREE.SRGBColorSpace);
-}
 
 /**
  * Triangles that fill a room's rings even-odd. Rings wound like the largest one are outlines,

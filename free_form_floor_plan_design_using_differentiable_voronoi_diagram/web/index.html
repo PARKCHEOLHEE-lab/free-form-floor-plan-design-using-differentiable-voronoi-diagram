@@ -272,7 +272,6 @@
         <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
         <symbol id="i-losses" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
         <symbol id="i-display" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
-        <symbol id="i-3d" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
       </defs>
     </svg>
 
@@ -287,7 +286,6 @@
       <button class="tool" data-open="optimize" aria-label="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
       <span class="sep"></span>
       <button class="tool" data-open="display" aria-label="Display"><svg class="ic"><use href="#i-display"/></svg></button>
-      <button class="tool" data-toggle="3d" aria-label="3D view" aria-pressed="false"><svg class="ic"><use href="#i-3d"/></svg></button>
       <button class="tool" data-toggle="losses" aria-label="Losses" aria-pressed="true"><svg class="ic"><use href="#i-losses"/></svg></button>
     </nav>
 
@@ -348,15 +346,10 @@
 const COLORS = ['#bfe4bf', '#ded7ea', '#fee0c2', '#ffffcc', '#9cb6d8', '#f881bf', '#dfad8b', '#b3b3b3'];
 const R = 1.18; // normalized boundaries fit within radius 1
 
-// three.js draws the plan: the top view keeps the 2D look, the 3D icon switches to isometric,
-// the wheel zooms (0.5x to 8x) and dragging pans (top view) or rotates (3D)
+// three.js draws the plan in 3D: it opens isometric with the plan flat on the floor, the wheel
+// zooms (0.5x to 8x), the mouse rotates and pans, and a double-click returns to isometric
 import { createPlanView } from './plan/view3d.js';
-// the 3D icon is pressed while the view is 3D, whether the icon or the gizmo turned it
-const view3dButton = document.querySelector('button[data-toggle="3d"]');
-const view = createPlanView(document.getElementById('plan'), {
-  gizmo: document.querySelector('.gizmo'),
-  onMode: mode => view3dButton.setAttribute('aria-pressed', String(mode === 'iso')),
-});
+const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo') });
 const $ = id => document.getElementById(id);
 
 // ---------- wall alignment (web/plan) ----------
@@ -779,9 +772,6 @@ document.querySelector('button[data-toggle=losses]').addEventListener('click', e
   e.currentTarget.setAttribute('aria-pressed', String(!card.hidden));
   if (lastFrame) drawFrame(lastFrame);
 });
-// The 3D icon turns the plan to isometric (walls standing) and back to the top view; a
-// double-click on the plan returns to the mode's home view.
-view3dButton.addEventListener('click', () => view.setMode(view.mode === 'iso' ? 'plan' : 'iso'));
 
 $('run').onclick = () => {
   if (running) {                         // running → pause

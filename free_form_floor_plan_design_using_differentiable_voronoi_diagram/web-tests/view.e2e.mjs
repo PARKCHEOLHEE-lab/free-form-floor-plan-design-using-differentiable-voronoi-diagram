@@ -1,5 +1,6 @@
-// The three.js view in a real browser: the plan's look in the top view, zoom and pan limits,
-// and the isometric 3D view. Run: cd web-tests && node --test view.e2e.mjs
+// The three.js view in a real browser: the isometric 3D default with flat walls, the plan's
+// look from the top, the mouse, the zoom limits and the view gizmo.
+// Run: cd web-tests && node --test view.e2e.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -46,9 +47,10 @@ const colourCounts = (page, hexes) =>
 // preset E's six rooms, in room order (index.html COLORS)
 const ROOM_COLOURS = ["#bfe4bf", "#ded7ea", "#fee0c2", "#ffffcc", "#9cb6d8", "#f881bf"];
 
-test("three.js top view keeps the 2D look: six pastel rooms and dark wall lines on screen", { timeout: 120_000 }, async () => {
+test("seen from the top (the gizmo's +Z), the three.js plan keeps the 2D look: six pastel rooms and dark wall lines on screen", { timeout: 120_000 }, async () => {
     await withPage(async (page) => {
         assert.ok(await page.$eval("#plan", (c) => !!c.getContext("webgl2")), "the plan canvas is drawn with WebGL (three.js)");
+        await page.click(".gizmo [data-axis='+z']");
         // The 2D canvas this replaces measured 31,183-52,466 px per room colour and 10,689 px of
         // dark wall line at 1145x820 (2026-11-17); about 60% of those is the floor here.
         const { rooms, dark } = await colourCounts(page, ROOM_COLOURS);
@@ -59,7 +61,7 @@ test("three.js top view keeps the 2D look: six pastel rooms and dark wall lines 
 
 /** The view's camera state, from the canvas's data attributes. */
 const camera = (page) =>
-    page.$eval("#plan", (c) => ({ view: c.dataset.view, zoom: +c.dataset.zoom, azimuth: +c.dataset.azimuth, elevation: +c.dataset.elevation }));
+    page.$eval("#plan", (c) => ({ zoom: +c.dataset.zoom, azimuth: +c.dataset.azimuth, elevation: +c.dataset.elevation }));
 
 /** Centre of the drawn (non-white) pixels on the plan canvas, in canvas pixels. */
 const drawnCentre = (page) =>
@@ -84,15 +86,16 @@ const drawnCentre = (page) =>
         return [sx / n, sy / n];
     });
 
-test("top view: dragging pans the plan without turning it, and the wheel zooms but stops at 0.5x and 8x", { timeout: 120_000 }, async () => {
+test("top view: a right drag pans the plan without turning it, and the wheel zooms but stops at 0.5x and 8x", { timeout: 120_000 }, async () => {
     await withPage(async (page) => {
-        assert.deepEqual(await camera(page), { view: "plan", zoom: 1, azimuth: 0, elevation: 90 });
+        await page.click(".gizmo [data-axis='+z']");
+        assert.deepEqual(await camera(page), { zoom: 1, azimuth: 0, elevation: 90 });
         // drag 100 px left and 50 px up, on open canvas (away from the toolbar and the loss card)
         const before = await drawnCentre(page);
         await page.mouse.move(600, 400);
-        await page.mouse.down();
+        await page.mouse.down({ button: "right" });
         await page.mouse.move(500, 350, { steps: 10 });
-        await page.mouse.up();
+        await page.mouse.up({ button: "right" });
         const after = await drawnCentre(page);
         const [dx, dy] = [after[0] - before[0], after[1] - before[1]];
         assert.ok(Math.abs(dx + 100) < 3 && Math.abs(dy + 50) < 3, `the plan moved by ${dx.toFixed(1)}, ${dy.toFixed(1)} px`);
@@ -129,35 +132,23 @@ const wallSidePixels = (page) =>
 
 const near = (a, b, tol = 0.01) => Math.abs(a - b) <= tol;
 
-test("3D: the 3D icon turns the plan to isometric with standing walls, a drag rotates it, a double-click returns to isometric, and the icon goes back to the top view", { timeout: 120_000 }, async () => {
+test("3D by default: the plan opens in isometric with its walls flat on the floor, there is no 3D icon, and a double-click returns to isometric", { timeout: 120_000 }, async () => {
     await withPage(async (page) => {
-        const flatGreys = await wallSidePixels(page);
-        await page.click("button[data-toggle='3d']");
         let c = await camera(page);
-        assert.equal(c.view, "iso");
-        assert.ok(near(c.azimuth, -45) && near(c.elevation, 35.26), `isometric starts at ${c.azimuth}, ${c.elevation}`);
-        assert.equal(await page.$eval("button[data-toggle='3d']", (b) => b.getAttribute("aria-pressed")), "true");
-        // measured at 1145x820 on 2026-11-17: 6,850 such px in the top view (anti-aliased wall
-        // lines) and 71,560-75,086 in 3D; about 55% of the 3D count is the floor here
-        const standing = await wallSidePixels(page);
-        assert.ok(standing > 40_000 && standing > 4 * flatGreys, `wall sides: ${standing} grey px in 3D, ${flatGreys} in the top view`);
+        assert.ok(near(c.azimuth, -45) && near(c.elevation, 35.26) && c.zoom === 1, `the view opens at ${JSON.stringify(c)}`);
+        // measured at 1145x820 on 2026-11-17: standing walls gave 71,560-75,086 such px in
+        // isometric, flat walls 4,352-4,894 (anti-aliased wall lines)
+        const greys = await wallSidePixels(page);
+        assert.ok(greys < 20_000, `${greys} px of wall-side grey: the walls stand up`);
+        assert.equal(await page.$("button[data-toggle='3d']"), null, "the 3D icon is still in the toolbar");
 
-        await page.mouse.move(600, 400);
-        await page.mouse.down();
-        await page.mouse.move(750, 400, { steps: 10 });
-        await page.mouse.up();
-        c = await camera(page);
-        assert.ok(Math.abs(c.azimuth + 45) > 30, `a 150 px drag turned the view only to azimuth ${c.azimuth}`);
         for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -200);
-        assert.ok((await camera(page)).zoom > 1.5, "the wheel zooms in 3D too");
-
+        await page.click(".gizmo [data-axis='+x']");
+        c = await camera(page);
+        assert.ok(c.zoom > 1.5 && near(c.azimuth, 90), `the wheel and +X left ${JSON.stringify(c)}`);
         await page.mouse.dblclick(600, 400);
         c = await camera(page);
         assert.ok(near(c.azimuth, -45) && near(c.elevation, 35.26) && c.zoom === 1, `double-click left ${JSON.stringify(c)}`);
-
-        await page.click("button[data-toggle='3d']");
-        assert.deepEqual(await camera(page), { view: "plan", zoom: 1, azimuth: 0, elevation: 90 });
-        assert.equal(await page.$eval("button[data-toggle='3d']", (b) => b.getAttribute("aria-pressed")), "false");
     });
 });
 
@@ -182,26 +173,23 @@ test("gizmo: it sits in the top-right corner, its axes follow the camera, clicki
     await withPage(async (page) => {
         let e = await gizmoEnds(page);
         assert.deepEqual(Object.keys(e).sort(), ["+x", "+y", "+z", "-x", "-y"]);
+        assert.ok(e["+z"][1] < -10 && Math.abs(e["+z"][0]) < 2, `isometric: +Z at ${e["+z"]}`);
+        assert.ok(e["+x"][0] > 5 && e["+x"][1] < 0 && e["+y"][0] < -5 && e["+y"][1] < 0, `isometric: +X at ${e["+x"]}, +Y at ${e["+y"]}`);
+        await page.click(".gizmo [data-axis='+z']");
+        assert.deepEqual(await camera(page), { zoom: 1, azimuth: 0, elevation: 90 });
+        e = await gizmoEnds(page);
         assert.ok(e["+x"][0] > 10 && Math.abs(e["+x"][1]) < 2, `top view: +X at ${e["+x"]}`);
         assert.ok(e["+y"][1] < -10 && Math.abs(e["+y"][0]) < 2, `top view: +Y at ${e["+y"]}`);
         assert.ok(Math.hypot(...e["+z"]) < 2, `top view: +Z at ${e["+z"]}`);
-        await page.click("button[data-toggle='3d']");
-        e = await gizmoEnds(page);
-        assert.ok(e["+z"][1] < -10 && Math.abs(e["+z"][0]) < 2, `3D: +Z at ${e["+z"]}`);
-        assert.ok(e["+x"][0] > 5 && e["+x"][1] < 0 && e["+y"][0] < -5 && e["+y"][1] < 0, `3D: +X at ${e["+x"]}, +Y at ${e["+y"]}`);
-        await page.click("button[data-toggle='3d']");
 
-        const pressed = () => page.$eval("button[data-toggle='3d']", (b) => b.getAttribute("aria-pressed"));
         await page.click(".gizmo [data-axis='+x']");
         let c = await camera(page);
-        assert.ok(c.view === "iso" && near(c.azimuth, 90) && near(c.elevation, 35.26), `+X gives ${JSON.stringify(c)}`);
-        assert.equal(await pressed(), "true");
+        assert.ok(near(c.azimuth, 90) && near(c.elevation, 35.26), `+X gives ${JSON.stringify(c)}`);
         await page.click(".gizmo [data-axis='-y']");
         c = await camera(page);
-        assert.ok(c.view === "iso" && near(c.azimuth, 0) && near(c.elevation, 35.26), `-Y gives ${JSON.stringify(c)}`);
+        assert.ok(near(c.azimuth, 0) && near(c.elevation, 35.26), `-Y gives ${JSON.stringify(c)}`);
         await page.click(".gizmo [data-axis='+z']");
-        assert.deepEqual(await camera(page), { view: "plan", zoom: 1, azimuth: 0, elevation: 90 });
-        assert.equal(await pressed(), "false");
+        assert.deepEqual(await camera(page), { zoom: 1, azimuth: 0, elevation: 90 });
 
         await page.hover(".gizmo [data-axis='+x']");
         await page.waitForTimeout(300);
