@@ -159,7 +159,7 @@
 
     footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
 
-    /* Canvas UI: the plan canvas covers the window (fitCanvases reads its width and height)
+    /* Canvas UI: the plan canvas covers the window (view.resize reads its width and height)
        and every control floats over it: icon toolbars in the corners, one settings panel at
        a time beside its toolbar, and the loss card at the bottom left. The plan's own look
        (pastel cells, double-line walls, sites, loss colours) is unchanged. */
@@ -213,6 +213,8 @@
     .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
     .panel .seg { margin-bottom: 4px; }
   </style>
+  <!-- three.js r187 (MIT), vendored in ./vendor/three -->
+  <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
 </head>
 <body>
 <div class="wrap">
@@ -249,6 +251,7 @@
         <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
         <symbol id="i-losses" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
         <symbol id="i-display" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+        <symbol id="i-3d" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
       </defs>
     </svg>
 
@@ -263,6 +266,7 @@
       <button class="tool" data-open="optimize" aria-label="Optimization" title="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
       <span class="sep"></span>
       <button class="tool" data-open="display" aria-label="Display" title="Display"><svg class="ic"><use href="#i-display"/></svg></button>
+      <button class="tool" data-toggle="3d" aria-label="3D view" title="3D view" aria-pressed="false"><svg class="ic"><use href="#i-3d"/></svg></button>
       <button class="tool" data-toggle="losses" aria-label="Losses" title="Losses" aria-pressed="true"><svg class="ic"><use href="#i-losses"/></svg></button>
     </nav>
 
@@ -320,8 +324,10 @@
 const COLORS = ['#bfe4bf', '#ded7ea', '#fee0c2', '#ffffcc', '#9cb6d8', '#f881bf', '#dfad8b', '#b3b3b3'];
 const R = 1.18; // normalized boundaries fit within radius 1
 
-const plan = document.getElementById('plan');
-const pctx = plan.getContext('2d');
+// three.js draws the plan: the top view keeps the 2D look, the 3D icon switches to isometric,
+// the wheel zooms (0.5x to 8x) and dragging pans (top view) or rotates (3D)
+import { createPlanView } from './plan/view3d.js';
+const view = createPlanView(document.getElementById('plan'));
 const $ = id => document.getElementById(id);
 
 // ---------- wall alignment (web/plan) ----------
@@ -350,34 +356,13 @@ $('walls').addEventListener('click', e => {
 // per-term loss graphs: 'total' + the 4 weighted terms, each its own y-scale
 const LOSS_TERMS = ['total', 'wall', 'area', 'lloyd', 'topo'];
 
-let CW = 520, CH = 520;                        // plan-canvas CSS-pixel dims (set by fitCanvases)
 let lastFrame = null;                          // last rendered cell-frame, for resize redraw
 let wallWidth = 0.02;                          // wall thickness (normalized half-width); JS-only render param
-// per-frame fit transform: center the plan in the canvas and scale it to fill
-// ~70% of the square (computed in drawFrame from the cell bbox = the boundary).
-let fitS = 1, fitCx = 0, fitCy = 0;
-let viewCx = 0, viewCy = 0;                    // screen centre of the area the plan fits into
-const nx = x => viewCx + (x - fitCx) * fitS;  // normalized -> canvas (centered fit)
-const ny = y => viewCy - (y - fitCy) * fitS;  // flip y
 
-// Size each canvas backing store to its displayed size x devicePixelRatio so the
-// render stays crisp on HiDPI screens and when the column is wider than 520px;
-// the 2D context is scaled so all drawing stays in CSS-pixel coordinates.
-function fitCanvases() {
-  const dpr = window.devicePixelRatio || 1;
-  // square on narrow screens (CSS aspect-ratio), the whole free area on desktop
-  const r = plan.getBoundingClientRect();
-  CW = Math.max(1, Math.round(r.width));
-  CH = Math.max(1, Math.round(r.height));
-  plan.width = Math.round(CW * dpr);
-  plan.height = Math.round(CH * dpr);
-  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // the loss graphs are SVG (viewBox-scaled) — no DPR backing-store sizing needed
-}
 function redraw() {
-  fitCanvases();
+  view.resize();                               // the loss graphs are SVG (viewBox-scaled), no resize needed
   if (lastFrame) drawFrame(lastFrame);
-  else clearPlan();
+  else view.clear();
   drawSparks();
 }
 let resizeTimer = 0;
@@ -636,87 +621,30 @@ $('presets').addEventListener('click', e => {
 });
 
 // ---------- drawing ----------
-function clearPlan() { pctx.fillStyle = '#fff'; pctx.fillRect(0, 0, CW, CH); }
-
+// Hand one frame to the view. Raw shows the optimizer's cells: pastel fills (matplotlib Accent
+// over white), double-line walls on the room outlines, faint grey cell lines on top, and the
+// sites. Aligned shows the welded and snapped rooms, each filled even-odd with its holes.
+// The camera fits the boundary, so switching Raw and Aligned keeps the zoom and pan.
 function drawFrame(f) {
-  clearPlan();
-  // Center the plan in the canvas: the cells tile the whole boundary, so their
-  // bbox is the (stable) plan extent. Center it and scale to ~70% of the square.
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const cell of f.cells) for (const [x, y] of cell.ring) {
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-  }
-  if (minX <= maxX) {
-    fitCx = (minX + maxX) / 2; fitCy = (minY + maxY) / 2;
-    // fit to the whole window; the floating cards may cover part of the plan, and showing or
-    // hiding them never moves or resizes it
-    viewCx = CW / 2; viewCy = CH / 2;
-    fitS = 0.80 * Math.min(CW, CH) / (Math.max(maxX - minX, maxY - minY) || 1);
-  }
   const al = boundaryRing ? alignFrame(f) : null;
   if (al) $('align_v').textContent = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
   if (wallsMode === 'aligned' && al) {
-    // aligned rooms: one fill per room (its rings, holes included), then double-line walls on the outlines
-    const path = rings => { pctx.beginPath(); for (const ring of rings) { ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y))); pctx.closePath(); } };
-    al.rooms.forEach((rings, r) => { path(rings); pctx.fillStyle = COLORS[r % COLORS.length]; pctx.fill('evenodd'); });
-    const refS = 0.70 * Math.min(CW, CH) / 1.45, fullPx = Math.max(1, 2 * wallWidth * refS), lineP = 0.005 * refS;
-    pctx.lineJoin = 'miter'; pctx.miterLimit = 2; pctx.lineCap = 'butt';
-    for (const [style, w] of [['#111', fullPx], ['#fff', fullPx - 2 * lineP]]) {
-      if (w <= 0) continue;
-      pctx.strokeStyle = style; pctx.lineWidth = w;
-      for (const rings of al.rooms) { path(rings); pctx.stroke(); }
-    }
-    movePlayhead(f.iteration);
-    return;
+    view.draw({
+      outline: boundaryRing,
+      rooms: al.rooms.map((rings, r) => ({ rings, color: COLORS[r % COLORS.length] })),
+      walls: al.rooms.flat(),
+      wall: wallWidth,
+    });
+  } else {
+    view.draw({
+      outline: boundaryRing,
+      rooms: f.cells.map(cell => ({ rings: [cell.ring], color: COLORS[cell.room % COLORS.length] })),
+      walls: f.walls || [],
+      lines: f.cells.map(cell => cell.ring),
+      points: f.sites,
+      wall: wallWidth,
+    });
   }
-  // 0) pastel room fills — each cell painted with its room colour (matplotlib
-  //    Accent over white); under the walls + gray cells.
-  for (const cell of f.cells) {
-    pctx.beginPath();
-    cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
-    pctx.closePath();
-    pctx.fillStyle = COLORS[cell.room % COLORS.length];
-    pctx.fill();
-  }
-  // 1) DOUBLE-LINE walls — stroke each room-boundary centerline black at the full
-  //    wall width (2·wallWidth), then white slightly narrower -> two black lines
-  //    with a white interior. The centerlines are CLOSED rings (only joins, no
-  //    caps), and the miter join renders the junctions cleanly.
-  // Wall stroke widths use a FIXED reference scale, not the per-preset fitS, so the
-  // same slider value renders at the same on-screen thickness for every boundary.
-  // (Each preset's plan fills ~70% of the canvas but has a different normalized
-  // bbox, so fitS varies and would make identical settings look thicker/thinner.)
-  // 1.45 ≈ the typical normalized plan extent across the demo presets.
-  const refS = 0.70 * Math.min(CW, CH) / 1.45;
-  const fullPx = Math.max(1, 2 * wallWidth * refS);   // full wall width (2d) in CSS px
-  const lineP = 0.005 * refS;                          // black line thickness (0.005 normalized)
-  const strokeWalls = (style, w) => {
-    if (w <= 0) return;
-    pctx.strokeStyle = style; pctx.lineWidth = w;
-    for (const ring of (f.walls || [])) {
-      pctx.beginPath();
-      ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
-      pctx.closePath();
-      pctx.stroke();
-    }
-  };
-  pctx.lineJoin = 'miter'; pctx.miterLimit = 2; pctx.lineCap = 'butt';
-  strokeWalls('#111', fullPx);                  // outer = full wall width -> two black edges
-  strokeWalls('#fff', fullPx - 2 * lineP);      // inner white -> leaves the two black lines
-  // 2) faint gray Voronoi cells ON TOP — the centerline shows gray (same as the
-  //    cells) between the two black wall lines, plus the room subdivisions.
-  pctx.lineJoin = 'round'; pctx.lineCap = 'round';
-  pctx.strokeStyle = 'rgba(150,150,150,0.55)'; pctx.lineWidth = 0.7;
-  for (const cell of f.cells) {
-    pctx.beginPath();
-    cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
-    pctx.closePath();
-    pctx.stroke();
-  }
-  // 3) sites — tiny faint dots (the Voronoi generators)
-  pctx.fillStyle = 'rgba(0,0,0,0.4)';
-  for (const [x, y] of f.sites) { pctx.beginPath(); pctx.arc(nx(x), ny(y), 1.4, 0, 7); pctx.fill(); }
   movePlayhead(f.iteration);   // the current-iteration playhead replaces the old iter/loss text
 }
 
@@ -850,8 +778,7 @@ $('reset').onclick = () => {
   sendBuild('preview');
 };
 
-fitCanvases();
-clearPlan();
+view.resize();
 applyPreset(mode);  // load the default boundary's preset on first load (same as clicking it)
 $('status').textContent = mode + ' · building…';
 sendBuild('preview');
