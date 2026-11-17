@@ -158,6 +158,25 @@
     .actions button:disabled { opacity: .4; cursor: default; }
 
     footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
+
+    /* Desktop: one screen, no page scroll. The header and intro shrink to a band, the plan
+       takes the height that is left (square, as large as fits), the loss rows sit under it,
+       and only the settings column scrolls when it runs long. Narrow screens keep the
+       stacked page above. */
+    @media (min-width: 901px) {
+      .wrap { max-width: none; height: 100vh; display: flex; flex-direction: column; padding: 1.2em clamp(1.2em, 3vw, 2.4em); }
+      header { margin-bottom: .5em; }
+      h1 { font-size: 1.4em; }
+      .lede { font-size: .88em; margin-bottom: 1em; max-width: 140ch; }
+      .stage { flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(0, 1fr) 300px; align-items: stretch; }
+      .canvas-card { display: flex; flex-direction: column; min-height: 0; }
+      .planbox { flex: 1 1 auto; min-height: 0; display: flex; justify-content: center; container-type: size; }
+      .planbox canvas#plan { width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); aspect-ratio: auto; }
+      .canvas-sub { margin-top: .6em; }
+      .lossrow { margin: .18em 0; }
+      .lossrow .spark { height: 20px; }
+      .controls { overflow-y: auto; min-height: 0; padding-right: .4em; }
+    }
   </style>
 </head>
 <body>
@@ -178,7 +197,7 @@
 
   <div class="stage">
     <div class="canvas-card">
-      <canvas id="plan" width="520" height="520"></canvas>
+      <div class="planbox"><canvas id="plan" width="520" height="520"></canvas></div>
       <div class="label canvas-sub">Loss</div>
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->
