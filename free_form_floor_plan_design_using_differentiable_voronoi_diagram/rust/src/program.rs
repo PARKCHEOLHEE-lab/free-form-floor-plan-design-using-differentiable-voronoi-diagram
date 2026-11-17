@@ -158,8 +158,11 @@ impl RoomProgram {
 
     fn initial_labels(&self, sites: &[[f32;2]], boundary: &Polygon<f64>) -> Vec<usize> {
         let k=self.centers.len();
+        // Log distance minus a weight is multiplicatively weighted distance.
+        // Unlike an additive squared-distance offset, it keeps each center at
+        // the heart of its region instead of requiring an isolated anchor cell.
         let costs:Vec<Vec<f64>>=sites.iter().map(|p|self.centers.iter().map(|c|
-            (p[0] as f64-c[0] as f64).powi(2)+(p[1] as f64-c[1] as f64).powi(2)
+            ((p[0] as f64-c[0] as f64).powi(2)+(p[1] as f64-c[1] as f64).powi(2)).ln()
         ).collect()).collect();
         let mut weights=vec![0.;k];
         let assign=|weights:&[f64]|costs.iter().enumerate().map(|(i,c)|{

@@ -18,13 +18,18 @@ fn initial_room_areas_follow_circle_shares_before_optimization() {
     use voronoi_floorplan::voronoi::render_cells;
     let concave=Polygon::new(LineString::from(vec![(-1.,-1.),(1.,-1.),(1.,0.),(0.,0.),(0.,1.),(-1.,1.),(-1.,-1.)]),vec![]);
     let cases=vec![
-        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.1],[0.5,0.,0.2]]),
-        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.2],[0.5,0.,0.1]]),
-        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.15],[0.5,0.,0.15]]),
-        (concave,vec![[-0.6,-0.4,0.1],[0.6,-0.5,0.23],[-0.6,0.6,0.14]]),
+        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.1],[0.5,0.,0.2]],true),
+        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.2],[0.5,0.,0.1]],true),
+        (rect(-1.,-1.,1.,1.),vec![[-0.5,0.,0.15],[0.5,0.,0.15]],true),
+        (concave,vec![[-0.6,-0.4,0.1],[0.6,-0.5,0.23],[-0.6,0.6,0.14]],false),
+        // Centers/radii from the real 1145x820 browser reproduction, preset A.
+        (voronoi_floorplan::shapes::by_name("shape_a").unwrap().polygon(),vec![
+            [-0.038907918283487594,-0.3075807746125865,0.06711228717629449],
+            [0.47561961673477016,-0.3075807746125865,0.13422457435258897],
+        ],true),
     ];
     let mut shares=Vec::new();
-    for (boundary,circles) in cases {
+    for (boundary,circles,connected) in cases {
         let p=RoomProgram::new(&boundary,&circles).unwrap();
         let (sites,labels)=p.initialize(&boundary,80,777).unwrap();
         assert_eq!(p.initialize(&boundary,80,777).unwrap(),(sites.clone(),labels.clone()),"initialization remains deterministic");
@@ -38,6 +43,10 @@ fn initial_room_areas_follow_circle_shares_before_optimization() {
         for (r,circle) in circles.iter().enumerate(){
             assert_eq!(sites[r],[circle[0] as f32,circle[1] as f32]);
             assert!(cells.iter().any(|(i,cell)|labels[*i]==r && cell.contains(&Point::new(circle[0],circle[1]))),"each initial room keeps its input center");
+            if connected {
+                let region=geo::algorithm::unary_union(cells.iter().filter(|(i,_)|labels[*i]==r).map(|(_,cell)|cell));
+                assert_eq!(region.0.len(),1,"initial fitting must not leave an isolated anchor cell");
+            }
             assert!((areas[r]/total-p.ratios()[r]).abs()<=0.05,"room {r}: initial displayed share {} must approach target {}",areas[r]/total,p.ratios()[r]);
         }
         shares.push(areas[0]/total);
