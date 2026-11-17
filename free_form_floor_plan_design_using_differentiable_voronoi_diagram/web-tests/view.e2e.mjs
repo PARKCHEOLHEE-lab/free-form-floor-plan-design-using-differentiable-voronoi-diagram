@@ -56,3 +56,53 @@ test("three.js top view keeps the 2D look: six pastel rooms and dark wall lines 
         assert.ok(dark > 6_000, `dark wall lines cover only ${dark} px`);
     });
 });
+
+/** The view's camera state, from the canvas's data attributes. */
+const camera = (page) =>
+    page.$eval("#plan", (c) => ({ view: c.dataset.view, zoom: +c.dataset.zoom, azimuth: +c.dataset.azimuth, elevation: +c.dataset.elevation }));
+
+/** Centre of the drawn (non-white) pixels on the plan canvas, in canvas pixels. */
+const drawnCentre = (page) =>
+    page.evaluate(async () => {
+        const img = new Image();
+        img.src = document.getElementById("plan").toDataURL();
+        await img.decode();
+        const c = document.createElement("canvas");
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const px = ctx.getImageData(0, 0, c.width, c.height).data;
+        let sx = 0, sy = 0, n = 0;
+        for (let i = 0; i < px.length; i += 4)
+            if (px[i] < 250 || px[i + 1] < 250 || px[i + 2] < 250) {
+                const p = i / 4;
+                sx += p % c.width;
+                sy += Math.floor(p / c.width);
+                n++;
+            }
+        return [sx / n, sy / n];
+    });
+
+test("top view: dragging pans the plan without turning it, and the wheel zooms but stops at 0.5x and 8x", { timeout: 120_000 }, async () => {
+    await withPage(async (page) => {
+        assert.deepEqual(await camera(page), { view: "plan", zoom: 1, azimuth: 0, elevation: 90 });
+        // drag 100 px left and 50 px up, on open canvas (away from the toolbar and the loss card)
+        const before = await drawnCentre(page);
+        await page.mouse.move(600, 400);
+        await page.mouse.down();
+        await page.mouse.move(500, 350, { steps: 10 });
+        await page.mouse.up();
+        const after = await drawnCentre(page);
+        const [dx, dy] = [after[0] - before[0], after[1] - before[1]];
+        assert.ok(Math.abs(dx + 100) < 3 && Math.abs(dy + 50) < 3, `the plan moved by ${dx.toFixed(1)}, ${dy.toFixed(1)} px`);
+        const turned = await camera(page);
+        assert.ok(turned.azimuth === 0 && turned.elevation === 90, `the drag turned the view to ${JSON.stringify(turned)}`);
+
+        // each wheel step of 200 zooms by 1/0.95^2 (OrbitControls), so 40 steps would pass 60x
+        for (let i = 0; i < 40; i++) await page.mouse.wheel(0, -200);
+        assert.equal((await camera(page)).zoom, 8, "zoom in stops at 8x");
+        for (let i = 0; i < 80; i++) await page.mouse.wheel(0, 200);
+        assert.equal((await camera(page)).zoom, 0.5, "zoom out stops at 0.5x");
+    });
+});

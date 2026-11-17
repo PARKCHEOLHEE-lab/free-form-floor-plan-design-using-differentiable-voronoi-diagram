@@ -39,7 +39,7 @@ export function createPlanView(canvas) {
     scene.add(content);
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
     const controls = new OrbitControls(camera, canvas);
-    Object.assign(controls, { zoomToCursor: true, screenSpacePanning: true });
+    Object.assign(controls, { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, zoomToCursor: true, screenSpacePanning: true });
 
     const meshMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
     const lineMat = new THREE.LineBasicMaterial({ color: CELL_LINE.color, transparent: true, opacity: CELL_LINE.opacity });
