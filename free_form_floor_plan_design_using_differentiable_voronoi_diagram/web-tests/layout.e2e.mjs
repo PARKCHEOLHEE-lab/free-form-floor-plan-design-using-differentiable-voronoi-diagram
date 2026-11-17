@@ -71,6 +71,26 @@ test("toolbar: an icon opens only its panel, another icon swaps it, the same ico
     }
 });
 
+test("one toolbar: every icon sits in the top-left toolbar, and the Display panel opens beside it", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1440, 900], async (page) => {
+            const bars = await page.$$eval(".toolbar", (ts) => ts.map((t) => t.getBoundingClientRect()));
+            assert.equal(bars.length, 1, "one toolbar");
+            assert.ok(bars[0].left < 40 && bars[0].top < 40, `toolbar at ${bars[0].left},${bars[0].top}`);
+            for (const sel of ["button[data-open=display]", "button[data-toggle=losses]", "#run", "#reset"])
+                assert.equal(await page.$eval(sel, (b) => !!b.closest(".toolbar")), true, `${sel} is in the toolbar`);
+            await page.click("button[data-open=display]");
+            const panel = await page.$eval(".panel[data-panel=display]", (p) => p.getBoundingClientRect().toJSON());
+            const tool = await page.$eval("button[data-open=display]", (b) => b.getBoundingClientRect().toJSON());
+            assert.ok(panel.left >= bars[0].right && panel.left - bars[0].right <= 16, `Display panel starts at ${panel.left}, toolbar ends at ${bars[0].right}`);
+            assert.ok(panel.top <= tool.top, `Display panel top ${panel.top} is below its icon ${tool.top}`);
+        });
+    } finally {
+        proc.kill();
+    }
+});
+
 test("loss card: its 5 rows are in view at the start, and the Losses icon hides and shows it", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
