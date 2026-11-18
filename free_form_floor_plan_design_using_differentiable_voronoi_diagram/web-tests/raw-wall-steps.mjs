@@ -44,7 +44,13 @@ export function measureRawSteps(walls, boundary) {
                     const shift = subtract(exit.a, entry.b);
                     const height = cross(heading, shift);
                     if (Math.abs(height) >= .005 * scale && Math.abs(dot(heading, shift)) <= .75 * Math.abs(height)
-                        && connector.every(run => cross(heading, run.heading) * height >= 0)) {
+                        && connector.every(run => {
+                            // Each connector edge must go mainly sideways.
+                            // A returning wall run is a separate part of the room.
+                            const sideways = cross(heading, run.heading);
+                            return sideways * height >= 0
+                                && Math.abs(sideways) >= Math.abs(dot(heading, run.heading));
+                        })) {
                         steps.push({
                             wall,
                             height: Math.abs(height),

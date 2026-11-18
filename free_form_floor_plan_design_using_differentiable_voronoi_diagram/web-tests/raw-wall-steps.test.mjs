@@ -38,3 +38,14 @@ test('a shared step counts once and a change of neighbors marks a junction step'
     assert.deepEqual(leftStep.pairs.sort(), ['0,1', '0,2']);
     assert.ok(Math.abs(leftStep.height - onePair.all.max) < 1e-12,'ownership does not change the measured height');
 });
+
+test('a long returning wall run does not join two bends into one step', () => {
+    const boundary = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    // The westward runs enclose a vertical offset of .75, but their
+    // path returns east for a full wall run. The actual step joins the
+    // two northward runs on either side of the .30 horizontal connector.
+    const room = [[-1, -1], [1, -1], [1, -.5], [-.3, -.5], [-.3, -.15],
+        [0, -.15], [0, .25], [-1, .25]];
+    const steps = measureRawSteps([room],boundary);
+    assert.deepEqual(steps.map(step => step.height), [.3]);
+});
