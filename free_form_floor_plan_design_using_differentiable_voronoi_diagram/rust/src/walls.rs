@@ -8,9 +8,15 @@
 //! is built from per-segment rectangles plus per-vertex disks.
 
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Simplify};
+use std::collections::{BTreeMap, HashMap};
 
 type CellEdge=((u64,u64),(u64,u64));
 const NO_CELL:usize=usize::MAX;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static OWNER_EDGES_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Shared physical walls, in stable room/edge order for numerical evaluation.
 pub(crate) struct SharedWalls {
@@ -36,19 +42,32 @@ pub(crate) struct SharedWallCells {
     rooms:usize,
     cell_rooms:Vec<usize>,
     cell_edges:Vec<Vec<CellEdge>>,
-    owners:std::collections::HashMap<CellEdge,[usize;2]>,
+    owners: HashMap<CellEdge, [usize; 2]>,
+    shared_edges: Vec<(CellEdge, [usize; 2])>,
 }
 impl SharedWallCells {
     pub(crate) fn new(cells:&[Polygon<f64>],labels:&[usize])->Self{
         Self::from_iter(labels.iter().copied().max().map_or(0,|n|n+1),cells.iter().zip(labels.iter().copied()))
     }
     fn from_iter<'a>(rooms:usize,cells:impl Iterator<Item=(&'a Polygon<f64>,usize)>)->Self{
-        let mut out=Self{rooms,cell_rooms:Vec::new(),cell_edges:Vec::new(),owners:std::collections::HashMap::new()};
+        let mut out = Self {
+            rooms,
+            cell_rooms: Vec::new(),
+            cell_edges: Vec::new(),
+            owners: HashMap::new(),
+            shared_edges: Vec::new(),
+        };
         for (cell,room) in cells {
             let id=out.cell_rooms.len();let edges=Self::edges(cell);
-            for &edge in &edges {Self::insert(&mut out.owners,edge,id);}
+            for &edge in &edges {
+                let slots = out.owners.entry(edge).or_insert([NO_CELL; 2]);
+                Self::insert_owner(slots, id);
+            }
             out.cell_rooms.push(room);out.cell_edges.push(edges);
         }
+        out.shared_edges = out.owners.iter().filter_map(|(&edge, &slots)| {
+            out.room_pair(slots).map(|_| (edge, slots))
+        }).collect();
         out
     }
     fn edges(cell:&Polygon<f64>)->Vec<CellEdge>{
@@ -61,33 +80,55 @@ impl SharedWallCells {
         }}
         edges.sort_unstable();edges.dedup();edges
     }
-    fn insert(map:&mut std::collections::HashMap<CellEdge,[usize;2]>,edge:CellEdge,cell:usize){
-        let owners=map.entry(edge).or_insert([NO_CELL;2]);
+    fn insert_owner(owners: &mut [usize; 2], cell: usize) {
         if owners.contains(&cell){return;}
         let slot=owners.iter_mut().find(|n|**n==NO_CELL).expect("a Voronoi cell face has at most two owners");*slot=cell;
     }
-    fn collect(&self,map:&std::collections::HashMap<CellEdge,[usize;2]>)->SharedWalls{
-        let mut pairs:std::collections::BTreeMap<_,Vec<Line<f64>>>=std::collections::BTreeMap::new();
-        for (&(a,b),owners) in map {
-            if owners[0]==NO_CELL||owners[1]==NO_CELL {continue;}
-            let (r,t)=(self.cell_rooms[owners[0]],self.cell_rooms[owners[1]]);
-            if r==t{continue;}
-            let pair=if r<t{(r,t)}else{(t,r)};
-            pairs.entry(pair).or_default().push(Line{start:Coord{x:f64::from_bits(a.0),y:f64::from_bits(a.1)},end:Coord{x:f64::from_bits(b.0),y:f64::from_bits(b.1)}});
+    fn room_pair(&self, [a, b]: [usize; 2]) -> Option<(usize, usize)> {
+        if a == NO_CELL || b == NO_CELL {
+            return None;
+        }
+        let (a, b) = (self.cell_rooms[a], self.cell_rooms[b]);
+        (a != b).then_some((a.min(b), a.max(b)))
+    }
+    fn collect(&self, edges: impl Iterator<Item = (CellEdge, [usize; 2])>) -> SharedWalls {
+        let mut pairs: BTreeMap<_, Vec<Line<f64>>> = BTreeMap::new();
+        for ((a, b), owners) in edges {
+            #[cfg(test)]
+            OWNER_EDGES_READ.set(OWNER_EDGES_READ.get() + 1);
+            if let Some(pair) = self.room_pair(owners) {
+                pairs.entry(pair).or_default().push(Line{start:Coord{x:f64::from_bits(a.0),y:f64::from_bits(a.1)},end:Coord{x:f64::from_bits(b.0),y:f64::from_bits(b.1)}});
+            }
         }
         for edges in pairs.values_mut(){edges.sort_unstable_by_key(|e|((e.start.x.to_bits(),e.start.y.to_bits()),(e.end.x.to_bits(),e.end.y.to_bits())));}
         SharedWalls{rooms:self.rooms,pairs}
     }
-    pub(crate) fn snapshot(&self)->SharedWalls{self.collect(&self.owners)}
-    pub(crate) fn updated(&self,cells:&[Polygon<f64>],changed:&[usize])->SharedWalls{
-        let mut owners=self.owners.clone();
-        for &cell in changed {for edge in &self.cell_edges[cell]{
-            let slots=owners.get_mut(edge).expect("base cell ownership exists");
-            *slots.iter_mut().find(|n|**n==cell).expect("base face contains its cell")=NO_CELL;
-            if slots.iter().all(|n|*n==NO_CELL){owners.remove(edge);}
-        }}
-        for &cell in changed {for edge in Self::edges(&cells[cell]){Self::insert(&mut owners,edge,cell);}}
-        self.collect(&owners)
+    pub(crate) fn snapshot(&self) -> SharedWalls {
+        self.collect(self.shared_edges.iter().copied())
+    }
+    pub(crate) fn updated(&self, cells: &[Polygon<f64>], changed: &[usize]) -> SharedWalls {
+        let mut overrides = HashMap::with_hasher(self.owners.hasher().clone());
+        let mut added = Vec::new();
+        for &cell in changed {
+            let old = &self.cell_edges[cell];
+            let new = Self::edges(&cells[cell]);
+            for &edge in old.iter().filter(|edge| new.binary_search(edge).is_err()) {
+                let slots = overrides.entry(edge).or_insert_with(|| self.owners[&edge]);
+                *slots.iter_mut().find(|n| **n == cell).expect("base face contains its cell") = NO_CELL;
+            }
+            added.extend(new.into_iter().filter(|edge| old.binary_search(edge).is_err()).map(|edge| (edge, cell)));
+        }
+        // A face can change both owners, so remove old owners before adding new ones.
+        for (edge, cell) in added {
+            let slots = overrides.entry(edge).or_insert_with(|| {
+                self.owners.get(&edge).copied().unwrap_or([NO_CELL; 2])
+            });
+            Self::insert_owner(slots, cell);
+        }
+        // Only shared faces can contribute from the base. Overrides may turn
+        // any face into a shared face, including a former room seam.
+        let unchanged = self.shared_edges.iter().copied().filter(|(edge, _)| !overrides.contains_key(edge));
+        self.collect(unchanged.chain(overrides.iter().map(|(&edge, &slots)| (edge, slots))))
     }
 }
 

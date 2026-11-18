@@ -9,6 +9,11 @@ use geo::{Area, LineString, MultiPolygon, Polygon};
 use geo_booleanop::boolean::BooleanOp;
 use crate::walls::nearest_boundary_direction;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static WALL_RINGS_SCORED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Groups the paired cells by room index, mirroring
 /// `rooms_group[room_index].append(cell)` over `zip(cells_sorted, room_indices)`
 /// (zip truncates to the shorter list, as in Python).
@@ -58,16 +63,38 @@ pub fn compute_wall_local_loss(
     boundary: &Polygon<f64>,
     w_wall_local: f64,
 ) -> f32 {
+    compute_wall_local_loss_reusing(room_unions, boundary, w_wall_local, |_| None)
+}
+
+pub(crate) fn compute_wall_local_loss_reusing<'a>(
+    room_unions: &[MultiPolygon<f64>],
+    boundary: &Polygon<f64>,
+    w_wall_local: f64,
+    cached_rings: impl Fn(usize) -> Option<&'a [f32]>,
+) -> f32 {
     let mut loss: f64 = 0.0;
-    for room_union in room_unions {
-        for room in room_union {
-            loss += ring_wall_local_sum(room.exterior(), boundary) as f64;
-            for interior in room.interiors() {
-                loss += ring_wall_local_sum(interior, boundary) as f64;
+    for (room, union) in room_unions.iter().enumerate() {
+        // Accumulate rings in the original order even when a room is cached.
+        if let Some(scores) = cached_rings(room) {
+            for &score in scores {
+                loss += score as f64;
+            }
+        } else {
+            for score in local_wall_ring_scores(union, boundary) {
+                loss += score as f64;
             }
         }
     }
     (loss as f32) * (w_wall_local as f32)
+}
+
+pub(crate) fn local_wall_ring_scores<'a>(
+    union: &'a MultiPolygon<f64>,
+    boundary: &'a Polygon<f64>,
+) -> impl Iterator<Item = f32> + 'a {
+    union.iter()
+        .flat_map(|room| std::iter::once(room.exterior()).chain(room.interiors()))
+        .map(move |ring| ring_wall_local_sum(ring, boundary))
 }
 
 /// `ring_wall_sum` measured in the local boundary frame: each edge vector is
@@ -75,6 +102,8 @@ pub fn compute_wall_local_loss(
 /// the |Δu| + |Δv| taxicab sum. Mirrors `ring_wall_sum`'s f32-first casting, so
 /// at φ = 0 it is bit-identical to `ring_wall_sum`.
 fn ring_wall_local_sum(ring: &LineString<f64>, boundary: &Polygon<f64>) -> f32 {
+    #[cfg(test)]
+    WALL_RINGS_SCORED.set(WALL_RINGS_SCORED.get() + 1);
     let pts = &ring.0;
     let n = pts.len().saturating_sub(1);
     if n == 0 {
@@ -232,6 +261,12 @@ pub struct LossWeights {
     pub w_cell: f64,
 }
 
+impl LossWeights {
+    pub(crate) fn shared_wall_shape(&self) -> (bool, bool) {
+        (self.w_wall > 0. && matches!(self.wall_mode, WallLossMode::CosineSquared), self.w_jog > 0.)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct LossBreakdown {
     pub jog: f32,
@@ -246,13 +281,35 @@ pub struct LossBreakdown {
 }
 
 /// One direction model and one shared-cell graph for shape and requested doors.
-pub(crate) fn compute_wall_terms(unions:&[MultiPolygon<f64>],groups:&[Vec<&Polygon<f64>>],boundary:&Polygon<f64>,w:&LossWeights,program:Option<&crate::program::RoomProgram>,cached:Option<&crate::walls::SharedWalls>)->(f32,f32,f32){
-    let shape=w.w_jog>0. ||(w.w_wall>0. && matches!(w.wall_mode,WallLossMode::CosineSquared));
-    let generated=if cached.is_none()&&(shape||program.is_some_and(|p|p.has_connections())) {Some(crate::walls::SharedWalls::from_cells(groups))}else{None};
-    let shared=cached.or(generated.as_ref());
-    let (direction,jog)=if shape {crate::wall_shape::evaluate_shared(shared.unwrap(),boundary)}else{(0.,0.)};
+pub(crate) fn compute_wall_terms(
+    groups: &[Vec<&Polygon<f64>>],
+    boundary: &Polygon<f64>,
+    w: &LossWeights,
+    program: Option<&crate::program::RoomProgram>,
+    shared: Option<&crate::walls::SharedWalls>,
+    wall_shape: Option<&crate::wall_shape::WallShapeCache<'_>>,
+    legacy_wall: impl FnOnce() -> f32,
+) -> (f32, f32, f32) {
+    let (score_direction, score_jog) = w.shared_wall_shape();
+    let generated = if shared.is_none()
+        && (score_direction || score_jog || program.is_some_and(|p| p.has_connections()))
+    {
+        Some(crate::walls::SharedWalls::from_cells(groups))
+    } else {
+        None
+    };
+    let shared = shared.or(generated.as_ref());
+    let (direction, jog) = if score_direction || score_jog {
+        let edges = shared.unwrap();
+        match wall_shape {
+            Some(cache) => cache.evaluate(edges),
+            None => crate::wall_shape::evaluate_shared_terms(edges, boundary, score_direction, score_jog),
+        }
+    } else {
+        (0., 0.)
+    };
     let wall=if w.w_wall<=0. {0.}else{match w.wall_mode{
-        WallLossMode::LegacyL1=>compute_wall_local_loss(unions,boundary,w.w_wall),
+        WallLossMode::LegacyL1=>legacy_wall(),
         WallLossMode::CosineSquared=>(direction as f32)*(w.w_wall as f32),
     }};
     let connection=if let (Some(p),Some(edges))=(program,shared){p.connection_loss_cells(groups,edges)}else{0.};
@@ -285,7 +342,8 @@ pub fn floor_plan_loss_with_program(
         Vec::new()
     };
 
-    let (wall,jog,connection) = compute_wall_terms(&unions,&groups,boundary,w,program,None);
+    let legacy_wall = || compute_wall_local_loss(&unions, boundary, w.w_wall);
+    let (wall,jog,connection) = compute_wall_terms(&groups,boundary,w,program,None,None,legacy_wall);
     let area = if w.w_area > 0.0 {
         compute_area_loss(&geom.cells_sorted, target_areas, room_indices, w.w_area)
     } else {

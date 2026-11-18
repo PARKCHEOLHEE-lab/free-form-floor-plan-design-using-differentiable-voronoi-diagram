@@ -19,8 +19,10 @@
 use crate::loss::{
     compute_area_loss, compute_bb_loss, compute_cell_area_loss, compute_lloyd_loss,
     compute_topology_loss, compute_wall_terms, rooms_group, LossBreakdown, LossWeights, WallLossMode,
+    compute_wall_local_loss_reusing, local_wall_ring_scores,
 };
 use crate::voronoi::compute_cells;
+use crate::wall_shape::WallShapeCache;
 use geo::{MultiPolygon, Polygon};
 use crate::program::RoomProgram;
 
@@ -37,8 +39,10 @@ fn breakdown_from(
     boundary: &Polygon<f64>,
     program: Option<&RoomProgram>,
     shared: Option<&crate::walls::SharedWalls>,
+    wall_shape: Option<&WallShapeCache<'_>>,
+    legacy_wall: impl FnOnce() -> f32,
 ) -> LossBreakdown {
-    let (wall,jog,connection) = compute_wall_terms(unions,groups,boundary,w,program,shared);
+    let (wall,jog,connection) = compute_wall_terms(groups,boundary,w,program,shared,wall_shape,legacy_wall);
     let area = if w.w_area > 0.0 { compute_area_loss(cells, target_areas, room_indices, w.w_area) } else { 0.0 };
     let lloyd = if w.w_lloyd > 0.0 { compute_lloyd_loss(cells, sites, w.w_lloyd) } else { 0.0 };
     let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
@@ -46,24 +50,6 @@ fn breakdown_from(
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
     let total = wall + area + lloyd + topo + bb + cell + connection + jog;
     LossBreakdown { jog, total, wall, area, lloyd, topo, bb, cell, connection }
-}
-
-/// Sum the six loss components from already-built geometry. Thin wrapper over
-/// `breakdown_from` — the hot finite-difference path only needs the scalar
-/// total, and `.total` uses the same left-to-right sum so it stays identical.
-fn total_from(
-    cells: &[Polygon<f64>],
-    groups: &[Vec<&Polygon<f64>>],
-    unions: &[MultiPolygon<f64>],
-    sites: &[[f32; 2]],
-    target_areas: &[f64],
-    room_indices: &[usize],
-    w: &LossWeights,
-    boundary: &Polygon<f64>,
-    program: Option<&RoomProgram>,
-    shared: Option<&crate::walls::SharedWalls>,
-) -> f32 {
-    breakdown_from(cells, groups, unions, sites, target_areas, room_indices, w, boundary, program,shared).total
 }
 
 /// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
@@ -102,6 +88,8 @@ pub struct LocalGradContext<'a> {
     base_raw_vertices: crate::voronoi::VertexWelder,
     base_vertices: crate::voronoi::VertexWelder,
     shared_cells: Option<crate::walls::SharedWallCells>,
+    wall_shape: Option<WallShapeCache<'a>>,
+    wall_rings: Option<Vec<Vec<f32>>>,
     /// Base clipped cells (site order) and per-room unions, reused for the
     /// cells/rooms a single-site perturbation does not touch.
     base_cells: Vec<Polygon<f64>>,
@@ -128,8 +116,9 @@ impl<'a> LocalGradContext<'a> {
         let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let base_cells = compute_cells(sites, boundary, None).cells_sorted;
         let base_vertices=crate::voronoi::VertexWelder::for_cells(&base_cells);
-        let need_unions = (w.w_wall > 0.0 && matches!(w.wall_mode,WallLossMode::LegacyL1)) || w.w_topo > 0.0 || w.w_bb > 0.0;
-        let (n_rooms, base_unions, base_breakdown,shared_cells) = {
+        let score_legacy_wall = w.w_wall > 0. && matches!(w.wall_mode, WallLossMode::LegacyL1);
+        let need_unions = score_legacy_wall || w.w_topo > 0.0 || w.w_bb > 0.0;
+        let (n_rooms, base_unions, base_breakdown, shared_cells, wall_shape, wall_rings) = {
             let groups = rooms_group(&base_cells, room_indices);
             let n_rooms = groups.len();
             // Edge-cancellation union (see module docs): the base per-room unions
@@ -139,14 +128,29 @@ impl<'a> LocalGradContext<'a> {
             } else {
                 Vec::new()
             };
-            let shared_cells=if w.w_jog>0. ||(w.w_wall>0. && matches!(w.wall_mode,WallLossMode::CosineSquared))||program.is_some_and(|p|p.has_connections()){Some(crate::walls::SharedWallCells::new(&base_cells,room_indices))}else{None};
-            let shared=shared_cells.as_ref().map(|c|c.snapshot());
-            let bd = breakdown_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary, program,shared.as_ref());
-            (n_rooms, unions, bd,shared_cells)
+            let (score_direction, score_jog) = w.shared_wall_shape();
+            let score_shape = score_direction || score_jog;
+            let shared_cells = if score_shape || program.is_some_and(|p| p.has_connections()) {
+                Some(crate::walls::SharedWallCells::new(&base_cells, room_indices))
+            } else {
+                None
+            };
+            let shared = shared_cells.as_ref().map(|cells| cells.snapshot());
+            let wall_shape = score_shape.then(|| {
+                WallShapeCache::new(shared.as_ref().unwrap(), boundary, score_direction, score_jog)
+            });
+            let wall_rings: Option<Vec<Vec<f32>>> = score_legacy_wall.then(|| {
+                unions.iter().map(|union| local_wall_ring_scores(union, boundary).collect()).collect()
+            });
+            let legacy_wall = || compute_wall_local_loss_reusing(&unions, boundary, w.w_wall, |room| {
+                wall_rings.as_ref().map(|rings| rings[room].as_slice())
+            });
+            let bd = breakdown_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary, program, shared.as_ref(), wall_shape.as_ref(), legacy_wall);
+            (n_rooms, unions, bd, shared_cells, wall_shape, wall_rings)
         };
         let base_raw = crate::voronoi::raw_cells_per_site(&sites_f64, boundary);
         let base_raw_vertices=crate::voronoi::VertexWelder::for_cells(&base_raw);
-        LocalGradContext { boundary, target_areas, room_indices, w, program, base_raw, base_raw_vertices, base_vertices, shared_cells, base_cells, base_unions, n_rooms, base_breakdown }
+        LocalGradContext { boundary, target_areas, room_indices, w, program, base_raw, base_raw_vertices, base_vertices, shared_cells, wall_shape, wall_rings, base_cells, base_unions, n_rooms, base_breakdown }
     }
 
     /// Total loss at the base (unperturbed) sites — must equal the global
@@ -273,7 +277,7 @@ impl<'a> LocalGradContext<'a> {
         // Only changed cells were welded. Cached room geometry remains valid.
         let groups = rooms_group(&cells, self.room_indices);
 
-        let need_unions = (self.w.w_wall > 0.0 && matches!(self.w.wall_mode,WallLossMode::LegacyL1)) || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
+        let need_unions = self.wall_rings.is_some() || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
         let unions: Vec<MultiPolygon<f64>> = if need_unions {
             (0..self.n_rooms)
                 .map(|r| {
@@ -288,7 +292,10 @@ impl<'a> LocalGradContext<'a> {
             Vec::new()
         };
         let shared=self.shared_cells.as_ref().map(|c|c.updated(&cells,&changed));
-        total_from(&cells, &groups, &unions, perturbed_sites, self.target_areas, self.room_indices, self.w, self.boundary, self.program,shared.as_ref())
+        let legacy_wall = || compute_wall_local_loss_reusing(&unions, self.boundary, self.w.w_wall, |room| {
+            self.wall_rings.as_ref().filter(|_| !affected_rooms[room]).map(|rings| rings[room].as_slice())
+        });
+        breakdown_from(&cells, &groups, &unions, perturbed_sites, self.target_areas, self.room_indices, self.w, self.boundary, self.program, shared.as_ref(), self.wall_shape.as_ref(), legacy_wall).total
     }
 }
 
@@ -538,6 +545,7 @@ mod tests {
         let ctx=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p));
         let mut uncached=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p));
         uncached.shared_cells=None;
+        uncached.wall_shape=None;
         let full=crate::loss::floor_plan_loss_with_program(&sites,&b,&targets,&labels,&w,None,Some(&p));
         assert!((ctx.base_total()-full.total).abs()<1e-4);
         for i in 0..sites.len(){for axis in 0..2{for sign in [-1.,1.]{

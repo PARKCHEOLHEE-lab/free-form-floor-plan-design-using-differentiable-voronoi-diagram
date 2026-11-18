@@ -1,46 +1,175 @@
 //! Direction and straightness of physical shared-wall chains.
-use crate::walls::{canonical_chain, wall_chains};
-use geo::{Area, Polygon};
+use crate::walls::{canonical_chain, stitch_room_chains, wall_chains, SharedWalls};
+use geo::{Area, Line, Polygon};
+use std::{borrow::Cow, collections::BTreeMap};
 
-pub(crate) fn evaluate_shared(
-    shared: &crate::walls::SharedWalls,
-    boundary: &Polygon<f64>,
-) -> (f64, f64) {
+#[cfg(test)]
+thread_local! {
+    static SCORE_WORK: std::cell::Cell<[usize; 2]> = const { std::cell::Cell::new([0; 2]) };
+}
+
+#[cfg(test)]
+fn count_score_work(kind: usize) {
+    SCORE_WORK.with(|work| {
+        let mut counts = work.get();
+        counts[kind] += 1;
+        work.set(counts);
+    });
+}
+
+#[derive(Clone)]
+struct ChainScore {
+    points: Vec<[f64; 2]>,
+    direction: f64,
+    jog: f64,
+}
+
+struct PairScores {
+    edges: Vec<Line<f64>>,
+    chains: Vec<ChainScore>,
+}
+
+/// Scores for the base diagram of a single gradient evaluation. A pair's
+/// ordered edge bits identify its inputs; a room's stitched score depends
+/// on all of its incident pairs. Keep individual terms in fold order.
+pub(crate) struct WallShapeCache<'a> {
+    boundary: &'a Polygon<f64>,
+    direction: bool,
+    jog: bool,
+    pairs: BTreeMap<[usize; 2], PairScores>,
+    junctions: Vec<Vec<f64>>,
+}
+
+impl<'a> WallShapeCache<'a> {
+    pub(crate) fn new(shared: &SharedWalls, boundary: &'a Polygon<f64>, direction: bool, jog: bool) -> Self {
+        let scale = boundary.unsigned_area().sqrt();
+        let pairs: BTreeMap<_, _> = shared.indexed_pairs().map(|(rooms, edges)| {
+            let chains = score_pair(edges, boundary, scale, direction, jog);
+            (rooms, PairScores { edges: edges.to_vec(), chains })
+        }).collect();
+        let junctions = if jog {
+            let mut by_room = vec![Vec::new(); shared.room_count()];
+            for (rooms, pair) in &pairs {
+                for &room in rooms {
+                    by_room[room].extend(pair.chains.iter().map(|chain| chain.points.as_slice()));
+                }
+            }
+            by_room.iter().map(|chains| score_junctions(chains, boundary, scale)).collect()
+        } else {
+            Vec::new()
+        };
+        Self { boundary, direction, jog, pairs, junctions }
+    }
+
+    pub(crate) fn evaluate(&self, shared: &SharedWalls) -> (f64, f64) {
+        score_shared(shared, self.boundary, self.direction, self.jog, Some(self))
+    }
+}
+
+fn same_edges(a: &[Line<f64>], b: &[Line<f64>]) -> bool {
+    fn bits(line: &Line<f64>) -> [u64; 4] {
+        [line.start.x.to_bits(), line.start.y.to_bits(), line.end.x.to_bits(), line.end.y.to_bits()]
+    }
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| bits(a) == bits(b))
+}
+
+fn score_pair(edges: &[Line<f64>], boundary: &Polygon<f64>, scale: f64, direction: bool, jog: bool) -> Vec<ChainScore> {
+    #[cfg(test)]
+    count_score_work(0);
+    let tol = scale * 1e-12;
+    wall_chains(edges, tol).into_iter().map(|chain| {
+        let points = canonical_chain(&chain, tol);
+        let direction = if direction {
+            #[cfg(test)]
+            count_score_work(1);
+            chain_direction(&points, boundary)
+        } else {
+            0.
+        };
+        let jog = if jog { chain_jog(&points, boundary) } else { 0. };
+        ChainScore { points, direction, jog }
+    }).collect()
+}
+
+fn score_junctions(chains: &[&[[f64; 2]]], boundary: &Polygon<f64>, scale: f64) -> Vec<f64> {
+    if chains.len() <= 1 {
+        return Vec::new();
+    }
+    let tol = scale * 1e-12;
+    stitch_room_chains(chains, tol).into_iter().map(|(chain, joins)| {
+        room_jog(&canonical_chain(&chain, tol), boundary, scale, &joins)
+    }).collect()
+}
+
+#[cfg(test)]
+pub(crate) fn evaluate_shared(shared: &SharedWalls, boundary: &Polygon<f64>) -> (f64, f64) {
+    evaluate_shared_terms(shared, boundary, true, true)
+}
+
+pub(crate) fn evaluate_shared_terms(shared: &SharedWalls, boundary: &Polygon<f64>, direction: bool, jog: bool) -> (f64, f64) {
+    score_shared(shared, boundary, direction, jog, None)
+}
+
+fn score_shared(shared: &SharedWalls, boundary: &Polygon<f64>, direction: bool, jog: bool, cache: Option<&WallShapeCache<'_>>) -> (f64, f64) {
     if shared.room_count() < 2 {
         return (0., 0.);
     }
-    let tol = boundary.unsigned_area().sqrt() * 1e-12;
-    let traced: Vec<_> = shared
-        .indexed_pairs()
-        .flat_map(|(rooms, edges)| {
-            wall_chains(edges, tol)
-                .into_iter()
-                .map(move |chain| (rooms, canonical_chain(&chain, tol)))
-        })
-        .collect();
-    let (mut direction, mut pair_jog) = (0., 0.);
-    for (_, points) in &traced {
-        direction += chain_direction(points, boundary);
-        pair_jog += chain_jog(points, boundary);
-    }
-    let mut by_room = vec![Vec::new(); shared.room_count()];
-    for (rooms, chain) in &traced {
-        for &room in rooms {
-            by_room[room].push(chain.as_slice());
+    let scale = boundary.unsigned_area().sqrt();
+    let mut dirty = vec![cache.is_none(); shared.room_count()];
+    if let Some(base) = cache {
+        // A pair that disappeared touches both rooms even though the new
+        // graph has no entry for it.
+        for &[a, b] in base.pairs.keys() {
+            if shared.between(a, b).is_empty() {
+                dirty[a] = true;
+                dirty[b] = true;
+            }
         }
     }
-    let scale = boundary.unsigned_area().sqrt();
-    let junction_jog = by_room
-        .iter()
-        .filter(|chains| chains.len() > 1)
-        .flat_map(|chains| crate::walls::stitch_room_chains(chains, tol))
-        .map(|(chain, joins)| room_jog(&canonical_chain(&chain, tol), boundary, scale, &joins))
-        .sum::<f64>();
-    let jog = pair_jog + 0.5 * junction_jog;
-    (
-        direction / shared.room_count() as f64,
-        jog / shared.room_count() as f64,
-    )
+    let traced: Vec<_> = shared.indexed_pairs().map(|(rooms, edges)| {
+        let saved = cache.and_then(|base| base.pairs.get(&rooms))
+            .filter(|pair| same_edges(&pair.edges, edges));
+        let chains = if let Some(pair) = saved {
+            Cow::Borrowed(pair.chains.as_slice())
+        } else {
+            for r in rooms { dirty[r] = true; }
+            Cow::Owned(score_pair(edges, boundary, scale, direction, jog))
+        };
+        (rooms, chains)
+    }).collect();
+    let (mut direction_score, mut pair_jog) = (0., 0.);
+    for (_, chains) in &traced {
+        for score in chains.iter() {
+            direction_score += score.direction;
+            pair_jog += score.jog;
+        }
+    }
+    let mut junction_jog = 0.;
+    if jog {
+        let mut by_room = vec![Vec::new(); shared.room_count()];
+        for (rooms, chains) in &traced {
+            for &r in rooms {
+                if dirty[r] {
+                    by_room[r].extend(chains.iter().map(|chain| chain.points.as_slice()));
+                }
+            }
+        }
+        // Add individual stitch scores, not per-room sums. Changing the
+        // floating-point grouping can change finite-difference gradients.
+        for (r, chains) in by_room.iter().enumerate() {
+            if let Some(base) = cache.filter(|_| !dirty[r]) {
+                for &score in &base.junctions[r] {
+                    junction_jog += score;
+                }
+            } else {
+                for score in score_junctions(chains, boundary, scale) {
+                    junction_jog += score;
+                }
+            }
+        }
+    }
+    let count = shared.room_count() as f64;
+    (direction_score / count, (pair_jog + 0.5 * junction_jog) / count)
 }
 
 // Score the transverse offset along a room's internal walls. Different

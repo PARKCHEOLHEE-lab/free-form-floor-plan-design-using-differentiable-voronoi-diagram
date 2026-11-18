@@ -1,6 +1,74 @@
 use super::*;
 use geo::{LineString,MultiPolygon};
 
+#[test]
+fn mixed_wall_edit_reuses_unchanged_pairs_without_scoring_unused_direction() {
+    let boundary = rectangle();
+    let scene = |offset| {
+        let rooms = [
+            room(vec![[-2.,-1.],[-1.,-1.],[-1.,1.],[-2.,1.],[-2.,-1.]]),
+            room(vec![[-1.,-1.],[0.,-1.],[0.,0.],[offset,0.],[offset,1.],[-1.,1.],[-1.,-1.]]),
+            room(vec![[0.,-1.],[0.7,-1.],[0.7,1.],[offset,1.],[offset,0.],[0.,0.],[0.,-1.]]),
+            room(vec![[0.7,-1.],[1.3,-1.],[1.3,1.],[0.7,1.],[0.7,-1.]]),
+            room(vec![[1.3,-1.],[2.,-1.],[2.,1.],[1.3,1.],[1.3,-1.]]),
+        ];
+        let groups: Vec<_> = rooms.iter().map(|r| vec![&r.0[0]]).collect();
+        crate::walls::SharedWalls::from_cells(&groups)
+    };
+    let base = scene(0.);
+    let edited = scene(0.12);
+    let reference = evaluate_shared(&edited, &boundary).1;
+    assert!(reference > 0., "the edit must introduce a real step");
+    let cache = WallShapeCache::new(&base, &boundary, false, true);
+    SCORE_WORK.set([0; 2]);
+    let actual = cache.evaluate(&edited);
+    assert_eq!(SCORE_WORK.get(), [1, 0], "only the changed pair is traced, and no direction is scored");
+    assert_eq!(actual.0, 0.);
+    assert_eq!(actual.1.to_bits(), reference.to_bits());
+}
+
+#[test]
+fn local_legacy_wall_loss_reuses_pairs_and_skips_cosine_scoring() {
+    use crate::{grad_local::LocalGradContext, loss::LossWeights, program::RoomProgram, voronoi};
+
+    let b = crate::shapes::by_name("shape_e").unwrap().polygon();
+    let data: serde_json::Value = serde_json::from_str(include_str!(
+        "../../web-tests/fixtures/room-program-six.json"
+    )).unwrap();
+    let circles: Vec<[f64; 3]> = data["rooms"].as_array().unwrap().iter().map(|r| [
+        r["center"][0].as_f64().unwrap(),
+        r["center"][1].as_f64().unwrap(),
+        r["radius"].as_f64().unwrap(),
+    ]).collect();
+    let mut program = RoomProgram::new(&b, &circles).unwrap();
+    program.set_connections(&[[0, 1], [2, 4]], 0.1).unwrap();
+    let (sites, labels) = program.initialize(&b, 80, 4971).unwrap();
+    let targets: Vec<_> = program.ratios().iter().map(|r| r * b.unsigned_area()).collect();
+    let w = LossWeights {w_wall: 1. / 13., w_jog: 0.01, ..Default::default()};
+    let ctx = LocalGradContext::new_with_program(&sites, &b, &targets, &labels, &w, Some(&program));
+
+    let mut moved = sites.clone();
+    moved[11][0] += 1e-6;
+    let cells = voronoi::compute_cells(&moved, &b, None).cells_sorted;
+    let all = crate::walls::SharedWallCells::new(&cells, &labels).snapshot();
+    SCORE_WORK.set([0; 2]);
+    crate::walls::OWNER_EDGES_READ.set(0);
+    crate::loss::WALL_RINGS_SCORED.set(0);
+    let local = ctx.local_total(&moved, 11);
+    let [pairs_scored, directions_scored] = SCORE_WORK.get();
+    assert!(local.is_finite() && local > 0.);
+    assert!(pairs_scored > 0 && pairs_scored < all.indexed_pairs().count(),
+        "one finite difference must score a strict subset of the wall pairs, scored {pairs_scored}");
+    assert_eq!(directions_scored, 0, "legacy wall loss never uses the cosine score");
+    let owner_edges = crate::walls::OWNER_EDGES_READ.get();
+    assert!(owner_edges < sites.len(),
+        "graph evaluation should visit shared walls and changed cell edges, visited {owner_edges} edges for {} sites",
+        sites.len());
+    let rings = crate::loss::WALL_RINGS_SCORED.get();
+    assert!(rings > 0 && rings < program.ratios().len(),
+        "only changed room rings require new legacy wall scores, scored {rings}");
+}
+
 fn rectangle() -> Polygon<f64> {
     Polygon::new(LineString::from(vec![(-2.,-1.),(2.,-1.),(2.,1.),(-2.,1.),(-2.,-1.)]),vec![])
 }
@@ -226,13 +294,27 @@ fn jog_cost_applies_when_the_neighbor_changes_at_a_junction() {
             [-2., 0.],
         ]);
         let upper_right = room(vec![[0., h], [2., h], [2., 1.], [0., 1.], [0., h]]);
-        let groups = vec![
+        let mut groups = vec![
             vec![&lower.0[0]],
             vec![&upper_left.0[0]],
             vec![&upper_right.0[0]],
         ];
         let walls = crate::walls::SharedWalls::from_cells(&groups);
-        evaluate_shared(&walls, &b).1
+        groups[2].clear();
+        let missing = crate::walls::SharedWalls::from_cells(&groups);
+        assert!(walls.indexed_pairs().count() > missing.indexed_pairs().count());
+        let without = evaluate_shared(&missing, &b).1;
+        let with = evaluate_shared(&walls, &b).1;
+        let base = WallShapeCache::new(&walls, &b, false, true);
+        assert_eq!(base.evaluate(&missing).1.to_bits(), without.to_bits(),
+            "a disappearing contact invalidates the old junction score");
+        let base = WallShapeCache::new(&missing, &b, false, true);
+        assert_eq!(base.evaluate(&walls).1.to_bits(), with.to_bits(),
+            "a new contact invalidates the old junction score");
+        if h > 0. {
+            assert!(with > without, "the contact change must remove a real step");
+        }
+        with
     };
     let visible = score(0.12);
     assert!(
