@@ -2,6 +2,26 @@ use super::*;
 use voronoi_floorplan::loss::WallLossMode;
 
 #[test]
+fn preset_area_fit_leaves_all_sites_free_to_move_and_is_safe_to_retry() {
+    let boundary = shapes::by_name("shape_e").unwrap().polygon();
+    let mut opt = WasmOpt::build(
+        boundary, 80, vec![0.13, 0.11, 0.21, 0.20, 0.11, 0.24],
+        LossWeights { w_area: 0.3, w_lloyd: 0.01, ..Default::default() }, 4971, 0.005,
+    );
+    let sites = opt.sites.clone();
+    opt.configure_preset_areas().unwrap();
+    let fitted = opt.room_indices.clone();
+    opt.configure_preset_areas().unwrap();
+    assert_eq!(opt.room_indices, fitted);
+    assert_eq!(opt.sites, sites, "preset fitting preserves existing site positions and indices");
+    assert!(opt.program.is_none(), "preset fitting does not add room center anchors");
+    opt.advance();
+    assert!(opt.configure_preset_areas().is_err());
+    assert_ne!(&opt.sites[..6], &sites[..6], "sites used to initialize rooms can still move");
+    assert_eq!(opt.room_indices, fitted, "a rejected refit leaves the running plan intact");
+}
+
+#[test]
 fn explicit_browser_wall_mode_reports_angle_and_step_in_preview_and_optimization(){
     let mut opt=WasmOpt::build(shapes::by_name("shape_a").unwrap().polygon(),18,vec![0.5,0.3,0.2],LossWeights{w_wall:1.,..Default::default()},777,0.005);
     let read=|opt:&WasmOpt|loss::floor_plan_loss_with_program(&opt.sites,&opt.boundary,&opt.target_areas,&opt.room_indices,&opt.weights,None,opt.program.as_ref());

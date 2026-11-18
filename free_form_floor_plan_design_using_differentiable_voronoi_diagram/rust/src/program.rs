@@ -139,6 +139,60 @@ impl RoomProgram {
         Ok((sites, labels))
     }
 
+    /// Fit preset areas with the same connected-cell fitter used for drawn
+    /// rooms. The existing sites keep their positions, order, and freedom
+    /// to move. One site from each initial cluster seeds the fit.
+    pub fn fit_automatic_labels(
+        sites: &[[f32; 2]],
+        boundary: &Polygon<f64>,
+        initial_labels: &[usize],
+        ratios: &[f64],
+    ) -> Result<Vec<usize>, String> {
+        let total = ratios.iter().sum::<f64>();
+        if !total.is_finite() || total <= 0. || ratios.iter().any(|&ratio| ratio <= 0.) {
+            return Err("Room area targets must be positive and finite.".into());
+        }
+        if sites.len() != initial_labels.len() || initial_labels.iter().any(|&room| room >= ratios.len()) {
+            return Err("Every site needs a valid room assignment.".into());
+        }
+        let representatives: Vec<_> = (0..ratios.len())
+            .map(|room| {
+                let indices: Vec<_> = initial_labels.iter().enumerate()
+                    .filter_map(|(i, &label)| (label == room).then_some(i))
+                    .collect();
+                let mut center = [0_f64; 2];
+                for &i in &indices {
+                    for axis in 0..2 {
+                        center[axis] += sites[i][axis] as f64 / indices.len() as f64;
+                    }
+                }
+                let distance = |i: usize| {
+                    (0..2).map(|axis| (sites[i][axis] as f64 - center[axis]).powi(2)).sum::<f64>()
+                };
+                indices.into_iter().min_by(|&a, &b| distance(a).total_cmp(&distance(b)))
+                    .ok_or_else(|| "Every generated room needs a representative site.".to_owned())
+            })
+            .collect::<Result<_, _>>()?;
+        let fitter = Self {
+            centers: representatives.iter().map(|&i| sites[i]).collect(),
+            ratios: ratios.iter().map(|ratio| ratio / total).collect(),
+            links: Vec::new(),
+            door_width: 0.,
+        };
+        // The fitter seeds its first k sites. Use a temporary permutation
+        // and translate the assignments back before returning to the caller.
+        let order: Vec<_> = representatives.iter().copied()
+            .chain((0..sites.len()).filter(|i| !representatives.contains(i)))
+            .collect();
+        let reordered: Vec<_> = order.iter().map(|&i| sites[i]).collect();
+        let fit = fitter.initial_labels(&reordered, boundary)?;
+        let mut labels = vec![0; sites.len()];
+        for (index, room) in order.into_iter().zip(fit) {
+            labels[index] = room;
+        }
+        Ok(labels)
+    }
+
     fn initial_labels(&self, sites: &[[f32;2]], boundary: &Polygon<f64>) -> Result<Vec<usize>,String> {
         let (k,n)=(self.centers.len(),sites.len());
         let mut pieces=vec![Vec::new();n];

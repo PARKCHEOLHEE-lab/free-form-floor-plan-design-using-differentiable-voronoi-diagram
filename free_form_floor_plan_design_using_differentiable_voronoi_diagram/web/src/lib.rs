@@ -133,6 +133,11 @@ impl WasmOpt {
         self.configure_program(circles, links, door_width).map_err(|e| JsValue::from_str(&e))
     }
 
+    /// Fit the built-in area targets without pinning any sites.
+    pub fn fit_preset_areas(&mut self) -> Result<(), JsValue> {
+        self.configure_preset_areas().map_err(|message| JsValue::from_str(&message))
+    }
+
     /// Select angle-only adaptive walls with an independent step weight.
     pub fn set_wall_loss(&mut self, jog_weight:f64)->Result<(),JsValue>{
         self.configure_wall_loss(jog_weight).map_err(|e|JsValue::from_str(&e))
@@ -160,6 +165,16 @@ impl WasmOpt {
 }
 
 impl WasmOpt {
+    fn configure_preset_areas(&mut self) -> Result<(), String> {
+        if self.iteration != 0 || self.program.is_some() {
+            return Err("Fit preset areas before running without drawn rooms.".into());
+        }
+        let initial = init::kmeans_labels(&self.sites, self.target_areas.len().max(1), self.seed);
+        self.room_indices =
+            RoomProgram::fit_automatic_labels(&self.sites, &self.boundary, &initial, &self.target_areas)?;
+        Ok(())
+    }
+
     fn configure_wall_loss(&mut self, jog_weight:f64)->Result<(),String>{
         if !jog_weight.is_finite() || jog_weight<0. {return Err("Step weight must be finite and nonnegative.".into());}
         self.weights.wall_mode=loss::WallLossMode::CosineSquared;

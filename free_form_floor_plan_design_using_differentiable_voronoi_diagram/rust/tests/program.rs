@@ -13,6 +13,21 @@ fn rect(x: f64, y: f64, xx: f64, yy: f64) -> Polygon<f64> {
 }
 
 #[test]
+fn automatic_room_fitting_rejects_invalid_inputs() {
+    let boundary = rect(-1., -1., 1., 1.);
+    let sites = [[-0.5, -0.5], [0.5, -0.5], [0., 0.5]];
+    let fit = |labels: &[usize], targets: &[f64]| {
+        RoomProgram::fit_automatic_labels(&sites, &boundary, labels, targets)
+    };
+    for targets in [&[][..], &[f64::NAN, 1.], &[f64::INFINITY, 1.], &[-0.1, 1.], &[0., 1.]] {
+        assert!(fit(&[0, 1, 1], targets).unwrap_err().contains("positive and finite"));
+    }
+    assert!(fit(&[0, 1], &[0.5, 0.5]).unwrap_err().contains("valid room assignment"));
+    assert!(fit(&[0, 1, 2], &[0.5, 0.5]).unwrap_err().contains("valid room assignment"));
+    assert!(fit(&[0, 0, 0], &[0.5, 0.5]).unwrap_err().contains("representative site"));
+}
+
+#[test]
 fn five_room_initialization_has_no_disconnected_islands() {
     use geo::{Area, Contains, Point};
     let boundary=voronoi_floorplan::shapes::by_name("shape_e").unwrap().polygon();

@@ -25,7 +25,9 @@ impl SharedWalls {
         let pair=if a<b {(a,b)}else{(b,a)};
         self.pairs.get(&pair).map(Vec::as_slice).unwrap_or(&[])
     }
-    pub(crate) fn pairs(&self)->impl Iterator<Item=&[Line<f64>]> {self.pairs.values().map(Vec::as_slice)}
+    pub(crate) fn indexed_pairs(&self)->impl Iterator<Item=([usize;2],&[Line<f64>])> {
+        self.pairs.iter().map(|(&(a,b),edges)|([a,b],edges.as_slice()))
+    }
     pub(crate) fn room_count(&self)->usize{self.rooms}
 }
 
@@ -119,37 +121,138 @@ pub(crate) fn shared_wall_segments(a:&[Line<f64>],b:&[Line<f64>])->Vec<Line<f64>
     shared
 }
 
-pub(crate) fn wall_chains(segments:&[Line<f64>],tol:f64)->Vec<Vec<[f64;2]>>{
-    fn vertex(nodes:&mut Vec<[f64;2]>,p:[f64;2],tol:f64)->usize{
-        if let Some(i)=nodes.iter().position(|q|(p[0]-q[0]).abs()<=tol&&(p[1]-q[1]).abs()<=tol){return i;}
-        nodes.push(p);nodes.len()-1
+fn wall_vertex(nodes: &mut Vec<[f64; 2]>, p: [f64; 2], tol: f64) -> usize {
+    if let Some(i) = nodes
+        .iter()
+        .position(|q| (p[0] - q[0]).abs() <= tol && (p[1] - q[1]).abs() <= tol)
+    {
+        return i;
     }
-    let mut nodes=Vec::new();
-    let mut edges=Vec::new();
-    for segment in segments{
-        let a=vertex(&mut nodes,[segment.start.x,segment.start.y],tol);
-        let b=vertex(&mut nodes,[segment.end.x,segment.end.y],tol);
-        let edge=if a<b {(a,b)}else{(b,a)};
-        if a!=b&&!edges.contains(&edge){edges.push(edge);}
-    }
-    let mut adjacent=vec![Vec::new();nodes.len()];
-    for (i,&(a,b)) in edges.iter().enumerate(){adjacent[a].push(i);adjacent[b].push(i);}
-    let mut starts:Vec<_>=adjacent.iter().enumerate().filter(|(_,a)|a.len()!=2).flat_map(|(v,a)|a.iter().map(move|&e|(v,e))).collect();
-    starts.extend(edges.iter().enumerate().map(|(e,&(a,_))|(a,e)));
-    let mut visited=vec![false;edges.len()];
-    let mut chains=Vec::new();
-    for (mut at,mut edge) in starts{
-        if visited[edge]{continue;}
-        let mut points=vec![nodes[at]];
-        loop{
-            visited[edge]=true;
-            let (a,b)=edges[edge];let next=if a==at {b}else{a};
-            points.push(nodes[next]);
-            if adjacent[next].len()!=2{break;}
-            let Some(&following)=adjacent[next].iter().find(|&&e|!visited[e])else{break;};
-            at=next;edge=following;
+    nodes.push(p);
+    nodes.len() - 1
+}
+pub(crate) fn wall_chains(segments: &[Line<f64>], tol: f64) -> Vec<Vec<[f64; 2]>> {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for segment in segments {
+        let a = wall_vertex(&mut nodes, [segment.start.x, segment.start.y], tol);
+        let b = wall_vertex(&mut nodes, [segment.end.x, segment.end.y], tol);
+        let edge = if a < b { (a, b) } else { (b, a) };
+        if a != b && !edges.contains(&edge) {
+            edges.push(edge);
         }
-        chains.push(points);
+    }
+    trace_wall_edges(
+        &edges,
+        nodes.len(),
+        |at| vec![nodes[at]],
+        |points, _, _, next| points.push(nodes[next]),
+    )
+}
+
+// Trace physical pair chains through their shared endpoints. Retain line
+// geometry from the pair pass; the small graph has only junction vertices.
+pub(crate) fn stitch_room_chains(
+    chains: &[&[[f64; 2]]],
+    tol: f64,
+) -> Vec<(Vec<[f64; 2]>, Vec<[f64; 2]>)> {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut open = Vec::new();
+    for &chain in chains {
+        let a = wall_vertex(&mut nodes, chain[0], tol);
+        let b = wall_vertex(&mut nodes, *chain.last().unwrap(), tol);
+        if a != b {
+            edges.push((a, b));
+            open.push(chain);
+        }
+    }
+    let mut paths = trace_wall_edges(
+        &edges,
+        nodes.len(),
+        |at| (vec![nodes[at]], Vec::new()),
+        |(points, joins), edge, reverse, _| {
+            let chain = open[edge];
+            if points.len() > 1 {
+                joins.push(*points.last().unwrap());
+            }
+            if reverse {
+                points.extend(chain.iter().rev().copied().skip(1));
+            } else {
+                points.extend(chain.iter().copied().skip(1));
+            }
+        },
+    );
+    paths.retain_mut(|(points, joins)| {
+        if joins.is_empty() {
+            return false;
+        }
+        if points.first() == points.last() {
+            joins.push(points[0]);
+        }
+        true
+    });
+    paths
+}
+
+fn trace_wall_edges<T>(
+    edges: &[(usize, usize)],
+    node_count: usize,
+    start: impl Fn(usize) -> T,
+    append: impl Fn(&mut T, usize, bool, usize),
+) -> Vec<T> {
+    // Ordinary wall vertices have one or two incident edges. Keep those
+    // on the graph itself and enumerate rare branches in stable edge order.
+    let mut degree = vec![0; node_count];
+    let mut adjacent = vec![[0; 2]; node_count];
+    for (edge, &(a, b)) in edges.iter().enumerate() {
+        for node in [a, b] {
+            if degree[node] < 2 {
+                adjacent[node][degree[node]] = edge;
+            }
+            degree[node] += 1;
+        }
+    }
+    let mut starts = Vec::new();
+    for (node, &count) in degree.iter().enumerate() {
+        if count == 1 {
+            starts.push((node, adjacent[node][0]));
+        }
+        if count > 2 {
+            starts.extend(
+                edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(edge, &(a, b))| (a == node || b == node).then_some((node, edge))),
+            );
+        }
+    }
+    starts.extend(edges.iter().enumerate().map(|(e, &(a, _))| (a, e)));
+    let mut visited = vec![false; edges.len()];
+    let mut chains = Vec::new();
+    for (mut at, mut edge) in starts {
+        if visited[edge] {
+            continue;
+        }
+        let mut walk = start(at);
+        loop {
+            visited[edge] = true;
+            let (a, b) = edges[edge];
+            let reverse = a != at;
+            let next = if reverse { a } else { b };
+            append(&mut walk, edge, reverse, next);
+            if degree[next] != 2 {
+                break;
+            }
+            let [first, second] = adjacent[next];
+            let following = if edge == first { second } else { first };
+            if visited[following] {
+                break;
+            }
+            at = next;
+            edge = following;
+        }
+        chains.push(walk);
     }
     chains
 }

@@ -203,3 +203,121 @@ fn a_nearly_straight_subdivision_cannot_change_an_existing_steps_cost(){
     assert!((near-base).abs()<1e-6,"tiny bend cannot multiply an existing step cost: base={base}, near={near}");
     assert!((split(1e-6)-base).abs()<1e-4);
 }
+
+#[test]
+fn jog_cost_applies_when_the_neighbor_changes_at_a_junction() {
+    let b = rectangle();
+    let score = |h| {
+        let lower = room(vec![
+            [-2., -1.],
+            [2., -1.],
+            [2., h],
+            [0., h],
+            [0., 0.],
+            [-2., 0.],
+            [-2., -1.],
+        ]);
+        let upper_left = room(vec![
+            [-2., 0.],
+            [0., 0.],
+            [0., h],
+            [0., 1.],
+            [-2., 1.],
+            [-2., 0.],
+        ]);
+        let upper_right = room(vec![[0., h], [2., h], [2., 1.], [0., 1.], [0., h]]);
+        let groups = vec![
+            vec![&lower.0[0]],
+            vec![&upper_left.0[0]],
+            vec![&upper_right.0[0]],
+        ];
+        let walls = crate::walls::SharedWalls::from_cells(&groups);
+        evaluate_shared(&walls, &b).1
+    };
+    let visible = score(0.12);
+    assert!(
+        visible > 0.001,
+        "a visible step belongs to the same room even with different neighbors: {visible}"
+    );
+    assert!(
+        score(0.06) < visible,
+        "decreasing the step must lower the loss"
+    );
+    assert_eq!(
+        score(0.),
+        0.,
+        "a straight wall through a junction costs nothing"
+    );
+}
+
+#[test]
+fn a_junction_step_cannot_pivot_its_arm_to_escape_the_fit() {
+    let boundary = rectangle();
+    let score = |toe| {
+        // One room's lower wall runs across two neighbors. Only the far
+        // endpoint of the second arm moves; the connector remains the same.
+        let h = 0.12;
+        let end = h + toe;
+        let lower = room(vec![
+            [-2., -1.],
+            [2., -1.],
+            [2., end],
+            [0., h],
+            [0., 0.],
+            [-2., 0.],
+            [-2., -1.],
+        ]);
+        let upper_left = room(vec![
+            [-2., 0.],
+            [0., 0.],
+            [0., h],
+            [0., 1.],
+            [-2., 1.],
+            [-2., 0.],
+        ]);
+        let upper_right = room(vec![[0., h], [2., end], [2., 1.], [0., 1.], [0., h]]);
+        let groups = vec![
+            vec![&lower.0[0]],
+            vec![&upper_left.0[0]],
+            vec![&upper_right.0[0]],
+        ];
+        let walls = crate::walls::SharedWalls::from_cells(&groups);
+        evaluate_shared(&walls, &boundary).1
+    };
+    let flat = score(0.);
+    let pivoted = score(0.22);
+    assert!(pivoted>flat*1.25,"rotating the arm away from its preferred line must increase the junction fit cost: flat={flat}, pivoted={pivoted}");
+}
+
+#[test]
+fn genuine_u_corner_through_a_neighbor_change_has_no_step_cost() {
+    let boundary = rectangle();
+    let around = room(vec![
+        [-2., -1.],
+        [-0.4, -1.],
+        [-0.4, 0.],
+        [0., 0.],
+        [0.4, 0.],
+        [0.4, -1.],
+        [2., -1.],
+        [2., 1.],
+        [-2., 1.],
+        [-2., -1.],
+    ]);
+    let left = room(vec![
+        [-0.4, -1.],
+        [0., -1.],
+        [0., 0.],
+        [-0.4, 0.],
+        [-0.4, -1.],
+    ]);
+    let right = room(vec![[0., -1.], [0.4, -1.], [0.4, 0.], [0., 0.], [0., -1.]]);
+    let groups = vec![vec![&around.0[0]], vec![&left.0[0]], vec![&right.0[0]]];
+    let shared = crate::walls::SharedWalls::from_cells(&groups);
+
+    assert_eq!(
+        evaluate_shared(&shared, &boundary).1,
+        0.,
+        "a necessary U corner remains a U even where the opposite room changes"
+    );
+}

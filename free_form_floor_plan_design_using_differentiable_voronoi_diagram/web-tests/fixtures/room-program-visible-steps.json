@@ -1,0 +1,61 @@
+{
+  "source": "Approximation based on the attached frame: affine fit to all 8 outline corners, 6 apparent site dots chosen in room interiors, and the verified rounded shares. Fixed-site identities, radius scale and exact centers are unknown. A shared radius multiplier of .24 keeps every circle inside; Rust uses the normalized squared radius, so changing that multiplier leaves area targets fixed.",
+  "shape": "shape_e",
+  "sites": 80,
+  "seed": 4971,
+  "iterations": 500,
+  "lr": 0.005,
+  "rooms": [
+    {
+      "center": [
+        0.3189743902793385,
+        0.15524633187276624
+      ],
+      "radius": 0.08653323061113574
+    },
+    {
+      "center": [
+        0.44928722530181314,
+        0.2784016164713259
+      ],
+      "radius": 0.07959899496852958
+    },
+    {
+      "center": [
+        -0.23923412346554657,
+        0.12099755308712216
+      ],
+      "radius": 0.10998181667894015
+    },
+    {
+      "center": [
+        -0.14078723410899177,
+        -0.44546007721297814
+      ],
+      "radius": 0.10733126291998989
+    },
+    {
+      "center": [
+        -0.3537904804784506,
+        0.3366286594194984
+      ],
+      "radius": 0.07959899496852958
+    },
+    {
+      "center": [
+        -0.07382132745003148,
+        0.5292020218943718
+      ],
+      "radius": 0.11757550765359254
+    }
+  ],
+  "links": [],
+  "doorWidth": 0.1,
+  "reference": {
+    "build": "3bcf65be1c84f36d589f2af4a75ed42d98e281d5",
+    "raw_step_max": 0.3188968970555019,
+    "raw_step_sum": 1.4019513551069935,
+    "angle_loss": 0.021490775048732758,
+    "measurement": "Same inputs from iteration 500 in Chromium. Raw frame.walls measured with room graph ownership and shared steps counted once. Each connector edge moves mainly sideways; returning wall runs cannot merge separate bends."
+  }
+}

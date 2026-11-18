@@ -65,6 +65,7 @@ function build(msg) {
   try {
     next.set_wall_loss(msg.jogWeight ?? 0);
     if (program) next.set_program(program.circles,program.links,program.doorWidth);
+    else next.fit_preset_areas();
   }
   catch(error) { next.free(); throw error; }
   if (opt) opt.free();

@@ -1,18 +1,52 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {basename,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {serve} from './serve.mjs';
+import {summarizeRawSteps} from './raw-wall-steps.mjs';
+import {fromCells} from '../web/plan/graph.js';
+import {ringArea} from '../web/plan/geom.js';
+import {evaluatePlan} from '../web/plan/openings.js';
+
+async function observeWorker(page, input = null) {
+    // Verify a candidate WASM build without replacing the live server's package.
+    const wasm = process.env.WALL_TEST_WASM_DIR;
+    if (wasm) {
+        await page.context().route('**/pkg/**', route => route.fulfill({
+            path:join(wasm,basename(new URL(route.request().url()).pathname)),
+        }));
+    }
+    return page.addInitScript(program => {
+        const Original = Worker;
+        window.wallProof = { builds: [], frames: [], boundary: null, done: false };
+        window.Worker = class extends Original {
+            constructor(...args) {
+                super(...args);
+                this.addEventListener('message', ({ data }) => {
+                    if (data.type === 'frame') wallProof.frames.push(data);
+                    if (data.type === 'built') wallProof.boundary = data.boundary;
+                    if (data.type === 'done') wallProof.done = true;
+                });
+            }
+            postMessage(msg, ...rest) {
+                if (msg.cmd === 'build') {
+                    if (program) msg = { ...msg, ...program };
+                    wallProof.builds.push(msg);
+                    wallProof.done = false;
+                }
+                return super.postMessage(msg, ...rest);
+            }
+        };
+    }, input);
+}
 
 test('angle and step controls reach real WASM and reduce raw step loss without changing the camera',{timeout:180000},async()=>{
     const {url,proc}=await serve();const browser=await chromium.launch();
     try{
         const page=await browser.newPage({viewport:{width:1440,height:900}});
-        await page.addInitScript(()=>{const Original=Worker;window.wallProof={builds:[],frames:[],boundary:null};window.Worker=class extends Original{
-            constructor(...args){super(...args);this.addEventListener('message',e=>{if(e.data.type==='frame')window.wallProof.frames.push(e.data);if(e.data.type==='built')window.wallProof.boundary=e.data.boundary;});}
-            postMessage(msg,...rest){if(msg.cmd==='build')window.wallProof.builds.push(msg);return super.postMessage(msg,...rest);}
-        };});
+        await observeWorker(page);
         if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
         await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         assert.equal(await page.locator('.lossrow').count(),6,'the independent step contribution has its own sixth loss row');
@@ -49,4 +83,86 @@ test('angle and step controls reach real WASM and reduce raw step loss without c
         await writeFile(new URL('measurements.json',dir),JSON.stringify({before,after,elapsedMs:Date.now()-start},null,2));
         if(process.env.VORONOI_COVERAGE_DIR)await writeFile(new URL('wall-loss-coverage.json',dir),JSON.stringify((await page.coverage.stopJSCoverage()).filter(e=>e.url===url||e.url.startsWith(url+'plan/'))));
     }finally{await browser.close();proc.kill();}
+});
+
+test('the six-room Raw walls have smaller visible steps and keep the room program',{timeout:180000},async()=>{
+    const input = JSON.parse(await readFile(new URL('./fixtures/room-program-visible-steps.json',import.meta.url)));
+    const {url,proc} = await serve();
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({viewport:{width:1440,height:960}});
+        await observeWorker(page,{
+            mode:input.shape, sites:input.sites, seed:input.seed, iters:input.iterations,
+            lr:input.lr, w:[1,.15/.49,.01/5.3,.2/4,0,0], jogWeight:.35, program:input,
+        });
+        await page.goto(url);
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        const initial = await page.evaluate(()=>wallProof.frames.at(-1).frame);
+        await page.click('#run');
+        await page.waitForFunction(()=>wallProof.done,null,{timeout:150000});
+        const {frame,boundary} = await page.evaluate(()=>({frame:wallProof.frames.at(-1).frame,boundary:wallProof.boundary}));
+        assert.equal(frame.iteration,500);
+        assert.deepEqual(frame.sites.slice(0,6),initial.sites.slice(0,6),'bubble centers stay fixed');
+        assert.equal(await page.locator('[data-walls=raw].active').count(),1);
+        const graph = fromCells(frame.cells,boundary,{roomCount:6,simplifyTol:0});
+        assert.deepEqual(evaluatePlan(graph,input,input.doorWidth,{finished:true}).issues,[]);
+        const face = ringArea(boundary);
+        const weights = input.rooms.map(room=>room.radius**2);
+        const totalWeight = weights.reduce((sum,weight)=>sum+weight,0);
+        for (const [room,weight] of weights.entries()) {
+            const area = frame.cells.filter(cell=>cell.room===room).reduce((sum,cell)=>sum+ringArea(cell.ring),0);
+            assert.ok(Math.abs(area/face-weight/totalWeight)<=.05,'each room stays within 5 percentage points of its target area');
+        }
+        const dir = new URL('../../.agents/cache/wall-quality/',import.meta.url);
+        await mkdir(dir,{recursive:true});
+        await page.screenshot({path:fileURLToPath(new URL('regression-raw.png',dir))});
+        const {all,pair,junction,unmatched} = summarizeRawSteps(frame,boundary,6);
+        const summary = {all,pair,junction,unmatched,angle:frame.wall};
+        await writeFile(new URL('regression-summary.json',dir),JSON.stringify(summary,null,2));
+        assert.ok(
+            all.max<input.reference.raw_step_max && all.sum<=input.reference.raw_step_sum,
+            'the drawn-room case keeps a smaller largest step without growing the summed height: '+JSON.stringify(summary),
+        );
+        assert.ok(frame.wall<=input.reference.angle_loss*1.15,'do not hide the steps by making the wall arms more oblique');
+    } finally {await browser.close();proc.kill();}
+});
+
+test('the default E preset has fewer visible Raw steps after Run',{timeout:180000},async()=>{
+    const {url,proc} = await serve();
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({viewport:{width:1440,height:960}});
+        await observeWorker(page);
+        await page.goto(url);
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        const preview = await page.evaluate(()=>({
+            frame:wallProof.frames.at(-1).frame,boundary:wallProof.boundary,build:wallProof.builds.at(-1),
+        }));
+        const areaErrors = ({frame,boundary,build}) => {
+            const areas = Array(6).fill(0);
+            for (const cell of frame.cells) areas[cell.room] += ringArea(cell.ring);
+            return areas.map((area,room)=>Math.abs(area/ringArea(boundary)-build.ratios[room]));
+        };
+        const previewError = Math.max(...areaErrors(preview));
+        assert.ok(previewError<=.05,'the preset starts near its target room areas: '+previewError);
+        await page.click('#run');
+        await page.waitForFunction(()=>wallProof.done,null,{timeout:150000});
+        const {frame,boundary,build} = await page.evaluate(()=>({
+            frame:wallProof.frames.at(-1).frame,boundary:wallProof.boundary,build:wallProof.builds.at(-1),
+        }));
+        assert.equal(build.mode,'shape_e');
+        assert.equal(build.seed,4971);
+        assert.equal(build.program,undefined,'opening the app and pressing Run uses the default preset');
+        assert.equal(frame.iteration,500);
+        assert.equal(await page.locator('[data-walls=raw].active').count(),1);
+        const graph = fromCells(frame.cells,boundary,{roomCount:6,simplifyTol:0});
+        assert.deepEqual(graph.rooms.map(rings=>rings.length),[1,1,1,1,1,1],'each default room stays connected');
+        assert.ok(areaErrors({frame,boundary,build}).every(error=>error<=.05),'each default room stays within 5 percentage points of its target area');
+        const {all,pair,junction} = summarizeRawSteps(frame,boundary,6);
+        // Measured from the drawn Raw walls of 3bcf65b at the same button
+        // click and seed. Loss values also match the reported default run.
+        assert.ok(all.max<=.34461844886995635*.7 && all.sum<=1.953664359951654*.7,
+            'largest and summed visible Raw steps must fall at least 30%: '+JSON.stringify({all,pair,junction}));
+        assert.ok(frame.wall<=.02,'keep the adaptive wall axes while reducing visible steps');
+    } finally {await browser.close();proc.kill();}
 });
