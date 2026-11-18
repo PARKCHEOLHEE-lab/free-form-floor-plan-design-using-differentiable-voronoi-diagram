@@ -95,3 +95,14 @@ fn jog_loss_aligns_parallel_runs_of_the_same_shared_wall(){
     let stripes=vec![room(vec![[-2.,-1.],[-0.5,-1.],[-0.5,1.],[-2.,1.],[-2.,-1.]]),room(vec![[-0.5,-1.],[0.5,-1.],[0.5,1.],[-0.5,1.],[-0.5,-1.]]),room(vec![[0.5,-1.],[2.,-1.],[2.,1.],[0.5,1.],[0.5,-1.]])];
     assert_eq!(evaluate(&stripes,&boundary),(0.,0.),"parallel walls between different room pairs remain independent");
 }
+
+#[test]
+fn vanishing_transverse_runs_have_continuous_jog_loss(){
+    let boundary=rectangle();
+    let value=|eps:f64|losses(&[vec![[0.,-1.],[eps,-1.],[eps,0.],[2.*eps,0.],[2.*eps,1.]]],&boundary).1;
+    assert_eq!(value(0.),0.);
+    let coarse=value(1e-4);let fine=value(1e-6);
+    assert!(fine<1e-4 && fine<coarse*0.02,"a disappearing offset cannot retain a finite penalty: coarse={coarse}, fine={fine}");
+    let derivative=(value(1.01e-6)-value(0.99e-6))/2e-8;
+    assert!(derivative>0. && derivative<100.,"tiny runs must produce a bounded descent gradient, got {derivative}");
+}

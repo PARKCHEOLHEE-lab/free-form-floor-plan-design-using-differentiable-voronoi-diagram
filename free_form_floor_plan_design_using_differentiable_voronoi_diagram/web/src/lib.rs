@@ -92,6 +92,7 @@ impl WasmOpt {
         let pts: Vec<(f64, f64)> = boundary_xy.chunks_exact(2).map(|c| (c[0], c[1])).collect();
         let w = LossWeights {
             w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell,
+            ..Default::default()
         };
         WasmOpt::build(normalize(&pts), num_sites, area_ratios.to_vec(), w, seed as u64, lr)
     }
@@ -115,6 +116,7 @@ impl WasmOpt {
         let boundary = shapes::by_name(name)?.polygon();
         let w = LossWeights {
             w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell,
+            ..Default::default()
         };
         Some(WasmOpt::build(boundary, num_sites, area_ratios.to_vec(), w, seed as u64, lr))
     }

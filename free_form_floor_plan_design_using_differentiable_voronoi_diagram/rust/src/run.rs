@@ -71,6 +71,7 @@ pub fn run_example(
         w_topo: config.w_topo,
         w_bb: config.w_bb,
         w_cell: config.w_cell,
+        ..Default::default()
     };
     let mut optimizer = crate::optim::AdamW::new(sites.len(), config.lr_initial);
 

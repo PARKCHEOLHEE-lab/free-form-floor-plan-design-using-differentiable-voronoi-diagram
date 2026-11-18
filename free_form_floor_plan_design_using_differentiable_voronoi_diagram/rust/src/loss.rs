@@ -213,8 +213,17 @@ pub fn compute_cell_area_loss(cells_sorted: &[Polygon<f64>], w_cell: f64) -> f32
     (sum as f32) * (w_cell as f32)
 }
 
+#[derive(Default, Clone, Copy)]
+pub enum WallLossMode {
+    #[default]
+    LegacyL1,
+    CosineSquared,
+}
+
 #[derive(Default)]
 pub struct LossWeights {
+    pub wall_mode: WallLossMode,
+    pub w_jog: f64,
     pub w_wall: f64,
     pub w_area: f64,
     pub w_lloyd: f64,
@@ -225,6 +234,7 @@ pub struct LossWeights {
 
 #[derive(Clone, Copy)]
 pub struct LossBreakdown {
+    pub jog: f32,
     pub total: f32,
     pub wall: f32,
     pub area: f32,
@@ -233,6 +243,26 @@ pub struct LossBreakdown {
     pub bb: f32,
     pub cell: f32,
     pub connection: f32,
+}
+
+/// Cell tilings retain the exact shared-wall ownership before room unions.
+pub(crate) fn room_tilings(groups:&[Vec<&Polygon<f64>>])->Vec<MultiPolygon<f64>> {
+    groups.iter().map(|g| MultiPolygon::new(g.iter().map(|p| (*p).clone()).collect())).collect()
+}
+
+/// One wall-direction model at a time; both paths share the same jog geometry.
+pub(crate) fn compute_wall_terms(unions:&[MultiPolygon<f64>], groups:&[Vec<&Polygon<f64>>], boundary:&Polygon<f64>, w:&LossWeights)->(f32,f32) {
+    let (direction,jog)=if w.w_jog>0. || (w.w_wall>0. && matches!(w.wall_mode,WallLossMode::CosineSquared)) {
+        // Shared walls belong to the Voronoi tiling. Independent room unions
+        // quantize in different frames and can lose exact shared segments.
+        let tiles = room_tilings(groups);
+        crate::wall_shape::evaluate(&tiles,boundary)
+    } else { (0.,0.) };
+    let wall=if w.w_wall<=0. {0.} else {match w.wall_mode {
+        WallLossMode::LegacyL1=>compute_wall_local_loss(unions,boundary,w.w_wall),
+        WallLossMode::CosineSquared=>(direction as f32)*(w.w_wall as f32),
+    }};
+    (wall,if w.w_jog>0. {(jog as f32)*(w.w_jog as f32)} else {0.})
 }
 
 /// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
@@ -255,19 +285,13 @@ pub fn floor_plan_loss_with_program(
     // Compute it once per group here and share it (it used to be recomputed
     // inside each component). The result is identical, so the f32 losses are
     // bitwise unchanged; this only removes the duplicate boolean ops.
-    let unions: Vec<MultiPolygon<f64>> = if w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 || program.is_some_and(|p| p.has_connections()) {
+    let unions: Vec<MultiPolygon<f64>> = if (w.w_wall > 0.0 && matches!(w.wall_mode,WallLossMode::LegacyL1)) || w.w_topo > 0.0 || w.w_bb > 0.0 {
         groups.iter().map(|g| union_group(g)).collect()
     } else {
         Vec::new()
     };
 
-    // The wall term is the nearest-boundary alignment loss (rotated-L1). On an
-    // axis-aligned boundary it reduces bit-exactly to the plain taxicab length.
-    let wall = if w.w_wall > 0.0 {
-        compute_wall_local_loss(&unions, boundary, w.w_wall)
-    } else {
-        0.0
-    };
+    let (wall,jog) = compute_wall_terms(&unions,&groups,boundary,w);
     let area = if w.w_area > 0.0 {
         compute_area_loss(&geom.cells_sorted, target_areas, room_indices, w.w_area)
     } else {
@@ -294,9 +318,10 @@ pub fn floor_plan_loss_with_program(
         0.0
     };
     // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
-    let connection = program.map_or(0., |p| p.connection_loss(&unions));
-    let total = wall + area + lloyd + topo + bb + cell + connection;
+    let connection = program.map_or(0., |p| p.connection_loss(&room_tilings(&groups)));
+    let total = wall + area + lloyd + topo + bb + cell + connection + jog;
     LossBreakdown {
+        jog,
         total,
         wall,
         area,

@@ -46,8 +46,11 @@ impl RoomProgram {
             .map(|&[a, b]| {
                 let gap = rooms[a].euclidean_distance(&rooms[b]);
                 let shared = if gap == 0. {
-                    crate::walls::shared_wall_segments(&edges[a], &edges[b]).iter()
-                        .map(|line| (line.end.x-line.start.x).hypot(line.end.y-line.start.y))
+                    crate::walls::wall_chains(&crate::walls::shared_wall_segments(&edges[a], &edges[b]),1e-12).iter()
+                        .flat_map(|chain| {
+                            let points=crate::walls::canonical_chain(chain,1e-12);
+                            points.windows(2).map(|p|(p[1][0]-p[0][0]).hypot(p[1][1]-p[0][1])).collect::<Vec<_>>()
+                        })
                         .fold(0., f64::max)
                 } else { 0. };
                 let deficit = (self.door_width - shared).max(0.);

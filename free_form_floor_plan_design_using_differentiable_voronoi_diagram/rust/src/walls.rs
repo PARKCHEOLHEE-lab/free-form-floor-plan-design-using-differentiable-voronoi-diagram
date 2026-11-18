@@ -26,6 +26,71 @@ pub(crate) fn shared_wall_segments(a:&[Line<f64>],b:&[Line<f64>])->Vec<Line<f64>
     shared
 }
 
+pub(crate) fn wall_chains(segments:&[Line<f64>],tol:f64)->Vec<Vec<[f64;2]>>{
+    fn vertex(nodes:&mut Vec<[f64;2]>,p:[f64;2],tol:f64)->usize{
+        if let Some(i)=nodes.iter().position(|q|(p[0]-q[0]).abs()<=tol&&(p[1]-q[1]).abs()<=tol){return i;}
+        nodes.push(p);nodes.len()-1
+    }
+    let mut nodes=Vec::new();
+    let mut edges=Vec::new();
+    for segment in segments{
+        let a=vertex(&mut nodes,[segment.start.x,segment.start.y],tol);
+        let b=vertex(&mut nodes,[segment.end.x,segment.end.y],tol);
+        let edge=if a<b {(a,b)}else{(b,a)};
+        if a!=b&&!edges.contains(&edge){edges.push(edge);}
+    }
+    let mut adjacent=vec![Vec::new();nodes.len()];
+    for (i,&(a,b)) in edges.iter().enumerate(){adjacent[a].push(i);adjacent[b].push(i);}
+    let mut starts:Vec<_>=adjacent.iter().enumerate().filter(|(_,a)|a.len()!=2).flat_map(|(v,a)|a.iter().map(move|&e|(v,e))).collect();
+    starts.extend(edges.iter().enumerate().map(|(e,&(a,_))|(a,e)));
+    let mut visited=vec![false;edges.len()];
+    let mut chains=Vec::new();
+    for (mut at,mut edge) in starts{
+        if visited[edge]{continue;}
+        let mut points=vec![nodes[at]];
+        loop{
+            visited[edge]=true;
+            let (a,b)=edges[edge];let next=if a==at {b}else{a};
+            points.push(nodes[next]);
+            if adjacent[next].len()!=2{break;}
+            let Some(&following)=adjacent[next].iter().find(|&&e|!visited[e])else{break;};
+            at=next;edge=following;
+        }
+        chains.push(points);
+    }
+    chains
+}
+
+fn collinear(a:[f64;2],b:[f64;2],c:[f64;2],tol:f64)->bool{
+    let ab=[b[0]-a[0],b[1]-a[1]];
+    let bc=[c[0]-b[0],c[1]-b[1]];
+    let ac=[c[0]-a[0],c[1]-a[1]];
+    let length=ac[0].hypot(ac[1]);
+    length>0. && ab[0]*bc[0]+ab[1]*bc[1]>=0. && (ab[0]*ac[1]-ab[1]*ac[0]).abs()<=tol*length
+}
+
+// Canonical physical segments make the nearest-frame sample independent of
+// arbitrary collinear Voronoi subdivisions. This only removes roundoff bends.
+pub(crate) fn canonical_chain(raw:&[[f64;2]],tol:f64)->Vec<[f64;2]>{
+    let mut points:Vec<[f64;2]>=Vec::new();
+    for &p in raw{
+        if points.last().is_some_and(|q|(p[0]-q[0]).hypot(p[1]-q[1])<=tol){continue;}
+        points.push(p);
+        while points.len()>=3{
+            let n=points.len();
+            if !collinear(points[n-3],points[n-2],points[n-1],tol){break;}
+            points.remove(n-2);
+        }
+    }
+    if points.len()>2 && (points[0][0]-points.last().unwrap()[0]).hypot(points[0][1]-points.last().unwrap()[1])<=tol{
+        points.pop();
+        while points.len()>2 && collinear(*points.last().unwrap(),points[0],points[1],tol){points.remove(0);}
+        while points.len()>2 && collinear(points[points.len()-2],*points.last().unwrap(),points[0],tol){points.pop();}
+        points.push(points[0]);
+    }
+    points
+}
+
 /// Unit direction of the nearest exterior segment. Preserve the original
 /// f32 projection arithmetic for the native numerical-reference path.
 pub(crate) fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32, f32) {

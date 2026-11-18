@@ -18,9 +18,9 @@
 
 use crate::loss::{
     compute_area_loss, compute_bb_loss, compute_cell_area_loss, compute_lloyd_loss,
-    compute_topology_loss, compute_wall_local_loss, rooms_group, LossBreakdown, LossWeights,
+    compute_topology_loss, compute_wall_terms, rooms_group, LossBreakdown, LossWeights, WallLossMode,
 };
-use crate::voronoi::{compute_cells, site_neighbors};
+use crate::voronoi::compute_cells;
 use geo::{MultiPolygon, Polygon};
 use crate::program::RoomProgram;
 
@@ -37,15 +37,15 @@ fn breakdown_from(
     boundary: &Polygon<f64>,
     program: Option<&RoomProgram>,
 ) -> LossBreakdown {
-    let wall = if w.w_wall > 0.0 { compute_wall_local_loss(unions, boundary, w.w_wall) } else { 0.0 };
+    let (wall,jog) = compute_wall_terms(unions,groups,boundary,w);
     let area = if w.w_area > 0.0 { compute_area_loss(cells, target_areas, room_indices, w.w_area) } else { 0.0 };
     let lloyd = if w.w_lloyd > 0.0 { compute_lloyd_loss(cells, sites, w.w_lloyd) } else { 0.0 };
     let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
     let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
-    let connection = program.map_or(0., |p| p.connection_loss(unions));
-    let total = wall + area + lloyd + topo + bb + cell + connection;
-    LossBreakdown { total, wall, area, lloyd, topo, bb, cell, connection }
+    let connection = program.map_or(0., |p| p.connection_loss(&crate::loss::room_tilings(groups)));
+    let total = wall + area + lloyd + topo + bb + cell + connection + jog;
+    LossBreakdown { jog, total, wall, area, lloyd, topo, bb, cell, connection }
 }
 
 /// Sum the six loss components from already-built geometry. Thin wrapper over
@@ -96,8 +96,8 @@ pub struct LocalGradContext<'a> {
     room_indices: &'a [usize],
     w: &'a LossWeights,
     program: Option<&'a RoomProgram>,
-    /// Voronoi neighbor site indices per site (stable under a 1e-6 perturbation).
-    neighbors: Vec<Vec<usize>>,
+    /// Raw geometry detects newly created neighbors at degenerate diagrams too.
+    base_raw: Vec<Polygon<f64>>,
     /// Base clipped cells (site order) and per-room unions, reused for the
     /// cells/rooms a single-site perturbation does not touch.
     base_cells: Vec<Polygon<f64>>,
@@ -123,7 +123,7 @@ impl<'a> LocalGradContext<'a> {
     ) -> Self {
         let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let base_cells = compute_cells(sites, boundary, None).cells_sorted;
-        let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0 || program.is_some_and(|p| p.has_connections());
+        let need_unions = (w.w_wall > 0.0 && matches!(w.wall_mode,WallLossMode::LegacyL1)) || w.w_topo > 0.0 || w.w_bb > 0.0;
         let (n_rooms, base_unions, base_breakdown) = {
             let groups = rooms_group(&base_cells, room_indices);
             let n_rooms = groups.len();
@@ -137,8 +137,8 @@ impl<'a> LocalGradContext<'a> {
             let bd = breakdown_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary, program);
             (n_rooms, unions, bd)
         };
-        let neighbors = site_neighbors(&sites_f64, boundary);
-        LocalGradContext { boundary, target_areas, room_indices, w, program, neighbors, base_cells, base_unions, n_rooms, base_breakdown }
+        let base_raw = crate::voronoi::raw_cells_per_site(&sites_f64, boundary);
+        LocalGradContext { boundary, target_areas, room_indices, w, program, base_raw, base_cells, base_unions, n_rooms, base_breakdown }
     }
 
     /// Total loss at the base (unperturbed) sites — must equal the global
@@ -220,11 +220,10 @@ impl<'a> LocalGradContext<'a> {
     pub fn affected_cells(&self, perturbed_sites: &[[f32; 2]], i: usize) -> Vec<(usize, Polygon<f64>)> {
         let pert_f64: Vec<[f64; 2]> = perturbed_sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let raw = crate::voronoi::raw_cells_per_site(&pert_f64, self.boundary);
-        let mut affected = Vec::with_capacity(self.neighbors[i].len() + 1);
-        affected.push(i);
-        affected.extend(self.neighbors[i].iter().copied());
-        affected
-            .into_iter()
+        // A perturbation can flip a Delaunay diagonal. Compare the raw cells
+        // already built above so new neighbors cannot retain stale geometry.
+        (0..raw.len())
+            .filter(|&j| j == i || raw[j] != self.base_raw[j])
             .map(|j| {
                 // Trivial accept: a cell fully inside the boundary is unchanged
                 // by clipping (cell ∩ boundary == cell), so skip the boolean
@@ -259,12 +258,12 @@ impl<'a> LocalGradContext<'a> {
             affected_rooms[self.room_indices[j]] = true;
             cells[j] = cell;
         }
-        // No snap: room_union (i_overlay) nodes shared/twin vertices internally,
-        // so the patched cells need not be pre-welded (the old edge-cancellation
-        // union required bitwise-shared edges and a snap pass; i_overlay does not).
+        // The shared-wall objective consumes cell edges before room unions.
+        // Weld twins across patched and cached cells, as the full path does.
+        crate::voronoi::snap_cells(&mut cells);
         let groups = rooms_group(&cells, self.room_indices);
 
-        let need_unions = self.w.w_wall > 0.0 || self.w.w_topo > 0.0 || self.w.w_bb > 0.0 || self.program.is_some_and(|p| p.has_connections());
+        let need_unions = (self.w.w_wall > 0.0 && matches!(self.w.wall_mode,WallLossMode::LegacyL1)) || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
         let unions: Vec<MultiPolygon<f64>> = if need_unions {
             (0..self.n_rooms)
                 .map(|r| {

@@ -90,7 +90,7 @@ fn build_voronoi(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> voronoice::
 
 /// Voronoi cell polygon per site (site order).
 pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Vec<Polygon<f64>> {
-    build_voronoi(sites_f64, boundary)
+    let mut cells: Vec<_> = build_voronoi(sites_f64, boundary)
         .iter_cells()
         .map(|cell| {
             Polygon::new(
@@ -102,7 +102,11 @@ pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Ve
                 vec![],
             )
         })
-        .collect()
+        .collect();
+    // Cocircular sites can emit twin circumcenters with a sub-ulp reverse
+    // edge. Weld before boolean clipping, which requires a simple ring.
+    snap_cells(&mut cells);
+    cells
 }
 
 /// Voronoi neighbor site indices per site (the sites sharing a Voronoi edge).
