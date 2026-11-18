@@ -49,6 +49,8 @@ fn chain_jog(points:&[[f64;2]],boundary:&Polygon<f64>)->f64{
     let (c,s)=crate::walls::nearest_boundary_direction(x,y,boundary);
     let norm=(c as f64).hypot(s as f64);let (c,s)=(c as f64/norm,s as f64/norm);
     let (u0,v0)=(x*c+y*s,-x*s+y*c);
+    let scale2=0.02_f64.powi(2)*boundary.unsigned_area();
+    let softness=scale2.sqrt();
     let mut groups=[[0.;4];4];
     for pair in points.windows(2){
         let (a,b)=(pair[0],pair[1]);let (dx,dy)=(b[0]-a[0],b[1]-a[1]);
@@ -61,19 +63,25 @@ fn chain_jog(points:&[[f64;2]],boundary:&Polygon<f64>)->f64{
         }else{
             (if dv>0. {2}else{3},(u-u0)-(du/dv)*(v-v0))
         };
-        groups[group][0]+=length;groups[group][1]+=length*offset;groups[group][2]+=length*offset*offset;
-        groups[group][3]+=du.abs().max(dv.abs());
+        // A physical run has bounded influence once it is visible. Weighting
+        // directly by its full length lets a growing step hide in a short run.
+        let extent=du.abs().max(dv.abs());
+        let weight=extent/(extent+softness);
+        groups[group][0]+=weight;
+        groups[group][1]+=weight*offset;
+        groups[group][2]+=weight*offset*offset;
+        groups[group][3]+=1.;
     }
-    // Two percent of the boundary's area-based linear scale represents a small
-    // offset. The monotone response cannot reward enlarging a short connector.
-    let scale2=0.02_f64.powi(2)*boundary.unsigned_area();
-    groups.iter().filter(|g|g[0]>0.).map(|g|{
-        let variance=(g[2]/g[0]-(g[1]/g[0]).powi(2)).max(0.);
-        // Vanishing transverse runs must vanish from the objective too. Use
-        // projected extent so shearing parallel runs preserves their penalty.
-        let activity=g[3]/(g[3]+scale2.sqrt());
-        variance/(variance+scale2)*activity
+    groups.iter().filter(|g|g[3]>1.).map(|g|{
+        // Sum of weighted pairwise squared line offsets. There is no changing
+        // length/count denominator that can dilute a remaining step.
+        let energy=(g[0]*g[2]-g[1]*g[1]).max(0.);
+        let z=energy/(4.*scale2);
+        // Smooth soft-L1 keeps a useful force on large offsets. This rational
+        // form is stable when z is tiny, unlike sqrt(1+z)-1.
+        2.*z/((1.+z).sqrt()+1.)
     }).sum::<f64>()/4.
+
 }
 
 #[cfg(test)]

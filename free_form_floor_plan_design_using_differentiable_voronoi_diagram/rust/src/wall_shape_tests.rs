@@ -106,3 +106,15 @@ fn vanishing_transverse_runs_have_continuous_jog_loss(){
     let derivative=(value(1.01e-6)-value(0.99e-6))/2e-8;
     assert!(derivative>0. && derivative<100.,"tiny runs must produce a bounded descent gradient, got {derivative}");
 }
+
+#[test]
+fn visible_steps_cannot_get_cheaper_by_run_imbalance_or_large_offset(){
+    let boundary=rectangle();
+    let original=losses(&[step(0.04)],&boundary).1;
+    let enlarged=vec![[-0.8,-0.5],[0.,-0.5],[0.,-0.44],[0.1,-0.44]];
+    let enlarged_loss=losses(&[enlarged],&boundary).1;
+    assert!(enlarged_loss>original,"growing a visible normalized offset0.04->0.06 cannot get cheaper by shortening one run to0.1: original={original}, enlarged={enlarged_loss}");
+    let derivative=|h:f64|(losses(&[step(h+1e-6)],&boundary).1-losses(&[step(h-1e-6)],&boundary).1)/2e-6;
+    let (small,large)=(derivative(0.04),derivative(0.4));
+    assert!(large>=small*0.5,"large steps still need a useful shrinking gradient: small={small}, large={large}");
+}
