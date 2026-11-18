@@ -33,3 +33,40 @@ test("preset E run to the end: Aligned walls show a higher aligned-wall share th
         proc.kill();
     }
 });
+
+test("alignment tolerance redraws the current plan without restarting it", { timeout: 30_000 }, async () => {
+    const { url, proc } = await serve();
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+        await page.addInitScript(() => {
+            window.buildCount = 0;
+            const postMessage = Worker.prototype.postMessage;
+            Worker.prototype.postMessage = function (message, ...args) {
+                if (message.cmd === "build") window.buildCount++;
+                return postMessage.call(this, message, ...args);
+            };
+        });
+        await page.goto(url);
+        await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
+        await page.locator("button[data-open=display]").click();
+        await page.locator("#walls button[data-walls=aligned]").click();
+        const control = page.getByRole("slider", { name: "Alignment tolerance" });
+        assert.equal(await control.count(), 1, "Display lets users change the alignment tolerance");
+        assert.equal(await control.inputValue(), "0.02", "keep the original tolerance on load");
+
+        const share = page.locator("#align_v");
+        const originalShare = await share.textContent();
+        const builds = await page.evaluate(() => window.buildCount);
+        await control.press("End");
+        assert.equal(await control.inputValue(), "0.04");
+        assert.equal(await page.locator("#align_tol_v").textContent(), "0.040");
+        assert.notEqual(await share.textContent(), originalShare, "the raised tolerance changes the aligned geometry");
+        await control.press("Home");
+        assert.equal(await share.textContent(), originalShare, "the lower tolerance restores the original alignment");
+        assert.equal(await page.evaluate(() => window.buildCount), builds, "the display changes without a new optimization");
+    } finally {
+        await browser.close();
+        proc.kill();
+    }
+});
