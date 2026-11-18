@@ -59,8 +59,8 @@ test("alignment tolerance redraws the current plan without restarting it", { tim
         const originalShare = await share.textContent();
         const builds = await page.evaluate(() => window.buildCount);
         await control.press("End");
-        assert.equal(await control.inputValue(), "0.04");
-        assert.equal(await page.locator("#align_tol_v").textContent(), "0.040");
+        assert.equal(await control.inputValue(), "1");
+        assert.equal(await page.locator("#align_tol_v").textContent(), "1.000");
         assert.notEqual(await share.textContent(), originalShare, "the raised tolerance changes the aligned geometry");
         await control.press("Home");
         assert.equal(await share.textContent(), originalShare, "the lower tolerance restores the original alignment");
