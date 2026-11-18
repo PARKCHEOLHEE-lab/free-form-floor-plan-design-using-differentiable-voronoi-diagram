@@ -74,7 +74,7 @@ pub fn compute_wall_local_loss(
 /// keeps the rotated-L1 below portable f32-exact across platforms (libm trig is
 /// not IEEE-mandated; +,−,×,÷,√ are). At an axis-aligned segment (cx,cy) is exactly
 /// (±1,0)/(0,±1), so the local sum reduces bit-identically to the global wall sum.
-fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32, f32) {
+pub(crate) fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32, f32) {
     let mut best_d2 = f64::INFINITY;
     let (mut cx, mut cy) = (1.0f32, 0.0f32); // φ = 0 default (no usable segment)
     for line in boundary.exterior().lines() {

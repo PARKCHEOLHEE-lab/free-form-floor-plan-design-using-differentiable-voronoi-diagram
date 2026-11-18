@@ -9,6 +9,7 @@ pub mod program;
 pub mod shapes;
 pub mod voronoi;
 pub mod walls;
+mod wall_shape;
 
 // Native-only: GIF/tfevents IO, the CLI, and the run pipeline that ties them
 // together. Excluded from the wasm build (the browser demo renders to a
