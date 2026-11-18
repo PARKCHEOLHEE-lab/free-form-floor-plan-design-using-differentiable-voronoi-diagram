@@ -42,9 +42,13 @@ fn chain_jog(points:&[[f64;2]],boundary:&Polygon<f64>)->f64{
     let (c,s)=crate::walls::nearest_boundary_direction(x,y,boundary);
     let norm=(c as f64).hypot(s as f64);let (c,s)=(c as f64/norm,s as f64/norm);
     let (u0,v0)=(x*c+y*s,-x*s+y*c);
-    let scale2=0.02_f64.powi(2)*boundary.unsigned_area();
+    // Pair energy has different units from the former bounded variance.
+    // Match the cost of a 0.12-unit step in the two-room reference case
+    // so the existing step weight remains comparable.
+    let scale2=0.042_f64.powi(2)*boundary.unsigned_area();
     let softness=scale2.sqrt();
     let mut groups=[[0.;4];4];
+    let mut runs=Vec::new();
     for pair in points.windows(2){
         let (a,b)=(pair[0],pair[1]);let (dx,dy)=(b[0]-a[0],b[1]-a[1]);
         let length=dx.hypot(dy);if length==0. {continue;}
@@ -56,10 +60,22 @@ fn chain_jog(points:&[[f64;2]],boundary:&Polygon<f64>)->f64{
         }else{
             (if dv>0. {2}else{3},(u-u0)-(du/dv)*(v-v0))
         };
-        // A physical run has bounded influence once it is visible. Weighting
-        // directly by its full length lets a growing step hide in a short run.
         let extent=du.abs().max(dv.abs());
-        let weight=extent/(extent+softness);
+        runs.push((group,extent,offset));
+    }
+    for &(group,extent,offset) in &runs{
+        // Nearly collinear pieces share one visibility budget continuously.
+        // For identical supports their extents add before saturation, so an
+        // arbitrarily small subdivision bend cannot multiply another step.
+        // Supports farther apart than one quarter of the step scale do
+        // not share weight. Longer distinct runs cannot dilute the step.
+        let density: f64 = runs.iter().filter(|&&(heading, _, _)| heading == group)
+            .map(|&(_, other_extent, other_offset)| {
+                let distance_squared = (offset - other_offset).powi(2);
+                let similarity = (1. - 16. * distance_squared / scale2).max(0.);
+                other_extent * similarity.powi(2)
+        }).sum();
+        let weight = extent / (density + softness);
         groups[group][0]+=weight;
         groups[group][1]+=weight*offset;
         groups[group][2]+=weight*offset*offset;

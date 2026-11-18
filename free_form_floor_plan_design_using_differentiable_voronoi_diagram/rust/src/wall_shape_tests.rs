@@ -115,6 +115,91 @@ fn visible_steps_cannot_get_cheaper_by_run_imbalance_or_large_offset(){
     let enlarged_loss=losses(&[enlarged],&boundary).1;
     assert!(enlarged_loss>original,"growing a visible normalized offset0.04->0.06 cannot get cheaper by shortening one run to0.1: original={original}, enlarged={enlarged_loss}");
     let derivative=|h:f64|(losses(&[step(h+1e-6)],&boundary).1-losses(&[step(h-1e-6)],&boundary).1)/2e-6;
-    let (small,large)=(derivative(0.04),derivative(0.4));
-    assert!(large>=small*0.5,"large steps still need a useful shrinking gradient: small={small}, large={large}");
+    let small = derivative(0.04);
+    // Both offsets fit inside the test boundary, including the far end
+    // where a bounded response can lose nearly all of its gradient.
+    for height in [0.4, 1.2] {
+        let large = derivative(height);
+        assert!(large >= small * 0.5,
+            "step {height} still needs a shrinking gradient: small={small}, large={large}");
+    }
+}
+
+
+// Independent geometric measurement, not the wall/jog objective. Count the
+// offsets of three-edge stairs with visible arms in one room-pair chain.
+fn geometric_stairs(cells:&[(usize,Polygon<f64>)],count:usize)->(f64,f64){
+    let groups:Vec<_>=(0..count).map(|r|MultiPolygon(cells.iter().filter(|(room,_)|*room==r).map(|(_,p)|p.clone()).collect())).collect();
+    let edges:Vec<_>=groups.iter().map(crate::walls::boundary_segments).collect();
+    let mut heights=Vec::new();
+    for r in 0..count{for t in r+1..count{
+        let shared=crate::walls::shared_wall_segments(&edges[r],&edges[t]);
+        for chain in wall_chains(&shared,1e-8){
+            let p=canonical_chain(&chain,1e-8);
+            let mut v:Vec<_>=p.windows(2).map(|p|[p[1][0]-p[0][0],p[1][1]-p[0][1]]).collect();
+            if p.len()>3&&p.first()==p.last(){let tail:Vec<_>=v.iter().copied().take(2).collect();v.extend(tail);}
+            for e in v.windows(3){
+                let l=[e[0][0].hypot(e[0][1]),e[1][0].hypot(e[1][1]),e[2][0].hypot(e[2][1])];
+                if l[0]<0.04||l[2]<0.04||l[1]<1e-6{continue;}
+                let dot=|a:usize,b:usize|(e[a][0]*e[b][0]+e[a][1]*e[b][1])/(l[a]*l[b]);let limit=10_f64.to_radians();
+                if dot(0,2)<limit.cos()||dot(0,1).abs()>limit.sin()||dot(1,2).abs()>limit.sin(){continue;}
+                heights.push((e[0][0]*e[1][1]-e[0][1]*e[1][0]).abs()/l[0]);
+            }
+        }
+    }}
+    (heights.iter().copied().fold(0.,f64::max),heights.iter().sum())
+}
+fn frozen_bad_cells()->Vec<(usize,Polygon<f64>)>{
+    let data:serde_json::Value=serde_json::from_str(include_str!("../../web-tests/fixtures/room-program-six-bad.json")).unwrap();
+    data["cells"].as_array().unwrap().iter().map(|c|{
+        let ring=c["ring"].as_array().unwrap().iter().map(|p|(p[0].as_f64().unwrap(),p[1].as_f64().unwrap())).collect::<Vec<_>>();
+        (c["room"].as_u64().unwrap() as usize,Polygon::new(LineString::from(ring),vec![]))
+    }).collect()
+}
+#[test]
+fn independent_stair_measurement_detects_the_frozen_reported_layout(){
+    let measured=geometric_stairs(&frozen_bad_cells(),6);
+    assert!((measured.0-0.18951299813428618).abs()<1e-8,"independent historical maximum offset, got {measured:?}");
+    assert!(// Reversing nearly parallel arms changes the projected total by less
+    // than0.02 screen pixels; keep the historical geometry/value unchanged.
+    (measured.1-0.6976662135381002).abs()<1e-4,"independent historical total offset, got {measured:?}");
+}
+#[test]
+fn six_room_raw_stairs_improve_with_orientation_area_centers_and_connectivity(){
+    use geo::{Contains,Point};
+    use crate::{grad_local::LocalGradContext,loss::{LossWeights,WallLossMode},optim::AdamW,program::RoomProgram,voronoi};
+    let data:serde_json::Value=serde_json::from_str(include_str!("../../web-tests/fixtures/room-program-six.json")).unwrap();
+    let circles:Vec<[f64;3]>=data["rooms"].as_array().unwrap().iter().map(|r|[r["center"][0].as_f64().unwrap(),r["center"][1].as_f64().unwrap(),r["radius"].as_f64().unwrap()]).collect();
+    let b=crate::shapes::by_name("shape_e").unwrap().polygon();let mut p=RoomProgram::new(&b,&circles).unwrap();p.set_connections(&[],0.1).unwrap();
+    let (mut sites,labels)=p.initialize(&b,80,4971).unwrap();let fixed=sites[..6].to_vec();let targets:Vec<_>=p.ratios().iter().map(|r|r*b.unsigned_area()).collect();
+    let w=LossWeights{wall_mode:WallLossMode::CosineSquared,w_wall:1.,w_jog:0.35,w_area:0.15/0.49,w_lloyd:0.01/5.3,w_topo:0.2/4.,..Default::default()};
+    let mut opt=AdamW::new(74,0.005);
+    for iteration in 1..=500{if iteration==300{opt.set_lr(0.004);}let ctx=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p));let g=ctx.gradients(&sites);assert!(g.iter().flatten().all(|v|v.is_finite()));opt.step(&mut sites[6..],&g[6..]);}
+    let rendered=voronoi::render_cells(&sites,&b);let cells:Vec<_>=rendered.into_iter().map(|(i,c)|(labels[i],c)).collect();
+    let reference=geometric_stairs(&frozen_bad_cells(),6);let measured=geometric_stairs(&cells,6);
+    let bd=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p)).base_breakdown();
+    eprintln!("six-room Raw: max/total={measured:?}, bad={reference:?}, angle={},area={}",bd.wall,bd.area);
+    assert!(measured.0<=reference.0*0.7&&measured.1<=reference.1*0.7,"actual geometric maximum and total stairs must shrink by at least30%");
+    assert!(bd.wall<=0.02,"stairs cannot disappear merely by bending walls away from adaptive axes, got {}",bd.wall);
+    assert_eq!(&sites[..6],fixed);
+    let mut sum=0.;
+    for r in 0..6{
+        let polygons:Vec<_>=cells.iter().filter(|(room,_)|*room==r).map(|(_,p)|p).collect();
+        let area:f64=polygons.iter().map(|p|p.unsigned_area()).sum();sum+=area;
+        assert!((area/b.unsigned_area()-p.ratios()[r]).abs()<=0.05,"room{r} actual area share must stay within5pp");
+        let union=geo::algorithm::unary_union(polygons.iter().copied());assert_eq!(union.0.len(),1,"room{r} stays one region");
+        assert!(union.contains(&Point::new(circles[r][0],circles[r][1])),"room{r} contains its fixed center");
+    }
+    assert!((sum-b.unsigned_area()).abs()<1e-7,"all actual pieces still cover the boundary");
+}
+
+#[test]
+fn a_nearly_straight_subdivision_cannot_change_an_existing_steps_cost(){
+    let boundary=rectangle();
+    let whole=vec![[-0.8,-0.5],[0.,-0.5],[0.,-0.4],[0.8,-0.4]];
+    let base=losses(&[whole],&boundary).1;
+    let split=|eps:f64|losses(&[vec![[-0.8,-0.5],[-0.4,-0.5+eps],[0.,-0.5],[0.,-0.4],[0.8,-0.4]]],&boundary).1;
+    let near=split(1e-8);
+    assert!((near-base).abs()<1e-6,"tiny bend cannot multiply an existing step cost: base={base}, near={near}");
+    assert!((split(1e-6)-base).abs()<1e-4);
 }

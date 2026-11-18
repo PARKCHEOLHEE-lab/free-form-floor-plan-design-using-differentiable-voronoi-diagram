@@ -1,4 +1,4 @@
-use geo::{Area,Contains,LineString,MultiPolygon,Point,Polygon};
+use geo::{Area,Contains,LineString,MultiPolygon,Point,Polygon,Simplify};
 use voronoi_floorplan::{grad_local::LocalGradContext,loss::{floor_plan_loss_with_program,LossWeights,WallLossMode},optim::AdamW,program::RoomProgram,voronoi};
 
 fn fixture()->(Polygon<f64>,Vec<[f32;2]>,Vec<usize>,RoomProgram){
@@ -16,14 +16,39 @@ fn rooms(sites:&[[f32;2]],labels:&[usize],boundary:&Polygon<f64>)->Vec<MultiPoly
     let cells=voronoi::render_cells(sites,boundary);
     (0..2).map(|r|voronoi_floorplan::loss::union_group(&cells.iter().filter(|(i,_)|labels[*i]==r).map(|(_,p)|p).collect::<Vec<_>>())).collect()
 }
-// Measure the actual room boundary at three fixed heights, independent of the loss.
-fn step_span(rooms:&[MultiPolygon<f64>])->f64{
-    let xs:Vec<f64>=[-0.7,0.,0.7].iter().map(|&y|rooms[0].iter().flat_map(|p|p.exterior().lines())
-        .filter(|l|(l.start.y<=y&&l.end.y>y)||(l.end.y<=y&&l.start.y>y))
-        .map(|l|l.start.x+(y-l.start.y)*(l.end.x-l.start.x)/(l.end.y-l.start.y))
-        .fold(f64::NEG_INFINITY,f64::max)).collect();
-    xs.iter().copied().fold(f64::NEG_INFINITY,f64::max)-xs.iter().copied().fold(f64::INFINITY,f64::min)
+// Independent geometric oracle: three internal edges form a step when their
+// visible arms point the same way and the connector is nearly perpendicular.
+// A tilted straight wall or a necessary L/U corner is not a staircase.
+fn step_offset(rooms:&[MultiPolygon<f64>],boundary:&Polygon<f64>)->f64{
+    use geo::line_intersection::{line_intersection,LineIntersection};
+    let length=|l:&geo::Line<f64>|(l.end.x-l.start.x).hypot(l.end.y-l.start.y);
+    let external=|line:&geo::Line<f64>|boundary.exterior().lines().any(|b|matches!(line_intersection(*line,b),Some(LineIntersection::Collinear{intersection})if length(&intersection)>=length(line)-1e-8));
+    let dot=|a:[f64;2],b:[f64;2]|(a[0]*b[0]+a[1]*b[1])/(a[0].hypot(a[1])*b[0].hypot(b[1]));
+    let mut largest:f64=0.;
+    for ring in rooms[0].iter().flat_map(|p|std::iter::once(p.exterior()).chain(p.interiors())){
+        let lines:Vec<_>=ring.simplify(&1e-8).lines().collect();
+        for i in 0..lines.len(){
+            let edges=[lines[i],lines[(i+1)%lines.len()],lines[(i+2)%lines.len()]];
+            if edges.iter().any(external){continue;}
+            let v=edges.map(|l|[l.end.x-l.start.x,l.end.y-l.start.y]);
+            let l=v.map(|v|v[0].hypot(v[1]));
+            if l[0]<0.04||l[2]<0.04||l[1]<1e-6{continue;}
+            let limit=10_f64.to_radians();
+            if dot(v[0],v[2])<limit.cos()||dot(v[0],v[1]).abs()>limit.sin()||dot(v[1],v[2]).abs()>limit.sin(){continue;}
+            largest=largest.max((v[0][0]*v[1][1]-v[0][1]*v[1][0]).abs()/l[0]);
+        }
+    }
+    largest
 }
+#[test]
+fn step_measure_ignores_straight_tilt_but_detects_an_offset(){
+    // A single straight tilted divider has angle error, but no step.
+    let tilted=Polygon::new(LineString::from(vec![(-1.,-1.),(-0.1,-1.),(0.1,1.),(-1.,1.),(-1.,-1.)]),vec![]);
+    assert!(step_offset(&[MultiPolygon(vec![tilted])],&fixture().0).abs()<1e-12,"a straight tilted wall must have zero geometric step");
+    let (b,sites,labels,_)=fixture();
+    assert!((step_offset(&rooms(&sites,&labels,&b),&b)-0.12).abs()<1e-6,"the real controlled offset remains measured in boundary units");
+}
+
 #[test]
 fn wall_shape_terms_drive_global_local_and_feasible_optimization(){
     let (b,sites,labels,_program)=fixture();let targets=[2.,2.];
@@ -64,10 +89,10 @@ fn wall_shape_optimizer_reduces_step_displacement_with_feasible_rooms(){
         }
         result
     };
-    let before=step_span(&rooms(&sites,&labels,&b));
+    let before=step_offset(&rooms(&sites,&labels,&b),&b);
     let enabled=run(2.);let disabled=run(0.);
-    let final_rooms=rooms(&enabled,&labels,&b);let after=step_span(&final_rooms);let control=step_span(&rooms(&disabled,&labels,&b));
-    eprintln!("raw step span before={before}, after={after}, disabled={control}");
+    let final_rooms=rooms(&enabled,&labels,&b);let after=step_offset(&final_rooms,&b);let control=step_offset(&rooms(&disabled,&labels,&b),&b);
+    eprintln!("raw geometric step before={before}, after={after}, disabled={control}");
     assert!(after<before*0.5,"actual step displacement must decrease at least 50%");
     assert!(after<control*0.75,"jog must improve on the same angle-only optimization");
     assert_eq!(&enabled[..2],&sites[..2]);
