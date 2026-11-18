@@ -1,6 +1,6 @@
 //! User room intentions in the optimizer's boundary coordinates. Center sites are
 //! the first parameters and must be excluded from AdamW, including its decay.
-use geo::{Area, ConvexHull, Contains, Line, MultiPoint, MultiPolygon, Point, Polygon, Simplify};
+use geo::{Area, ConvexHull, Contains, MultiPoint, MultiPolygon, Point, Polygon};
 
 pub struct RoomProgram {
     centers: Vec<[f32; 2]>,
@@ -38,47 +38,18 @@ impl RoomProgram {
     /// touch, the remaining penalty grows a straight shared wall to door width.
     #[allow(deprecated)]
     pub fn connection_loss(&self, rooms: &[MultiPolygon<f64>]) -> f32 {
-        use geo::{
-            line_intersection::{line_intersection, LineIntersection},
-            EuclideanDistance,
-        };
-        if self.links.is_empty() {
-            return 0.;
-        }
-        // A zero epsilon disables geo's simplifier. Its smallest positive value
-        // joins collinear pieces without straightening actual bends in the wall.
-        let edges: Vec<Vec<Line<f64>>> = rooms
-            .iter()
-            .map(|room| {
-                room.iter()
-                    .flat_map(|p| std::iter::once(p.exterior()).chain(p.interiors()))
-                    .flat_map(|ring| {
-                        ring.simplify(&f64::MIN_POSITIVE)
-                            .lines()
-                            .collect::<Vec<_>>()
-                    })
-                    .collect()
-            })
-            .collect();
+        use geo::EuclideanDistance;
+        if self.links.is_empty() { return 0.; }
+        let edges: Vec<_> = rooms.iter().map(crate::walls::boundary_segments).collect();
         self.links
             .iter()
             .map(|&[a, b]| {
                 let gap = rooms[a].euclidean_distance(&rooms[b]);
-                let mut shared: f64 = 0.;
-                if gap == 0. {
-                    for &x in &edges[a] {
-                        for &y in &edges[b] {
-                            if let Some(LineIntersection::Collinear { intersection }) =
-                                line_intersection(x, y)
-                            {
-                                shared = shared.max(
-                                    (intersection.end.x - intersection.start.x)
-                                        .hypot(intersection.end.y - intersection.start.y),
-                                );
-                            }
-                        }
-                    }
-                }
+                let shared = if gap == 0. {
+                    crate::walls::shared_wall_segments(&edges[a], &edges[b]).iter()
+                        .map(|line| (line.end.x-line.start.x).hypot(line.end.y-line.start.y))
+                        .fold(0., f64::max)
+                } else { 0. };
                 let deficit = (self.door_width - shared).max(0.);
                 ((gap + deficit) / self.door_width).powi(2)
             })

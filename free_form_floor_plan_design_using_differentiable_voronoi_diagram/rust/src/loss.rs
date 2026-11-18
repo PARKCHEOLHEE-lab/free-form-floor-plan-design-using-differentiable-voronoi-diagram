@@ -7,6 +7,7 @@
 
 use geo::{Area, LineString, MultiPolygon, Polygon};
 use geo_booleanop::boolean::BooleanOp;
+use crate::walls::nearest_boundary_direction;
 
 /// Groups the paired cells by room index, mirroring
 /// `rooms_group[room_index].append(cell)` over `zip(cells_sorted, room_indices)`
@@ -67,35 +68,6 @@ pub fn compute_wall_local_loss(
         }
     }
     (loss as f32) * (w_wall_local as f32)
-}
-
-/// Unit direction `(cx, cy)` (= cos φ, sin φ) of the boundary segment nearest to
-/// `(mx, my)`, as f32. Computing the unit vector by division — not atan2/cos/sin —
-/// keeps the rotated-L1 below portable f32-exact across platforms (libm trig is
-/// not IEEE-mandated; +,−,×,÷,√ are). At an axis-aligned segment (cx,cy) is exactly
-/// (±1,0)/(0,±1), so the local sum reduces bit-identically to the global wall sum.
-pub(crate) fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32, f32) {
-    let mut best_d2 = f64::INFINITY;
-    let (mut cx, mut cy) = (1.0f32, 0.0f32); // φ = 0 default (no usable segment)
-    for line in boundary.exterior().lines() {
-        let (ax, ay) = (line.start.x, line.start.y);
-        let (ex, ey) = (line.end.x - ax, line.end.y - ay);
-        let len2 = ex * ex + ey * ey;
-        if len2 == 0.0 {
-            continue; // #7: a zero-length segment carries no orientation — skip it
-        }
-        // projection parameter of (mx,my) onto the segment, clamped to [0,1]
-        let t = (((mx - ax) * ex + (my - ay) * ey) / len2).clamp(0.0, 1.0);
-        let (px, py) = (ax + t * ex, ay + t * ey);
-        let d2 = (mx - px) * (mx - px) + (my - py) * (my - py);
-        if d2 < best_d2 {
-            best_d2 = d2;
-            let l = len2.sqrt();
-            cx = (ex / l) as f32;
-            cy = (ey / l) as f32;
-        }
-    }
-    (cx, cy)
 }
 
 /// `ring_wall_sum` measured in the local boundary frame: each edge vector is

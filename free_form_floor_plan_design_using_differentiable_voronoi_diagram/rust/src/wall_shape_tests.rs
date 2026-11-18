@@ -50,3 +50,48 @@ fn cosine_direction_is_adaptive_and_independent_of_scale_and_subdivision(){
     assert!((losses(&[split],&mixed).0-original).abs()<1e-10,"a closed wall's arbitrary starting point and subdivisions do not change its direction loss");
     assert_eq!(losses(&[vec![],vec![[0.,0.]],vec![[0.,0.],[0.,0.]]],&boundary).0,0.,"zero-length geometry is finite and contributes no wall");
 }
+
+fn step(h:f64)->Vec<[f64;2]>{vec![[-0.8,-0.5],[0.,-0.5],[0.,-0.5+h],[0.8,-0.5+h]]}
+fn room(points:Vec<[f64;2]>)->MultiPolygon<f64>{
+    MultiPolygon(vec![Polygon::new(LineString::from(points.into_iter().map(|p|(p[0],p[1])).collect::<Vec<_>>()),vec![])])
+}
+
+#[test]
+fn jog_loss_aligns_parallel_runs_of_the_same_shared_wall(){
+    let boundary=rectangle();
+    let small=losses(&[step(0.02)],&boundary);
+    let large=losses(&[step(0.04)],&boundary);
+    assert_eq!(large.0,0.,"an orthogonal step is already direction-aligned");
+    assert!(small.1>0. && large.1>small.1,"jog must measure parallel-line offset, not just edge angle");
+    let h=0.04;
+    let derivative=(losses(&[step(h+1e-6)],&boundary).1-losses(&[step(h-1e-6)],&boundary).1)/2e-6;
+    assert!(derivative>0.,"gradient descent must shrink the step, not enlarge its short edge");
+    assert_eq!(losses(&[step(0.)],&boundary).1,0.);
+    for points in [vec![[-1.,0.],[0.,0.],[0.,1.]],vec![[-1.,0.],[0.,0.],[0.,1.],[-1.,1.]]]{
+        assert_eq!(losses(&[points],&boundary).1,0.,"major L and U corners are retained");
+    }
+    for degrees in [7_f64,17.,33.]{
+        let a=degrees.to_radians();let b=transformed_boundary(&boundary,a,0.3);
+        let points=vec![[-0.9,-0.1],[0.1,-0.1],[0.1,0.9]].into_iter().map(|p|transform(p,a,0.3)).collect();
+        assert_eq!(losses(&[points],&b).1,0.,"one line per heading has exactly zero variance, including rotated/scaled L corners");
+    }
+    assert_eq!(losses(&[vec![[0.,-0.5],[0.,0.5]],vec![[0.2,-0.5],[0.2,0.5]]],&boundary).1,0.,"separate physical walls cannot attract each other");
+    let sheared:Vec<_>=step(h).into_iter().map(|p|[p[0],p[1]+0.5*p[0]]).collect();
+    assert!((losses(&[sheared],&boundary).1-large.1).abs()<1e-10,"compare supporting-line intercepts, not the locations of segment midpoints");
+    let angle=17_f64.to_radians();
+    let b=transformed_boundary(&boundary,angle,3.);
+    let chain=step(h).into_iter().map(|p|transform(p,angle,3.)).collect();
+    assert!((losses(&[chain],&b).1-large.1).abs()<1e-7,"jog is independent of uniform scale and rotation");
+    let bump=vec![[0.,-1.],[0.,-0.3],[h,-0.3],[h,0.3],[0.,0.3],[0.,1.]];
+    let mut left=vec![[-2.,-1.]];left.extend(bump.clone());left.extend([[-2.,1.],[-2.,-1.]]);
+    let mut right:Vec<_>=bump.iter().copied().rev().collect();right.extend([[2.,-1.],[2.,1.],[0.,1.]]);
+    let rooms=vec![room(left),room(right)];
+    let actual=evaluate(&rooms,&boundary);
+    assert!(actual.1>0.,"extract the connected shared wall including its transverse connectors");
+    assert!((actual.1*2.-losses(&[bump],&boundary).1).abs()<1e-10,"physical shared walls count once with fixed room-count normalization");
+    let reversed:Vec<_>=rooms.iter().map(|r|MultiPolygon(r.0.iter().map(|p|Polygon::new(LineString::from(p.exterior().0.iter().rev().copied().collect::<Vec<_>>()),vec![])).collect())).collect();
+    assert!((evaluate(&reversed,&boundary).1-actual.1).abs()<1e-10);
+    assert_eq!(evaluate(&rooms[..1],&boundary),(0.,0.),"external walls are fixed geometry, not shared-wall fitting targets");
+    let stripes=vec![room(vec![[-2.,-1.],[-0.5,-1.],[-0.5,1.],[-2.,1.],[-2.,-1.]]),room(vec![[-0.5,-1.],[0.5,-1.],[0.5,1.],[-0.5,1.],[-0.5,-1.]]),room(vec![[0.5,-1.],[2.,-1.],[2.,1.],[0.5,1.],[0.5,-1.]])];
+    assert_eq!(evaluate(&stripes,&boundary),(0.,0.),"parallel walls between different room pairs remain independent");
+}

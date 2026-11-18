@@ -7,7 +7,47 @@
 //! engine `grad_local::room_union` uses). geo 0.30 has no buffer, so the band
 //! is built from per-segment rectangles plus per-vertex disks.
 
-use geo::{Coord, LineString, MultiPolygon, Polygon};
+use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Simplify};
+
+pub(crate) fn boundary_segments(room:&MultiPolygon<f64>)->Vec<Line<f64>>{
+    room.iter().flat_map(|p|std::iter::once(p.exterior()).chain(p.interiors()))
+        .flat_map(|ring|ring.simplify(&f64::MIN_POSITIVE).lines().collect::<Vec<_>>()).collect()
+}
+
+/// Actual positive-length overlap, shared by door widths and wall shape losses.
+pub(crate) fn shared_wall_segments(a:&[Line<f64>],b:&[Line<f64>])->Vec<Line<f64>>{
+    use geo::line_intersection::{line_intersection,LineIntersection};
+    let mut shared=Vec::new();
+    for &x in a {for &y in b {
+        if let Some(LineIntersection::Collinear{intersection})=line_intersection(x,y){
+            if intersection.start!=intersection.end {shared.push(intersection);}
+        }
+    }}
+    shared
+}
+
+/// Unit direction of the nearest exterior segment. Preserve the original
+/// f32 projection arithmetic for the native numerical-reference path.
+pub(crate) fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32, f32) {
+    let mut best_d2 = f64::INFINITY;
+    let (mut cx, mut cy) = (1.0f32, 0.0f32);
+    for line in boundary.exterior().lines() {
+        let (ax, ay) = (line.start.x, line.start.y);
+        let (ex, ey) = (line.end.x - ax, line.end.y - ay);
+        let len2 = ex * ex + ey * ey;
+        if len2 == 0.0 { continue; }
+        let t = (((mx - ax) * ex + (my - ay) * ey) / len2).clamp(0.0, 1.0);
+        let (px, py) = (ax + t * ex, ay + t * ey);
+        let d2 = (mx - px) * (mx - px) + (my - py) * (my - py);
+        if d2 < best_d2 {
+            best_d2 = d2;
+            let l = len2.sqrt();
+            cx = (ex / l) as f32;
+            cy = (ey / l) as f32;
+        }
+    }
+    (cx, cy)
+}
 
 /// Vertices per buffer disk (round joins/caps). 16 keeps the joins smooth enough
 /// that sharp outer corners fill cleanly, without bloating the union input.
