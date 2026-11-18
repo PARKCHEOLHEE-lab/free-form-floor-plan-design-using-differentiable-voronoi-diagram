@@ -86,6 +86,7 @@
     .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--divider); border-radius: 6px; background: var(--light); display: block; }
     .lossrow .spark polyline { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
     #sp_total { stroke: #66a1ff; } #sp_wall { stroke: #e08a5a; } #sp_area { stroke: #5aa469; }
+    #sp_jog { stroke: #479a9c; }
     #sp_lloyd { stroke: #8c7bd0; } #sp_topo { stroke: #c75d8f; }
     /* vertical playhead marking the current iteration (replaces the plain iter text) */
     .playhead { position: absolute; width: 0; border-left: 1px dotted rgba(20,20,20,.55); pointer-events: none; display: none; }
@@ -101,6 +102,7 @@
     .playhead .vtag::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
       border: 4px solid transparent; border-top-color: var(--c); border-bottom: 0; }
     #vt_total { --c: #66a1ff; } #vt_wall { --c: #e08a5a; } #vt_area { --c: #5aa469; }
+    #vt_jog { --c: #479a9c; }
     #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
 
     .controls { font-size: .96em; }
@@ -270,11 +272,12 @@
       <div class="label canvas-sub">Loss</div>
       <div class="losspanel" id="losspanel">
         <div class="lossrow"><span class="lk">total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
-        <div class="lossrow"><span class="lk">wall</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
+        <div class="lossrow"><span class="lk">angle</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
+        <div class="lossrow"><span class="lk">step</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_jog" /></svg></div>
         <div class="lossrow"><span class="lk">area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
         <div class="lossrow"><span class="lk">lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
         <div class="lossrow"><span class="lk">topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
-        <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
+        <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_jog"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
       </div>
       </div>
     </div>
@@ -357,7 +360,8 @@
 
       <section class="panel" data-panel="weights">
         <div class="label">Loss weight (0–1)</div>
-        <div class="row"><label>wall</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="0.70"><span class="val" id="w_wall_v">0.70</span></div>
+        <div class="row"><label for="w_wall">angle</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="0.70"><span class="val" id="w_wall_v">0.70</span></div>
+        <div class="row"><label for="w_jog">step</label><input id="w_jog" type="range" min="0" max="1" step="0.01" value="0.35"><span class="val" id="w_jog_v">0.35</span></div>
         <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
         <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
         <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
@@ -413,8 +417,8 @@ $('walls').addEventListener('click', e => {
   wallsMode = b.dataset.walls;
   if (lastFrame) drawFrame(lastFrame);
 });
-// per-term loss graphs: 'total' + the 4 weighted terms, each its own y-scale
-const LOSS_TERMS = ['total', 'wall', 'area', 'lloyd', 'topo'];
+// Per-term loss graphs: total plus five weighted contributions, each with its own y-scale.
+const LOSS_TERMS = ['total', 'wall', 'jog', 'area', 'lloyd', 'topo'];
 
 let lastFrame = null;                          // last rendered cell-frame, for resize redraw
 let wallWidth = 0.02;                          // wall thickness (normalized half-width); JS-only render param
@@ -435,7 +439,7 @@ let running = false;
 let paused = false;
 let runFinished = false;
 let maxIters = 300;
-const hist = { total: [], wall: [], area: [], lloyd: [], topo: [] };
+const hist = { total: [], wall: [], jog: [], area: [], lloyd: [], topo: [] };
 const clearHist = () => { for (const t in hist) hist[t].length = 0; };
 let gen = 0, curGen = 0;  // build generation; frames from a superseded build are dropped
 
@@ -488,8 +492,8 @@ $('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubble
 $('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
 
 // ---------- inputs ----------
-const SLIDERS = ['sites','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr','seed'];
-const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo']);
+const SLIDERS = ['sites','wall','w_wall','w_jog','w_area','w_lloyd','w_topo','iters','lr','seed'];
+const IMPORTANCE_IDS = new Set(['w_wall','w_jog','w_area','w_lloyd','w_topo']);
 // Shared slider -> readout formatter (used by the live listeners and applyPreset).
 function fmtVal(id, v) {
   return (id === 'lr' || id === 'wall') ? (+v).toFixed(3)
@@ -547,22 +551,14 @@ function refreshRoomReadout() {
   document.querySelector('[data-bubble-tool=link]').disabled=!input||input.rooms.length<2;
 }
 
-// Per-term reference scales s_i = the iter-0 raw magnitude of each loss term
-// (measured with w=1, geomean over the 5 demo shapes x 8 seeds, 2026-06). They
-// turn the 0..1 sliders into relative IMPORTANCE knobs: the optimizer weight is
-// importance / s, so equal slider values give ~equal per-term contribution at the
-// start. wall is stable across shapes (x1.3), area is roughest (x2.7, because it
-// is a sum-then-square), and topo is never >0 in practice so its scale is a
-// judgment value (= one room split into two pieces).
-const LOSS_SCALES = { w_wall: 13.0, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0 };
+// Angle and step use their native dimensionless scales. Area/Lloyd/topology
+// retain the previous reference scales measured for the demo (2026-06).
+const LOSS_SCALES = { w_wall: 1.0, w_jog: 1.0, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0 };
 
 function params() {
   const weights = (currentProgram()?.snapshot().ratios ?? roomRatios).map(r => Math.max(0, r));
   const wsum = weights.reduce((a, b) => a + b, 0) || 1;
-  // Each loss slider is a 0..1 importance; divide by the per-term scale to get the
-  // raw weight the optimizer consumes. The default {0.70,0.10,0.12,0.06} ~back-maps
-  // to the old demo weights {5,20,2.1,1.5} (within slider rounding; the global
-  // factor is irrelevant under AdamW). bb, cell stay 0.
+  // Importance is divided by the corresponding native scale; bb/cell stay off.
   const imp = id => +$(id).value;
   return {
     sites: +$('sites').value,
@@ -574,6 +570,7 @@ function params() {
       imp('w_topo')  / LOSS_SCALES.w_topo,
       0, 0,
     ],
+    jogWeight: imp('w_jog') / LOSS_SCALES.w_jog,
     iters: +$('iters').value,
     lr: +$('lr').value,
     seed: +$('seed').value | 0,
@@ -591,7 +588,7 @@ function sendBuild(then) {
   maxIters = p.iters;
   curGen = ++gen;
   worker.postMessage({ cmd: 'build', gen: curGen, kind: 'shape', mode,
-    sites: p.sites, ratios: p.ratios, w: p.w, seed: p.seed, lr: p.lr, iters: p.iters, then,
+    sites: p.sites, ratios: p.ratios, w: p.w, jogWeight: p.jogWeight, seed: p.seed, lr: p.lr, iters: p.iters, then,
     ...(input?{program:{...input,doorWidth:DOOR_WIDTH}}:{}) });
   return true;
 }
@@ -646,7 +643,7 @@ const PRESETS = {
     sites: 80, rooms: 5,
     roomRatios: [0.13, 0.30, 0.23, 0.13, 0.21],  // normalized shares 13/30/23/13/21%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_jog: 0.35, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
   // B — orthogonal boundary, 7 rooms (user preset, 2026-06).
@@ -654,7 +651,7 @@ const PRESETS = {
     sites: 80, rooms: 7,
     roomRatios: [0.12, 0.12, 0.25, 0.16, 0.07, 0.12, 0.15],  // displayed shares 12/12/25/16/7/12/15%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_jog: 0.35, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 4217,
   },
   // C — orthogonal boundary, 5 rooms (user preset, 2026-06).
@@ -664,7 +661,7 @@ const PRESETS = {
     // so the weights are normalized to sum 1.0 here to reproduce that exact readout.
     roomRatios: [0.116, 0.266, 0.316, 0.116, 0.186],
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_jog: 0.35, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 3764,
   },
   // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
@@ -672,7 +669,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_jog: 0.35, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 2153,
   },
   // E — orthogonal runs with two diagonal walls, 6 rooms (user preset, 2026-06).
@@ -680,7 +677,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.13, 0.11, 0.21, 0.20, 0.11, 0.24],  // normalized shares 13/11/21/20/11/24%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_jog: 0.35, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 4971,
   },
 };
@@ -695,7 +692,7 @@ function applyPreset(mode) {
   const set = (id, val) => { $(id).value = val; const o = $(id + '_v'); if (o) o.textContent = fmtVal(id, val); };
   set('sites', p.sites);
   set('wall', p.wall);
-  set('w_wall', p.w_wall); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
+  set('w_wall', p.w_wall); set('w_jog', p.w_jog); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
   set('iters', p.iters); set('lr', p.lr);
   set('seed', p.seed);
   roomRatios = p.roomRatios.slice();
@@ -771,10 +768,11 @@ function drawSparks() {
     }).join(' '));
   }
 }
-// Record one frame's per-term losses (total + the 4 weighted terms) and redraw.
+// Record the weighted loss contributions and redraw.
 function pushLoss(f) {
   hist.total.push(f.loss);
   hist.wall.push(f.wall);
+  hist.jog.push(f.jog);
   hist.area.push(f.area);
   hist.lloyd.push(f.lloyd);
   hist.topo.push(f.topo);

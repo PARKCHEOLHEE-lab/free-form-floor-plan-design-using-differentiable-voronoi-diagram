@@ -39,9 +39,10 @@ struct Frame {
     iteration: usize,
     /// loss at the sites *before* this step (matches the CLI/tensorboard log)
     loss: f32,
-    /// Legacy weighted contributions plus the room program's connection term.
+    /// Weighted contributions of the selected wall model and the room program.
     /// The demo's bb/cell weights remain zero.
     wall: f32,
+    jog: f32,
     area: f32,
     lloyd: f32,
     topo: f32,
@@ -132,6 +133,11 @@ impl WasmOpt {
         self.configure_program(circles, links, door_width).map_err(|e| JsValue::from_str(&e))
     }
 
+    /// Select angle-only adaptive walls with an independent step weight.
+    pub fn set_wall_loss(&mut self, jog_weight:f64)->Result<(),JsValue>{
+        self.configure_wall_loss(jog_weight).map_err(|e|JsValue::from_str(&e))
+    }
+
     /// The normalized boundary ring (`[[x,y],...]`) for drawing + canvas fit.
     pub fn boundary(&self) -> JsValue {
         let ring: Vec<(f64, f64)> = self.boundary.exterior().0.iter().map(|p| (p.x, p.y)).collect();
@@ -154,6 +160,13 @@ impl WasmOpt {
 }
 
 impl WasmOpt {
+    fn configure_wall_loss(&mut self, jog_weight:f64)->Result<(),String>{
+        if !jog_weight.is_finite() || jog_weight<0. {return Err("Step weight must be finite and nonnegative.".into());}
+        self.weights.wall_mode=loss::WallLossMode::CosineSquared;
+        self.weights.w_jog=jog_weight;
+        Ok(())
+    }
+
     fn configure_program(&mut self, circles: &[f64], links: &[u32], door_width: f64) -> Result<(), String> {
         if circles.len()%3!=0 || links.len()%2!=0 { return Err("Use complete x/y/r circles and room-index pairs.".into()); }
         let circles: Vec<[f64;3]> = circles.chunks_exact(3).map(|c|[c[0],c[1],c[2]]).collect();
@@ -276,6 +289,7 @@ impl WasmOpt {
             iteration: self.iteration,
             loss: bd.total,
             wall: bd.wall,
+            jog: bd.jog,
             area: bd.area,
             lloyd: bd.lloyd,
             topo: bd.topo,
@@ -289,6 +303,8 @@ impl WasmOpt {
 
 #[cfg(test)]
 mod program_tests;
+#[cfg(test)]
+mod wall_shape_tests;
 
 #[cfg(test)]
 mod tests {

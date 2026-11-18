@@ -3,7 +3,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test *.test.mjs",
-    "e2e": "node --test page.e2e.mjs"
+    "e2e": "node --test page.e2e.mjs",
+    "e2e:wall-loss": "node --test wall-loss.e2e.mjs"
   },
   "devDependencies": {
     "monocart-coverage-reports": "3.2.1",

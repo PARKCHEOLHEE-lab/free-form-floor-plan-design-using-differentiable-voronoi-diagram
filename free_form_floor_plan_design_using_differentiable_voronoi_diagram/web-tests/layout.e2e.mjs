@@ -158,7 +158,7 @@ test("panels: an open panel is see-through, so the plan shows behind it", { time
     }
 });
 
-test("loss card: its 5 rows are in view at the start, and the Losses icon hides and shows it", { timeout: 120_000 }, async () => {
+test("loss card: its 6 rows are in view at the start, and the Losses icon hides and shows it", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
@@ -169,11 +169,11 @@ test("loss card: its 5 rows are in view at the start, and the Losses icon hides 
                         return b.width > 0 && b.top >= 0 && b.bottom <= innerHeight;
                     }),
                 );
-            assert.deepEqual(await rows(), [true, true, true, true, true], "all 5 rows in view at the start");
+            assert.deepEqual(await rows(), [true, true, true, true, true, true], "all 6 rows in view at the start");
             await page.click("button[data-toggle=losses]");
-            assert.deepEqual(await rows(), [false, false, false, false, false], "hidden after one click");
+            assert.deepEqual(await rows(), [false, false, false, false, false, false], "hidden after one click");
             await page.click("button[data-toggle=losses]");
-            assert.deepEqual(await rows(), [true, true, true, true, true], "shown again after a second click");
+            assert.deepEqual(await rows(), [true, true, true, true, true, true], "shown again after a second click");
         });
     } finally {
         proc.kill();
