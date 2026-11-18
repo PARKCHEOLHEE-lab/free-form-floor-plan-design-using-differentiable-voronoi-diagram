@@ -10,8 +10,21 @@
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Simplify};
 
 pub(crate) fn boundary_segments(room:&MultiPolygon<f64>)->Vec<Line<f64>>{
-    room.iter().flat_map(|p|std::iter::once(p.exterior()).chain(p.interiors()))
-        .flat_map(|ring|ring.simplify(&f64::MIN_POSITIVE).lines().collect::<Vec<_>>()).collect()
+    use std::collections::HashMap;
+    let mut pending=HashMap::new();
+    let mut edges:Vec<Option<Line<f64>>>=Vec::new();
+    for ring in room.iter().flat_map(|p|std::iter::once(p.exterior()).chain(p.interiors())){
+        for line in ring.simplify(&f64::MIN_POSITIVE).lines(){
+            let a=(line.start.x.to_bits(),line.start.y.to_bits());
+            let b=(line.end.x.to_bits(),line.end.y.to_bits());
+            let key=if a<b {(a,b)}else{(b,a)};
+            // Snapped twin edges within one room are cell seams. Keep source
+            // order for surviving edges so gradients remain deterministic.
+            if let Some(index)=pending.remove(&key){edges[index]=None;}
+            else {pending.insert(key,edges.len());edges.push(Some(line));}
+        }
+    }
+    edges.into_iter().flatten().collect()
 }
 
 /// Actual positive-length overlap, shared by door widths and wall shape losses.
@@ -224,4 +237,15 @@ mod tests {
             "wall area did not grow with d ({area_thin} -> {area_thick})"
         );
     }
+    #[test]
+    fn cell_seams_do_not_become_room_boundary_walls(){
+        let square=|x:f64|Polygon::new(LineString::from(vec![(x,0.),(x+1.,0.),(x+1.,1.),(x,1.),(x,0.)]),vec![]);
+        let room=MultiPolygon(vec![square(0.),square(1.)]);
+        let edges=boundary_segments(&room);
+        assert!(edges.iter().all(|e|e.start.x!=1. || e.end.x!=1.),"the common cell seam lies inside one room and is not a wall");
+        let perimeter:f64=edges.iter().map(|e|(e.end.x-e.start.x).hypot(e.end.y-e.start.y)).sum();
+        assert_eq!(perimeter,6.);
+        assert_eq!(boundary_segments(&room),edges,"preserve deterministic source order for finite differences");
+    }
+
 }
