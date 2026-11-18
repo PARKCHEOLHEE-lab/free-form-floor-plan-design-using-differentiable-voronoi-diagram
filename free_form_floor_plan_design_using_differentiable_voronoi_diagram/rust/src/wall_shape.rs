@@ -1,20 +1,13 @@
 //! Direction and straightness of physical shared-wall chains.
-use geo::{Area,Polygon,MultiPolygon};
+use geo::{Area,Polygon};
 use crate::walls::{wall_chains,canonical_chain};
 
-pub(crate) fn evaluate(rooms:&[MultiPolygon<f64>],boundary:&Polygon<f64>)->(f64,f64){
-    if rooms.len()<2 {return (0.,0.);}
-    let edges:Vec<_>=rooms.iter().map(crate::walls::boundary_segments).collect();
-    let mut chains=Vec::new();
+pub(crate) fn evaluate_shared(shared:&crate::walls::SharedWalls,boundary:&Polygon<f64>)->(f64,f64){
+    if shared.room_count()<2{return (0.,0.);}
     let tol=boundary.unsigned_area().sqrt()*1e-12;
-    for r in 0..rooms.len(){for s in r+1..rooms.len(){
-        let shared=crate::walls::shared_wall_segments(&edges[r],&edges[s]);
-        chains.extend(wall_chains(&shared,tol));
-    }}
+    let chains:Vec<_>=shared.pairs().flat_map(|edges|wall_chains(edges,tol)).collect();
     let (direction,jog)=losses(&chains,boundary);
-    // Room count is fixed during an optimization. Adding a perfect chain must
-    // not lower another wall's error by changing the averaging denominator.
-    (direction/rooms.len() as f64,jog/rooms.len() as f64)
+    (direction/shared.room_count() as f64,jog/shared.room_count() as f64)
 }
 
 fn losses(chains: &[Vec<[f64;2]>], boundary: &Polygon<f64>) -> (f64,f64) {
@@ -82,6 +75,23 @@ fn chain_jog(points:&[[f64;2]],boundary:&Polygon<f64>)->f64{
         2.*z/((1.+z).sqrt()+1.)
     }).sum::<f64>()/4.
 
+}
+
+// The former geometric search remains an independent test oracle.
+#[cfg(test)]
+pub(crate) fn evaluate(rooms:&[geo::MultiPolygon<f64>],boundary:&Polygon<f64>)->(f64,f64){
+    if rooms.len()<2 {return (0.,0.);}
+    let edges:Vec<_>=rooms.iter().map(crate::walls::boundary_segments).collect();
+    let mut chains=Vec::new();
+    let tol=boundary.unsigned_area().sqrt()*1e-12;
+    for r in 0..rooms.len(){for s in r+1..rooms.len(){
+        let shared=crate::walls::shared_wall_segments(&edges[r],&edges[s]);
+        chains.extend(wall_chains(&shared,tol));
+    }}
+    let (direction,jog)=losses(&chains,boundary);
+    // Room count is fixed during an optimization. Adding a perfect chain must
+    // not lower another wall's error by changing the averaging denominator.
+    (direction/rooms.len() as f64,jog/rooms.len() as f64)
 }
 
 #[cfg(test)]

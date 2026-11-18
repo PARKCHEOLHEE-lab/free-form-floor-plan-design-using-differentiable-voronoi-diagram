@@ -9,6 +9,86 @@
 
 use geo::{Coord, Line, LineString, MultiPolygon, Polygon, Simplify};
 
+type CellEdge=((u64,u64),(u64,u64));
+const NO_CELL:usize=usize::MAX;
+
+/// Shared physical walls, in stable room/edge order for numerical evaluation.
+pub(crate) struct SharedWalls {
+    rooms:usize,
+    pairs:std::collections::BTreeMap<(usize,usize),Vec<Line<f64>>>,
+}
+impl SharedWalls {
+    pub(crate) fn from_cells(groups:&[Vec<&Polygon<f64>>])->Self {
+        SharedWallCells::from_iter(groups.len(),groups.iter().enumerate().flat_map(|(room,polys)|polys.iter().map(move|p|(*p,room)))).snapshot()
+    }
+    pub(crate) fn between(&self,a:usize,b:usize)->&[Line<f64>]{
+        let pair=if a<b {(a,b)}else{(b,a)};
+        self.pairs.get(&pair).map(Vec::as_slice).unwrap_or(&[])
+    }
+    pub(crate) fn pairs(&self)->impl Iterator<Item=&[Line<f64>]> {self.pairs.values().map(Vec::as_slice)}
+    pub(crate) fn room_count(&self)->usize{self.rooms}
+}
+
+/// Immutable base-cell ownership. Each perturbation changes only its cell faces.
+pub(crate) struct SharedWallCells {
+    rooms:usize,
+    cell_rooms:Vec<usize>,
+    cell_edges:Vec<Vec<CellEdge>>,
+    owners:std::collections::HashMap<CellEdge,[usize;2]>,
+}
+impl SharedWallCells {
+    pub(crate) fn new(cells:&[Polygon<f64>],labels:&[usize])->Self{
+        Self::from_iter(labels.iter().copied().max().map_or(0,|n|n+1),cells.iter().zip(labels.iter().copied()))
+    }
+    fn from_iter<'a>(rooms:usize,cells:impl Iterator<Item=(&'a Polygon<f64>,usize)>)->Self{
+        let mut out=Self{rooms,cell_rooms:Vec::new(),cell_edges:Vec::new(),owners:std::collections::HashMap::new()};
+        for (cell,room) in cells {
+            let id=out.cell_rooms.len();let edges=Self::edges(cell);
+            for &edge in &edges {Self::insert(&mut out.owners,edge,id);}
+            out.cell_rooms.push(room);out.cell_edges.push(edges);
+        }
+        out
+    }
+    fn edges(cell:&Polygon<f64>)->Vec<CellEdge>{
+        let mut edges=Vec::new();
+        // Cell ownership precedes collinear simplification.
+        for ring in std::iter::once(cell.exterior()).chain(cell.interiors()){for line in ring.lines(){
+            if line.start==line.end {continue;}
+            let a=(line.start.x.to_bits(),line.start.y.to_bits());let b=(line.end.x.to_bits(),line.end.y.to_bits());
+            edges.push(if a<b{(a,b)}else{(b,a)});
+        }}
+        edges.sort_unstable();edges.dedup();edges
+    }
+    fn insert(map:&mut std::collections::HashMap<CellEdge,[usize;2]>,edge:CellEdge,cell:usize){
+        let owners=map.entry(edge).or_insert([NO_CELL;2]);
+        if owners.contains(&cell){return;}
+        let slot=owners.iter_mut().find(|n|**n==NO_CELL).expect("a Voronoi cell face has at most two owners");*slot=cell;
+    }
+    fn collect(&self,map:&std::collections::HashMap<CellEdge,[usize;2]>)->SharedWalls{
+        let mut pairs:std::collections::BTreeMap<_,Vec<Line<f64>>>=std::collections::BTreeMap::new();
+        for (&(a,b),owners) in map {
+            if owners[0]==NO_CELL||owners[1]==NO_CELL {continue;}
+            let (r,t)=(self.cell_rooms[owners[0]],self.cell_rooms[owners[1]]);
+            if r==t{continue;}
+            let pair=if r<t{(r,t)}else{(t,r)};
+            pairs.entry(pair).or_default().push(Line{start:Coord{x:f64::from_bits(a.0),y:f64::from_bits(a.1)},end:Coord{x:f64::from_bits(b.0),y:f64::from_bits(b.1)}});
+        }
+        for edges in pairs.values_mut(){edges.sort_unstable_by_key(|e|((e.start.x.to_bits(),e.start.y.to_bits()),(e.end.x.to_bits(),e.end.y.to_bits())));}
+        SharedWalls{rooms:self.rooms,pairs}
+    }
+    pub(crate) fn snapshot(&self)->SharedWalls{self.collect(&self.owners)}
+    pub(crate) fn updated(&self,cells:&[Polygon<f64>],changed:&[usize])->SharedWalls{
+        let mut owners=self.owners.clone();
+        for &cell in changed {for edge in &self.cell_edges[cell]{
+            let slots=owners.get_mut(edge).expect("base cell ownership exists");
+            *slots.iter_mut().find(|n|**n==cell).expect("base face contains its cell")=NO_CELL;
+            if slots.iter().all(|n|*n==NO_CELL){owners.remove(edge);}
+        }}
+        for &cell in changed {for edge in Self::edges(&cells[cell]){Self::insert(&mut owners,edge,cell);}}
+        self.collect(&owners)
+    }
+}
+
 pub(crate) fn boundary_segments(room:&MultiPolygon<f64>)->Vec<Line<f64>>{
     use std::collections::HashMap;
     let mut pending=HashMap::new();
@@ -246,6 +326,46 @@ mod tests {
         let perimeter:f64=edges.iter().map(|e|(e.end.x-e.start.x).hypot(e.end.y-e.start.y)).sum();
         assert_eq!(perimeter,6.);
         assert_eq!(boundary_segments(&room),edges,"preserve deterministic source order for finite differences");
+    }
+
+    #[test]
+    fn shared_cell_faces_match_generic_geometry_including_local_perturbations(){
+        use crate::{init,shapes,voronoi,loss::rooms_group};
+        let compare=|cells:&[Polygon<f64>],labels:&[usize]|{
+            let groups=rooms_group(cells,labels);
+            let fast=SharedWalls::from_cells(&groups);
+            let indexed=SharedWallCells::new(cells,labels).snapshot();
+            assert_eq!(fast.room_count(),groups.len());
+            let rooms:Vec<_>=groups.iter().map(|g|MultiPolygon(g.iter().map(|p|(*p).clone()).collect())).collect();
+            let edges:Vec<_>=rooms.iter().map(boundary_segments).collect();
+            let length=|lines:&[Line<f64>]|lines.iter().map(|l|(l.end.x-l.start.x).hypot(l.end.y-l.start.y)).sum::<f64>();
+            for r in 0..groups.len(){for t in r+1..groups.len(){
+                let expected=shared_wall_segments(&edges[r],&edges[t]);let actual=fast.between(r,t);
+                assert_eq!(indexed.between(r,t),actual,"stable owner ordering must not depend on cell labels");
+                assert!((length(&expected)-length(actual)).abs()<1e-8,"shared physical length must match for rooms{r},{t}");
+                for edge in actual {assert!((length(&shared_wall_segments(&[*edge],&expected))-length(&[*edge])).abs()<1e-8);}
+                for edge in &expected {assert!((length(&shared_wall_segments(&[*edge],actual))-length(&[*edge])).abs()<1e-8);}
+            }}
+        };
+        for name in ["shape_a","shape_b","shape_c","shape_d","shape_e","shape_duck"]{
+            let b=shapes::by_name(name).unwrap().polygon();
+            for seed in [0,777,4971]{let s=init::initialize_sites(&b,80,seed);let labels=init::kmeans_labels(&s,6,seed);compare(&voronoi::compute_cells(&s,&b,None).cells_sorted,&labels);}
+        }
+        let data:serde_json::Value=serde_json::from_str(include_str!("../../web-tests/fixtures/room-program-six.json")).unwrap();
+        let circles:Vec<[f64;3]>=data["rooms"].as_array().unwrap().iter().map(|r|[r["center"][0].as_f64().unwrap(),r["center"][1].as_f64().unwrap(),r["radius"].as_f64().unwrap()]).collect();
+        let b=shapes::by_name("shape_e").unwrap().polygon();let p=crate::program::RoomProgram::new(&b,&circles).unwrap();let (s,labels)=p.initialize(&b,80,4971).unwrap();
+        let base=voronoi::compute_cells(&s,&b,None).cells_sorted;let targets=vec![0.2;6];let w=crate::loss::LossWeights::default();let ctx=crate::grad_local::LocalGradContext::new(&s,&b,&targets,&labels,&w);
+        for i in 0..s.len(){for axis in 0..2{for sign in [-1.,1.]{let mut moved=s.clone();moved[i][axis]+=sign*1e-6;compare(&voronoi::compute_cells(&moved,&b,None).cells_sorted,&labels);let mut patched=base.clone();for(j,c)in ctx.affected_cells(&moved,i){patched[j]=c;}voronoi::snap_cells(&mut patched);compare(&patched,&labels);}}}
+        // A known multipart-cell clipping case, with each site owning a room.
+        let b=shapes::by_name("shape_b").unwrap().polygon();let sites=init::initialize_sites(&b,16,5);let labels:Vec<_>=(0..16).collect();compare(&voronoi::compute_cells(&sites,&b,None).cells_sorted,&labels);
+        // Compare the actual engine's clipped-cell representation for a hole
+        // and extra collinear boundary vertices, without claiming hole support.
+        let b=Polygon::new(LineString::from(vec![(-1.,-1.),(0.,-1.),(1.,-1.),(1.,1.),(-1.,1.),(-1.,-1.)]),vec![LineString::from(vec![(-0.2,-0.2),(-0.2,0.2),(0.2,0.2),(0.2,-0.2),(-0.2,-0.2)])]);
+        let sites=init::initialize_sites(&b,40,777);let labels=init::kmeans_labels(&sites,4,777);compare(&voronoi::compute_cells(&sites,&b,None).cells_sorted,&labels);
+        let b=Polygon::new(LineString::from(vec![(-1.,-1.),(1.,-1.),(1.,1.),(-1.,1.),(-1.,-1.)]),vec![]);
+        let s:Vec<_>=[-0.75_f32,-0.25,0.25,0.75].into_iter().flat_map(|y|[-0.12,0.,0.12].into_iter().map(move|x|[x,y])).collect();
+        let labels:Vec<_>=s.iter().map(|p|if p[0]<0. ||(p[0]==0. && p[1].abs()<0.5){0}else{1}).collect();
+        compare(&voronoi::compute_cells(&s,&b,None).cells_sorted,&labels);
     }
 
 }

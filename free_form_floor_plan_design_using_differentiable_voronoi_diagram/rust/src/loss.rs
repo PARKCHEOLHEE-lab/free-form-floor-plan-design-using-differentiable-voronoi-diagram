@@ -245,24 +245,18 @@ pub struct LossBreakdown {
     pub connection: f32,
 }
 
-/// Cell tilings retain the exact shared-wall ownership before room unions.
-pub(crate) fn room_tilings(groups:&[Vec<&Polygon<f64>>])->Vec<MultiPolygon<f64>> {
-    groups.iter().map(|g| MultiPolygon::new(g.iter().map(|p| (*p).clone()).collect())).collect()
-}
-
-/// One wall-direction model at a time; both paths share the same jog geometry.
-pub(crate) fn compute_wall_terms(unions:&[MultiPolygon<f64>], groups:&[Vec<&Polygon<f64>>], boundary:&Polygon<f64>, w:&LossWeights)->(f32,f32) {
-    let (direction,jog)=if w.w_jog>0. || (w.w_wall>0. && matches!(w.wall_mode,WallLossMode::CosineSquared)) {
-        // Shared walls belong to the Voronoi tiling. Independent room unions
-        // quantize in different frames and can lose exact shared segments.
-        let tiles = room_tilings(groups);
-        crate::wall_shape::evaluate(&tiles,boundary)
-    } else { (0.,0.) };
-    let wall=if w.w_wall<=0. {0.} else {match w.wall_mode {
+/// One direction model and one shared-cell graph for shape and requested doors.
+pub(crate) fn compute_wall_terms(unions:&[MultiPolygon<f64>],groups:&[Vec<&Polygon<f64>>],boundary:&Polygon<f64>,w:&LossWeights,program:Option<&crate::program::RoomProgram>,cached:Option<&crate::walls::SharedWalls>)->(f32,f32,f32){
+    let shape=w.w_jog>0. ||(w.w_wall>0. && matches!(w.wall_mode,WallLossMode::CosineSquared));
+    let generated=if cached.is_none()&&(shape||program.is_some_and(|p|p.has_connections())) {Some(crate::walls::SharedWalls::from_cells(groups))}else{None};
+    let shared=cached.or(generated.as_ref());
+    let (direction,jog)=if shape {crate::wall_shape::evaluate_shared(shared.unwrap(),boundary)}else{(0.,0.)};
+    let wall=if w.w_wall<=0. {0.}else{match w.wall_mode{
         WallLossMode::LegacyL1=>compute_wall_local_loss(unions,boundary,w.w_wall),
         WallLossMode::CosineSquared=>(direction as f32)*(w.w_wall as f32),
     }};
-    (wall,if w.w_jog>0. {(jog as f32)*(w.w_jog as f32)} else {0.})
+    let connection=if let (Some(p),Some(edges))=(program,shared){p.connection_loss_cells(groups,edges)}else{0.};
+    (wall,if w.w_jog>0. {(jog as f32)*(w.w_jog as f32)}else{0.},connection)
 }
 
 /// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
@@ -291,7 +285,7 @@ pub fn floor_plan_loss_with_program(
         Vec::new()
     };
 
-    let (wall,jog) = compute_wall_terms(&unions,&groups,boundary,w);
+    let (wall,jog,connection) = compute_wall_terms(&unions,&groups,boundary,w,program,None);
     let area = if w.w_area > 0.0 {
         compute_area_loss(&geom.cells_sorted, target_areas, room_indices, w.w_area)
     } else {
@@ -318,7 +312,6 @@ pub fn floor_plan_loss_with_program(
         0.0
     };
     // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
-    let connection = program.map_or(0., |p| p.connection_loss(&room_tilings(&groups)));
     let total = wall + area + lloyd + topo + bb + cell + connection + jog;
     LossBreakdown {
         jog,

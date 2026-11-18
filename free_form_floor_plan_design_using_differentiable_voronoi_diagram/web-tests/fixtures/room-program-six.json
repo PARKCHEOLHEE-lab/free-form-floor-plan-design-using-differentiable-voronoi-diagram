@@ -1,0 +1,67 @@
+{
+  "source": "Approximate similarity fit from screenshot; not exact live browser state. Browser access host unavailable.",
+  "shape": "shape_e",
+  "sites": 80,
+  "seed": 4971,
+  "iterations": 500,
+  "lr": 0.005,
+  "rooms": [
+    {
+      "center": [
+        0.13220299005255376,
+        0.5402762385839223
+      ],
+      "radius": 0.1653764866221112
+    },
+    {
+      "center": [
+        0.27079731855582245,
+        0.16988295346069138
+      ],
+      "radius": 0.24529296997761946
+    },
+    {
+      "center": [
+        -0.14150447899783367,
+        0.2693876205112498
+      ],
+      "radius": 0.3093910763841721
+    },
+    {
+      "center": [
+        -0.218603231503886,
+        -0.2009241908966307
+      ],
+      "radius": 0.18116086440776327
+    },
+    {
+      "center": [
+        -0.5014257613904417,
+        0.08707352054457235
+      ],
+      "radius": 0.15688991074867112
+    },
+    {
+      "center": [
+        -0.47871395956121643,
+        0.5442822757795024
+      ],
+      "radius": 0.18116086440776327
+    }
+  ],
+  "links": [],
+  "doorWidth": 0.1,
+  "importance": {
+    "angle": 1,
+    "step": 0.35,
+    "area": 0.15,
+    "lloyd": 0.01,
+    "topo": 0.2
+  },
+  "reference_bad": {
+    "commit": "987c83754e35f53113d70e4b4fa3ff57563e22de",
+    "max_step": 0.18951299813428618,
+    "total_step": 0.6976662135381002,
+    "measurement": "Consecutive three-edge stairs with both arms>=0.04 normalized units; parallel/orthogonal within10degrees; tiny connector threshold1e-6. Measured independently from Raw render_cells geometry."
+  }
+}

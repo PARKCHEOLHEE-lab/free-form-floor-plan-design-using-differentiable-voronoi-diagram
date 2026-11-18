@@ -39,24 +39,33 @@ impl RoomProgram {
     #[allow(deprecated)]
     pub fn connection_loss(&self, rooms: &[MultiPolygon<f64>]) -> f32 {
         use geo::EuclideanDistance;
-        if self.links.is_empty() { return 0.; }
-        let edges: Vec<_> = rooms.iter().map(crate::walls::boundary_segments).collect();
-        self.links
-            .iter()
-            .map(|&[a, b]| {
-                let gap = rooms[a].euclidean_distance(&rooms[b]);
-                let shared = if gap == 0. {
-                    crate::walls::wall_chains(&crate::walls::shared_wall_segments(&edges[a], &edges[b]),1e-12).iter()
-                        .flat_map(|chain| {
-                            let points=crate::walls::canonical_chain(chain,1e-12);
-                            points.windows(2).map(|p|(p[1][0]-p[0][0]).hypot(p[1][1]-p[0][1])).collect::<Vec<_>>()
-                        })
-                        .fold(0., f64::max)
-                } else { 0. };
-                let deficit = (self.door_width - shared).max(0.);
-                ((gap + deficit) / self.door_width).powi(2)
-            })
-            .sum::<f64>() as f32
+        if self.links.is_empty(){return 0.;}
+        let edges:Vec<_>=rooms.iter().map(crate::walls::boundary_segments).collect();
+        self.links.iter().map(|&[a,b]|{
+            let gap=rooms[a].euclidean_distance(&rooms[b]);
+            let shared=crate::walls::shared_wall_segments(&edges[a],&edges[b]);
+            self.connection_penalty(gap,&shared)
+        }).sum::<f64>() as f32
+    }
+
+    #[allow(deprecated)]
+    pub(crate) fn connection_loss_cells(&self,groups:&[Vec<&Polygon<f64>>],shared:&crate::walls::SharedWalls)->f32{
+        use geo::EuclideanDistance;
+        self.links.iter().map(|&[a,b]|{
+            let edges=shared.between(a,b);
+            let gap=if edges.is_empty(){
+                groups[a].iter().flat_map(|x|groups[b].iter().map(move|y|x.euclidean_distance(*y))).fold(f64::INFINITY,f64::min)
+            }else{0.};
+            self.connection_penalty(gap,edges)
+        }).sum::<f64>() as f32
+    }
+
+    fn connection_penalty(&self,gap:f64,edges:&[geo::Line<f64>])->f64{
+        let straight=crate::walls::wall_chains(edges,1e-12).iter().flat_map(|chain|{
+            let points=crate::walls::canonical_chain(chain,1e-12);
+            points.windows(2).map(|p|(p[1][0]-p[0][0]).hypot(p[1][1]-p[0][1])).collect::<Vec<_>>()
+        }).fold(0.,f64::max);
+        ((gap+(self.door_width-straight).max(0.))/self.door_width).powi(2)
     }
 
     #[allow(deprecated)] // geo 0.30's point-to-ring distance uses this trait.

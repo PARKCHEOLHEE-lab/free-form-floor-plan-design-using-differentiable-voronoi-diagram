@@ -1,5 +1,5 @@
 use super::*;
-use geo::LineString;
+use geo::{LineString,MultiPolygon};
 
 fn rectangle() -> Polygon<f64> {
     Polygon::new(LineString::from(vec![(-2.,-1.),(2.,-1.),(2.,1.),(-2.,1.),(-2.,-1.)]),vec![])

@@ -90,23 +90,27 @@ fn build_voronoi(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> voronoice::
 
 /// Voronoi cell polygon per site (site order).
 pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Vec<Polygon<f64>> {
-    let mut cells: Vec<_> = build_voronoi(sites_f64, boundary)
-        .iter_cells()
-        .map(|cell| {
-            Polygon::new(
-                LineString::from(
-                    cell.iter_vertices()
-                        .map(|v| (v.x, v.y))
-                        .collect::<Vec<_>>(),
-                ),
-                vec![],
-            )
-        })
-        .collect();
-    // Cocircular sites can emit twin circumcenters with a sub-ulp reverse
-    // edge. Weld before boolean clipping, which requires a simple ring.
-    snap_cells(&mut cells);
-    cells
+    raw_cells_per_site_using(sites_f64,boundary,None)
+}
+
+pub(crate) fn raw_cells_per_site_using(sites_f64:&[[f64;2]],boundary:&Polygon<f64>,base:Option<&VertexWelder>)->Vec<Polygon<f64>>{
+    let diagram=build_voronoi(sites_f64,boundary);
+    let mut welder=VertexWelder::with_capacity(diagram.vertices().len());
+    let mut coordinates=vec![None;diagram.vertices().len()];
+    // Visit sites in the original order, but weld each shared global vertex
+    // only once before clipping. Cocircular twin IDs still pass through weld.
+    diagram.iter_cells().map(|cell|{
+        let mut ring=Vec::new();
+        for &id in cell.triangles(){
+            let point=*coordinates[id].get_or_insert_with(||{
+                let p=&diagram.vertices()[id];welder.point(p.x,p.y,base)
+            });
+            if ring.last()!=Some(&point){ring.push(point);}
+        }
+        while ring.len()>1&&ring.first()==ring.last(){ring.pop();}
+        if ring.len()<3{empty_cell()}else{Polygon::new(LineString::from(ring),vec![])}
+    }).collect()
+
 }
 
 /// Voronoi neighbor site indices per site (the sites sharing a Voronoi edge).
@@ -192,33 +196,64 @@ pub(crate) fn cell_inside_boundary(raw: &Polygon<f64>, boundary: &Polygon<f64>) 
 /// below any real feature size; displacement is invisible at the f32 loss
 /// precision) restores the bitwise-shared edges that GEOS gets for free from
 /// its single noding step.
-pub(crate) fn snap_cells(cells: &mut [Polygon<f64>]) {
-    use std::collections::HashMap;
-    const TOL: f64 = 1e-12;
-    let mut canon: HashMap<(i64, i64), Vec<(f64, f64)>> = HashMap::new();
-
-    fn canonical(
-        canon: &mut HashMap<(i64, i64), Vec<(f64, f64)>>,
-        x: f64,
-        y: f64,
-    ) -> (f64, f64) {
-        let kx = (x / TOL).round() as i64;
-        let ky = (y / TOL).round() as i64;
-        for dx in -1..=1i64 {
-            for dy in -1..=1i64 {
-                if let Some(pts) = canon.get(&(kx + dx, ky + dy)) {
-                    for &(px, py) in pts {
-                        if (px - x).abs() <= TOL && (py - y).abs() <= TOL {
-                            return (px, py);
-                        }
-                    }
-                }
+#[derive(Default)]
+pub(crate) struct VertexWelder {
+    // Sorted buckets retain the old (bucket x, bucket y, encounter) lookup
+    // order without hashing nine empty neighboring buckets per vertex.
+    points:Vec<((i64,i64),(f64,f64))>,
+    exact:Vec<((u64,u64),(f64,f64))>,
+}
+const WELD_TOLERANCE:f64=1e-12;
+impl VertexWelder {
+    fn with_capacity(n:usize)->Self{
+        Self{points:Vec::with_capacity(n),exact:Vec::with_capacity(n)}
+    }
+    pub(crate) fn for_cells(cells:&[Polygon<f64>])->Self{
+        let mut out=Self::default();
+        // Base cells already carry their canonical identities. Seed their
+        // actual coordinates without selecting new representatives.
+        for p in cells.iter().flat_map(|c|c.exterior().0.iter()){
+            let point=(p.x,p.y);let key=(p.x.to_bits(),p.y.to_bits());
+            if let Err(at)=out.exact.binary_search_by_key(&key,|&(k,_)|k){
+                out.exact.insert(at,(key,point));
+                out.insert(point);
             }
         }
-        canon.entry((kx, ky)).or_default().push((x, y));
-        (x, y)
+        out
     }
+    fn bucket(x:f64,y:f64)->(i64,i64){((x/WELD_TOLERANCE).round() as i64,(y/WELD_TOLERANCE).round() as i64)}
+    fn insert(&mut self,point:(f64,f64)){
+        let key=Self::bucket(point.0,point.1);
+        let at=self.points.partition_point(|&(bucket,_)|bucket<=key);
+        self.points.insert(at,(key,point));
+    }
+    fn nearby(&self,x:f64,y:f64)->Option<(f64,f64)>{
+        let (kx,ky)=Self::bucket(x,y);
+        let start=self.points.partition_point(|&((bx,_),_)|bx<kx-1);
+        for &((bx,by),(px,py)) in &self.points[start..]{
+            if bx>kx+1{break;}
+            if (by-ky).abs()<=1 && (px-x).abs()<=WELD_TOLERANCE && (py-y).abs()<=WELD_TOLERANCE{return Some((px,py));}
+        }
+        None
+    }
+    fn point(&mut self,x:f64,y:f64,base:Option<&Self>)->(f64,f64){
+        let key=(x.to_bits(),y.to_bits());
+        // Most raw vertices are identical across one-site perturbations.
+        // Their immutable base identity needs no new memo or bucket entry.
+        if let Some(p)=base.and_then(|b|b.exact.binary_search_by_key(&key,|&(k,_)|k).ok().map(|i|b.exact[i].1)){return p;}
+        let at=match self.exact.binary_search_by_key(&key,|&(k,_)|k){Ok(i)=>return self.exact[i].1,Err(at)=>at};
+        let existing=base.and_then(|b|b.nearby(x,y)).or_else(||self.nearby(x,y));
+        let point=existing.unwrap_or_else(||{self.insert((x,y));(x,y)});
+        self.exact.insert(at,(key,point));
+        point
+    }
+}
 
+pub(crate) fn snap_cells(cells:&mut[Polygon<f64>]){
+    snap_cells_using(cells,&mut VertexWelder::default(),None);
+}
+
+pub(crate) fn snap_cells_using(cells:&mut[Polygon<f64>],welder:&mut VertexWelder,base:Option<&VertexWelder>){
     for cell in cells.iter_mut() {
         if is_empty_cell(cell) {
             continue;
@@ -227,7 +262,7 @@ pub(crate) fn snap_cells(cells: &mut [Polygon<f64>]) {
         let open = &pts[..pts.len() - 1];
         let mut snapped: Vec<(f64, f64)> = Vec::with_capacity(open.len());
         for c in open {
-            let p = canonical(&mut canon, c.x, c.y);
+            let p = welder.point(c.x,c.y,base);
             if snapped.last() != Some(&p) {
                 snapped.push(p);
             }
