@@ -92,9 +92,9 @@ test('the real worker installs room inputs rejects invalid links and cancels sup
         const shape={...base,w:[1,0,0,0,0,0]};
         const active=await send({...shape,gen:43,jogWeight:0.35});
         assert.ok(active.frame.wall>0 && active.frame.jog>0,'worker activates both new wall terms without a room program');
-        const angleOnly=await send({...shape,gen:44});
-        assert.equal(angleOnly.frame.jog,0,'omitting the optional step weight disables only that contribution');
-        assert.equal(angleOnly.frame.wall,active.frame.wall,'default step weight still explicitly selects cosine direction');
+        const wallOnly=await send({...shape,gen:44});
+        assert.equal(wallOnly.frame.jog,0,'omitting the optional step weight disables only that contribution');
+        assert.equal(wallOnly.frame.wall,active.frame.wall,'the separate step weight does not change the wall contribution');
         for(const [i,weight] of [-1,NaN,Infinity].entries())assert.equal((await send({...shape,gen:45+i, jogWeight:weight})).type,'error','invalid step weight cannot silently choose legacy walls');
         assert.equal((await send({...shape,gen:48,jogWeight:0.35})).type,'frame');
         const malformed=await page.evaluate(async()=>{

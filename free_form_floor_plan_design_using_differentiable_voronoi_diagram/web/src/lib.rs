@@ -138,7 +138,7 @@ impl WasmOpt {
         self.configure_preset_areas().map_err(|message| JsValue::from_str(&message))
     }
 
-    /// Select angle-only adaptive walls with an independent step weight.
+    /// Set the step weight without changing the wall model.
     pub fn set_wall_loss(&mut self, jog_weight:f64)->Result<(),JsValue>{
         self.configure_wall_loss(jog_weight).map_err(|e|JsValue::from_str(&e))
     }
@@ -177,7 +177,6 @@ impl WasmOpt {
 
     fn configure_wall_loss(&mut self, jog_weight:f64)->Result<(),String>{
         if !jog_weight.is_finite() || jog_weight<0. {return Err("Step weight must be finite and nonnegative.".into());}
-        self.weights.wall_mode=loss::WallLossMode::CosineSquared;
         self.weights.w_jog=jog_weight;
         Ok(())
     }
