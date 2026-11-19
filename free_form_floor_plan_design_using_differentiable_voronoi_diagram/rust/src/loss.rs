@@ -283,7 +283,10 @@ pub fn compute_cell_area_loss(cells_sorted: &[Polygon<f64>], w_cell: f64) -> f32
 pub enum WallLossMode {
     #[default]
     LegacyL1,
+    /// The original angle score normalized to a maximum of one per chain.
     CosineSquared,
+    /// The unscaled c²(1−c²) score, with a maximum of a quarter per chain.
+    CosineProduct,
 }
 
 #[derive(Default)]
@@ -300,7 +303,7 @@ pub struct LossWeights {
 
 impl LossWeights {
     pub(crate) fn shared_wall_shape(&self) -> (bool, bool) {
-        (self.w_wall > 0. && matches!(self.wall_mode, WallLossMode::CosineSquared), self.w_jog > 0.)
+        (self.w_wall > 0. && matches!(self.wall_mode, WallLossMode::CosineSquared | WallLossMode::CosineProduct), self.w_jog > 0.)
     }
 }
 
@@ -347,7 +350,8 @@ pub(crate) fn compute_wall_terms(
     };
     let wall=if w.w_wall<=0. {0.}else{match w.wall_mode{
         WallLossMode::LegacyL1=>legacy_wall(),
-        WallLossMode::CosineSquared=>(direction as f32)*(w.w_wall as f32),
+        WallLossMode::CosineSquared=>((4. * direction) as f32)*(w.w_wall as f32),
+        WallLossMode::CosineProduct=>(direction as f32)*(w.w_wall as f32),
     }};
     let connection=if let (Some(p),Some(edges))=(program,shared){p.connection_loss_cells(groups,edges)}else{0.};
     (wall,if w.w_jog>0. {(jog as f32)*(w.w_jog as f32)}else{0.},connection)

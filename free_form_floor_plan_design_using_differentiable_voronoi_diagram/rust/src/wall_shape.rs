@@ -297,17 +297,15 @@ fn chain_direction(points: &[[f64; 2]], boundary: &Polygon<f64>) -> f64 {
         if l == 0. {
             continue;
         }
-        let (c, s) = crate::walls::nearest_boundary_direction(
+        let (ex, ey) = crate::walls::nearest_boundary_direction(
             (a[0] + b[0]) / 2.,
             (a[1] + b[1]) / 2.,
             boundary,
         );
-        let (du, dv) = (
-            dx * c as f64 + dy * s as f64,
-            -dx * s as f64 + dy * c as f64,
-        );
-        let q = du * du / (du * du + dv * dv);
-        weighted += l * 4. * q * (1. - q);
+        let (ex, ey) = (ex as f64, ey as f64);
+        let cosine = (dx * ex + dy * ey) / (l * ex.hypot(ey));
+        let c2 = (cosine * cosine).clamp(0., 1.);
+        weighted += l * (c2 * (1. - c2));
         length += l;
     }
     if length != 0. {

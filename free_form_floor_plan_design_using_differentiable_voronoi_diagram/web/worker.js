@@ -6,7 +6,8 @@
 //
 // Protocol
 //   main -> worker : {cmd:'build', gen, mode, sites, ratios, w[6], seed, lr, iters,
-//                    jogWeight?: number, program?: {rooms:[{center:[x,y],radius}],links:[[a,b]],doorWidth}, then:'preview'|'start'}
+//                    cosineWall?: boolean, jogWeight?: number,
+//                    program?: {rooms:[{center:[x,y],radius}],links:[[a,b]],doorWidth}, then:'preview'|'start'}
 //                    {cmd:'dispose'}
 //   worker -> main : {type:'ready'} | {type:'built', gen, boundary} | {type:'error', gen?, msg}
 //                    {type:'frame', frame, mode:'preview'|'step'} | {type:'done'}
@@ -63,6 +64,7 @@ function build(msg) {
   const next = WasmOpt.from_shape(msg.mode, msg.sites, ratios, w[0], w[1], w[2], w[3], w[4], w[5], msg.seed, msg.lr);
   if (!next) throw new Error('Unknown boundary.');
   try {
+    if (msg.cosineWall === true) next.use_cosine_wall_loss();
     next.set_wall_loss(msg.jogWeight ?? 0);
     if (program) next.set_program(program.circles,program.links,program.doorWidth);
     else next.fit_preset_areas();

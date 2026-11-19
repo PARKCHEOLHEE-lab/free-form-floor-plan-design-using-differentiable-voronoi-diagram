@@ -588,6 +588,8 @@ function params() {
   };
 }
 
+const cosineWall = new URLSearchParams(location.search).get('wall') === 'cosine';
+
 // Build (or rebuild) the optimizer for the selected preset in the worker.
 // `then` is what the worker does once built: 'preview' or 'start' (run).
 function sendBuild(then) {
@@ -599,7 +601,7 @@ function sendBuild(then) {
   maxIters = p.iters;
   curGen = ++gen;
   worker.postMessage({ cmd: 'build', gen: curGen, kind: 'shape', mode,
-    sites: p.sites, ratios: p.ratios, w: p.w, jogWeight: p.jogWeight, seed: p.seed, lr: p.lr, iters: p.iters, then,
+    sites: p.sites, ratios: p.ratios, w: p.w, cosineWall, jogWeight: p.jogWeight, seed: p.seed, lr: p.lr, iters: p.iters, then,
     ...(input?{program:{...input,doorWidth:DOOR_WIDTH}}:{}) });
   return true;
 }

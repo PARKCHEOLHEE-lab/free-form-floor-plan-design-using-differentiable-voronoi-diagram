@@ -138,6 +138,11 @@ impl WasmOpt {
         self.configure_preset_areas().map_err(|message| JsValue::from_str(&message))
     }
 
+    /// Select the angular wall experiment for this optimizer.
+    pub fn use_cosine_wall_loss(&mut self) {
+        self.weights.wall_mode = loss::WallLossMode::CosineProduct;
+    }
+
     /// Set the step weight without changing the wall model.
     pub fn set_wall_loss(&mut self, jog_weight:f64)->Result<(),JsValue>{
         self.configure_wall_loss(jog_weight).map_err(|e|JsValue::from_str(&e))

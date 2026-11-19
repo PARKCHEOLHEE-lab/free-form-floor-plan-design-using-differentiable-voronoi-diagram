@@ -91,9 +91,10 @@ fn cosine_direction_is_adaptive_and_independent_of_scale_and_subdivision(){
     }
     let tilted=vec![[0.,0.],transform([1.,0.],30_f64.to_radians(),1.)];
     let value=losses(&[tilted.clone()],&boundary).0;
-    assert!((value-0.75).abs()<1e-8,"30 degrees has normalized cos-squared penalty 0.75, got {value}");
+    assert!((value-0.1875).abs()<1e-8,"30 degrees gives c²(1−c²) = 0.1875, got {value}");
     assert!((losses(&[tilted.clone(),vec![[-1.,0.],[1.,0.]]],&boundary).0-value).abs()<1e-8,"adding a perfect wall cannot dilute the remaining directional error");
-    assert!((losses(&[vec![[0.,0.],[0.5,0.5]]],&boundary).0-1.).abs()<1e-12,"45 degrees is the maximum directional error");
+    assert!((losses(&[vec![[0.,0.],[0.5,0.5]]],&boundary).0-0.25).abs()<1e-12,
+        "45 degrees gives c²(1−c²) = 0.25");
     for scale in [0.1,2.,10.]{
         let b=transformed_boundary(&boundary,0.,scale);
         let chain=tilted.iter().map(|&p|transform(p,0.,scale)).collect();

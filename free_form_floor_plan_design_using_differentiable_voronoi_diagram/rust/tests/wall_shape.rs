@@ -74,6 +74,12 @@ fn wall_shape_terms_drive_global_local_and_feasible_optimization(){
     assert!(g.wall>0. && g.wall<1. && g.jog==0.);
     assert!((l.base_total()-g.total).abs()<1e-4);
     assert!(l.gradients(&tilted).iter().flatten().any(|g|g.abs()>0.01));
+
+    let product = LossWeights { wall_mode: WallLossMode::CosineProduct, ..angle };
+    let raw = floor_plan_loss_with_program(&tilted, &b, &targets, &labels, &product, None, None);
+    let local = LocalGradContext::new(&tilted, &b, &targets, &labels, &product);
+    assert_eq!(raw.wall, g.wall * 0.25, "the requested formula uses the unscaled product");
+    assert!((local.base_breakdown().wall - raw.wall).abs() < 1e-5);
 }
 
 #[test]

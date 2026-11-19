@@ -43,3 +43,17 @@ fn step_weight_keeps_legacy_walls_in_preview_and_optimization(){
     assert_eq!(read(&opt).jog,0.);
     assert!(matches!(opt.weights.wall_mode,WallLossMode::LegacyL1));
 }
+
+#[test]
+fn cosine_wall_experiment_preserves_independent_step_weight() {
+    let mut opt = WasmOpt::from_shape(
+        "shape_e", 24, &[0.5, 0.3, 0.2], 1. / 13., 0., 0., 0., 0., 0., 4971, 0.005,
+    ).unwrap();
+    opt.configure_wall_loss(0.01).unwrap();
+    opt.use_cosine_wall_loss();
+    assert!(matches!(opt.weights.wall_mode, WallLossMode::CosineProduct));
+    assert_eq!(opt.weights.w_wall, 1. / 13.);
+    assert_eq!(opt.weights.w_jog, 0.01);
+    opt.configure_wall_loss(0.).unwrap();
+    assert!(matches!(opt.weights.wall_mode, WallLossMode::CosineProduct));
+}

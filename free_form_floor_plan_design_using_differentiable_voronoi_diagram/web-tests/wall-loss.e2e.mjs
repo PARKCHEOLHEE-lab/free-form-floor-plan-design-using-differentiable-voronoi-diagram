@@ -42,6 +42,36 @@ async function observeWorker(page, input = null) {
     }, input);
 }
 
+test('cosine experiment replaces L1 in the browser without changing Step', {timeout:60000}, async()=>{
+    const {url,proc}=await serve();
+    const browser=await chromium.launch();
+    try{
+        const control=await browser.newPage();
+        const experiment=await browser.newPage();
+        const preview=async(page,address)=>{
+            await observeWorker(page);
+            await page.goto(address);
+            await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+            return page.evaluate(()=>({
+                build:wallProof.builds.at(-1),
+                frame:wallProof.frames.at(-1).frame,
+            }));
+        };
+        const legacy=await preview(control,url);
+        const cosine=await preview(experiment,new URL('?wall=cosine',url).href);
+        assert.deepEqual(cosine.frame.cells,legacy.frame.cells,'compare exactly the same initial plan');
+        assert.deepEqual(cosine.build.w,legacy.build.w,'compare the same engine weights');
+        assert.ok(cosine.frame.wall>0 && cosine.frame.wall<legacy.frame.wall,
+            'the experimental URL must replace the L1 score with the requested angular score');
+        assert.equal(cosine.frame.jog,legacy.frame.jog,'Step is a separate contribution');
+        await experiment.click('#run');
+        await experiment.waitForFunction(()=>wallProof.frames.some(message=>message.mode==='step'));
+        const first=await experiment.evaluate(()=>wallProof.frames.find(message=>message.mode==='step').frame);
+        assert.ok(Math.abs(first.wall-cosine.frame.wall)<1e-5,'the optimizer uses the same experiment as preview');
+        assert.ok(Math.abs(first.jog-cosine.frame.jog)<1e-5);
+    }finally{await browser.close();proc.kill();}
+});
+
 test('wall and step controls reach real WASM without changing the camera',{timeout:180000},async()=>{
     const {url,proc}=await serve();const browser=await chromium.launch();
     try{
