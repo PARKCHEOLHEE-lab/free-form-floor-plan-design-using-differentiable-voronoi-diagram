@@ -5,18 +5,25 @@ const SNAP_ANGLE_SINE = Math.sin(5 * Math.PI / 180);
 const samePoint = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9;
 const segments = points => points.slice(1).map((end, i) => [points[i], end]);
 
+function visitSnapTargets(points, edges, visit) {
+    for (const p of points) visit(p, 'vertex');
+    for (const [a, b] of edges) {
+        visit([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], 'midpoint');
+    }
+}
+
 export function snapBoundaryPoint({ point, screen, project, vertices, reference, shift }) {
     const last = vertices.at(-1);
     const dx = last ? point[0] - last[0] : 0;
     const dy = last ? point[1] - last[1] : 0;
     const fixedAxis = shift && last ? (Math.abs(dx) >= Math.abs(dy) ? 1 : 0) : null;
     const onAxis = p => fixedAxis === null || Math.abs(p[fixedAxis] - last[fixedAxis]) < 1e-9;
-    const screenDistance = p => {
+    const screenDistance = (p, cursor) => {
         const [x, y] = project(p);
-        return Math.hypot(x - screen[0], y - screen[1]);
+        return Math.hypot(x - cursor[0], y - cursor[1]);
     };
 
-    if (vertices.length >= 3 && onAxis(vertices[0]) && screenDistance(vertices[0]) <= SNAP_RADIUS) {
+    if (vertices.length >= 3 && onAxis(vertices[0]) && screenDistance(vertices[0], screen) <= SNAP_RADIUS) {
         return { point: vertices[0], kind: 'close' };
     }
 
@@ -25,28 +32,34 @@ export function snapBoundaryPoint({ point, screen, project, vertices, reference,
     const referenceEdges = segments(ring.length ? [...ring, ring[0]] : []);
     let nearest = SNAP_RADIUS;
     let candidate = null;
-    function consider(p, kind) {
-        const distance = screenDistance(p);
+    function consider(p, kind, cursor = screen, trackingFrom = null) {
+        const distance = screenDistance(p, cursor);
         if (distance < nearest) {
             nearest = distance;
-            candidate = { point: p, kind };
+            candidate = trackingFrom ? { point: p, kind, trackingFrom } : { point: p, kind };
         }
     }
     for (const [points, edges] of [[vertices, draftEdges], [ring, referenceEdges]]) {
-        for (const p of points) {
-            if ((!last || !samePoint(p, last)) && onAxis(p)) consider(p, 'vertex');
-        }
-        for (const [a, b] of edges) {
-            const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-            if (onAxis(mid)) consider(mid, 'midpoint');
-        }
+        visitSnapTargets(points, edges, (p, kind) => {
+            if ((!last || !samePoint(p, last)) && onAxis(p)) consider(p, kind);
+        });
         if (candidate) return candidate;
     }
 
     if (fixedAxis !== null) {
-        const constrained = [...point];
-        constrained[fixedAxis] = last[fixedAxis];
-        return { point: constrained, kind: 'axis' };
+        const lock = p => {
+            const aligned = [...p];
+            aligned[fixedAxis] = last[fixedAxis];
+            return aligned;
+        };
+        const constrained = lock(point);
+        const constrainedScreen = project(constrained);
+        visitSnapTargets(vertices, draftEdges, (from, kind) => {
+            const target = lock(from);
+            if (samePoint(target, from) || samePoint(target, last) || samePoint(target, vertices[0])) return;
+            consider(target, kind, constrainedScreen, from);
+        });
+        return candidate ?? { point: constrained, kind: 'axis' };
     }
 
     const length = Math.hypot(dx, dy);
@@ -71,14 +84,24 @@ export function snapBoundaryPoint({ point, screen, project, vertices, reference,
     return { point, kind: 'free' };
 }
 
+function drawGuide(line, start, end) {
+    line.toggleAttribute('hidden', !start || !end);
+    if (!start || !end) return;
+    line.setAttribute('x1', start[0]);
+    line.setAttribute('y1', start[1]);
+    line.setAttribute('x2', end[0]);
+    line.setAttribute('y2', end[1]);
+}
+
 /** A temporary sketch in the existing camera's plan coordinates. */
 export function createBoundaryEditor(canvas, view, { overlay, reference, isBuilding, onActive, onClose, onError }) {
     const placed = overlay.querySelector('polyline');
-    const guide = overlay.querySelector('line');
+    const guide = overlay.querySelector('[data-edge-guide]');
+    const trackingGuide = overlay.querySelector('[data-tracking-guide]');
     const start = overlay.querySelector('[data-first]');
     const marker = overlay.querySelector('[data-cursor]');
     const label = overlay.querySelector('text');
-    const snapLabels = { close: 'Close', vertex: 'Vertex', midpoint: 'Midpoint', axis: 'X/Y', parallel: 'Parallel', perpendicular: 'Perpendicular' };
+    const snapLabels = { close: 'Close', vertex: 'Endpoint', midpoint: 'Midpoint', axis: 'X/Y', parallel: 'Parallel', perpendicular: 'Perpendicular' };
     let active = false;
     let vertices = [];
     let pointer = null;
@@ -103,21 +126,17 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
         overlay.dataset.snap = result?.kind ?? 'free';
         marker.toggleAttribute('hidden', !result);
         label.toggleAttribute('hidden', !snapLabels[result?.kind]);
-        guide.toggleAttribute('hidden', !result || !points.length);
-        if (result) {
-            const [x, y] = view.screenPoint(result.point);
+        const end = result ? view.screenPoint(result.point) : null;
+        const trackingStart = result?.trackingFrom && view.screenPoint(result.trackingFrom);
+        drawGuide(guide, points.at(-1), end);
+        drawGuide(trackingGuide, trackingStart, end);
+        if (end) {
+            const [x, y] = end;
             marker.setAttribute('cx', x);
             marker.setAttribute('cy', y);
             label.textContent = snapLabels[result.kind] ?? '';
             label.setAttribute('x', x + 12);
             label.setAttribute('y', y - 8);
-            const last = points.at(-1);
-            if (last) {
-                guide.setAttribute('x1', last[0]);
-                guide.setAttribute('y1', last[1]);
-                guide.setAttribute('x2', x);
-                guide.setAttribute('y2', y);
-            }
         }
     }
 

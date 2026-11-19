@@ -244,6 +244,7 @@
   #boundary-sketch [hidden], #boundary-sketch[hidden] { display:none; }
   #boundary-sketch polyline, #boundary-sketch line { fill:none; stroke:currentColor; stroke-width:2; }
   #boundary-sketch line { stroke-dasharray:5 4; }
+  #boundary-sketch [data-tracking-guide] { stroke-width:1; }
   #boundary-sketch circle { fill:var(--light); stroke:currentColor; stroke-width:2; }
   #boundary-sketch [data-first] { fill:currentColor; }
   #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
@@ -278,7 +279,7 @@
   <div class="stage">
     <div class="canvas-card">
       <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div>
-        <svg id="boundary-sketch" aria-hidden="true" hidden><polyline></polyline><line hidden></line><circle data-first r="4" hidden></circle><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
+        <svg id="boundary-sketch" aria-hidden="true" hidden><polyline></polyline><line data-edge-guide hidden></line><line data-tracking-guide hidden></line><circle data-first r="4" hidden></circle><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
       </div>
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->

@@ -121,6 +121,46 @@ test('boundary sketch uses a temporary overlay, snaps with Shift, rejects crossi
     });
 });
 
+test('Shift tracks a draft endpoint height and a midpoint with a visible guide', { timeout: 30000 }, async () => {
+    await withPlan(async page => {
+        await page.click('button[data-open=boundary]');
+        await page.click('.gizmo [data-axis="+z"]');
+        await page.getByRole('button',{ name:'Draw boundary', exact:true }).click();
+        for (const point of [[485,210],[485,555],[630,555],[630,730],[840,730]]) await page.mouse.click(...point);
+
+        const sketch = page.locator('#boundary-sketch');
+        const guide = sketch.locator('[data-tracking-guide]');
+        const cursor = sketch.locator('[data-cursor]');
+        const cursorPoint = async () => [+(await cursor.getAttribute('cx')), +(await cursor.getAttribute('cy'))];
+        const near = (a,b) => assert.ok(Math.abs(a-b)<0.01, a + ' should equal ' + b);
+        await page.keyboard.down('Shift');
+        await page.mouse.move(841,548);
+        assert.equal(await sketch.getAttribute('data-snap'),'vertex','the shoulder height takes precedence over plain X/Y');
+        assert.equal(await sketch.locator('text').textContent(),'Endpoint');
+        // A horizontal SVG line has a zero-height DOM box even when its stroke is drawn.
+        assert.notEqual(await guide.evaluate(el => getComputedStyle(el).display),'none');
+        const [x,y] = await cursorPoint();
+        near(x,840);
+        near(y,555);
+        near(+(await guide.getAttribute('y1')),y);
+        near(+(await guide.getAttribute('y2')),y);
+
+        await page.mouse.move(841,639);
+        assert.equal(await sketch.getAttribute('data-snap'),'midpoint');
+        assert.equal(await sketch.locator('text').textContent(),'Midpoint');
+        assert.notEqual(await guide.evaluate(el => getComputedStyle(el).display),'none');
+        const midpoint = await cursorPoint();
+        near(midpoint[0],840);
+        near(midpoint[1],642.5);
+        if (process.env.BOUNDARY_SCREEN) await page.screenshot({path:process.env.BOUNDARY_SCREEN});
+        await page.mouse.click(841,639);
+        const placed = (await sketch.locator('polyline').getAttribute('points')).split(' ').at(-1).split(',').map(Number);
+        assert.deepEqual(placed,midpoint,'clicking places the exact previewed tracking intersection');
+        await page.keyboard.up('Shift');
+        assert.equal(await guide.getAttribute('hidden'),'');
+    }, '?wall=mixed', 'tracking');
+});
+
 test('a drawn boundary runs with rooms and retains one custom design across replacements', { timeout: 90000 }, async () => {
     await withPlan(async page => {
         const ready = name => page.waitForFunction(name => document.querySelector('#status').textContent.includes(name + ' · ready'), name);

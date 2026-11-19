@@ -54,6 +54,21 @@ test('near-normal cursor snaps exactly perpendicular to an oblique draft edge', 
     assert.equal(snap([3.04, 1.03], false, [[2, 2]], [[6, 6], [7, 7]]).kind, 'perpendicular');
 });
 
+test('Shift tracks draft endpoints and midpoints along either locked axis', () => {
+    const project = ([x,y]) => [100*x + 30*y, -20*x + 100*y];
+    const vertices = [[0,0],[0,2.2],[1,2],[1,3],[3,3]];
+    const snap = (point, shift = true, points = vertices) =>
+        snapBoundaryPoint({point, screen:project(point), project, vertices:points, reference:[], shift});
+
+    assert.deepEqual(snap([3.5,1.96]), {point:[3,2],kind:'vertex',trackingFrom:[1,2]});
+    assert.deepEqual(snap([3.01,2.48]), {point:[3,2.5],kind:'midpoint',trackingFrom:[1,2.5]});
+    assert.deepEqual(snap([0.05,3.16]), {point:[0,3],kind:'vertex',trackingFrom:[0,0]});
+    assert.deepEqual(snap([3.01,1.86]), {point:[3,1.86],kind:'axis'});
+    assert.equal(snap([3.01,1.96],false).trackingFrom,undefined);
+    assert.deepEqual(snap([0.02,0.03],true,[[0,0],[1,0],[1,1],[0,1]]), {point:[0,0],kind:'close'});
+    assert.deepEqual(snap([0.2,0.04],true,[[0,0],[2,0],[2,3],[0,3]]), {point:[0,0.04],kind:'axis'}, 'tracking cannot accidentally close the sketch');
+});
+
 test('a simple boundary may be concave and include straight runs but cannot touch itself', () => {
     const concave = [[2,1],[4,1],[6,1],[6,3],[4,3],[4,5],[2,5]];
     assert.equal(isSimpleBoundary(concave),true);
