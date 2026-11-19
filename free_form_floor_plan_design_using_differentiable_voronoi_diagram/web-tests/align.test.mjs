@@ -39,3 +39,24 @@ for (const name of ["shape_a", "shape_b", "shape_c", "shape_d", "shape_e"]) {
         assert.ok(after >= py.after - 0.01, `${after} >= postprocess.py ${py.after} - 0.01`);
     });
 }
+
+test("point merging and wall snapping use independent tolerances", () => {
+    const boundary = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    const polygon = [[0, 0], [0.6, 0.012], [0.6, 0.6], [0.014, 0.61], [0, 0.6]];
+    const makeGraph = () => fromCells([{ room: 0, ring: polygon }], boundary, {
+        roomCount: 1,
+        simplifyTol: 0,
+    });
+
+    const merge = makeGraph();
+    alignPlan(merge, boundary, { mergeTol: 0.02, snapTol: 0.005 });
+    assert.equal(merge.corners.size, 4, "the close pair merges at the higher point tolerance");
+    assert.equal(merge.corners.get(1).y - merge.corners.get(0).y, 0.012,
+        "the bottom wall stays tilted at the lower snap tolerance");
+
+    const snap = makeGraph();
+    alignPlan(snap, boundary, { mergeTol: 0.005, snapTol: 0.02 });
+    assert.equal(snap.corners.size, 5, "the lower point tolerance keeps both corners");
+    assert.equal(snap.corners.get(1).y, snap.corners.get(0).y,
+        "the bottom wall straightens at the higher snap tolerance");
+});

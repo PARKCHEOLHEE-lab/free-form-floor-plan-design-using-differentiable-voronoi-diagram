@@ -353,7 +353,8 @@
           <button data-walls="raw" class="active">Raw</button>
           <button data-walls="aligned">Aligned</button>
         </div>
-        <div class="row"><label for="align_tol">Alignment tolerance</label><input id="align_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="align_tol_v">0.020</span></div>
+        <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="merge_tol_v">0.020</span></div>
+        <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="align_tol_v">0.020</span></div>
         <div class="row"><label>aligned</label><span class="readout" id="align_v"></span></div>
         <div class="row"><label for="show-doors">Doors</label><input type="checkbox" id="show-doors" checked></div>
         <div class="row"><label for="show-bubbles">Room bubbles</label><input type="checkbox" id="show-bubbles" checked></div>
@@ -400,7 +401,8 @@ import { fromCells, roomRings } from './plan/graph.js';
 import { alignPlan, alignedShare } from './plan/align.js';
 import { evaluatePlan } from './plan/openings.js';
 const SIMPLIFY_TOL = 0.004;  // the kink tolerance web/src/lib.rs uses for room outlines
-let alignTolerance = +$('align_tol').value;
+const pointMergeInput = $('merge_tol');
+const wallSnapInput = $('align_tol');
 let wallsMode = 'raw';
 let boundaryRing = null;     // sent by the worker once the optimizer is built
 // Align one frame; returns room rings and the aligned-wall share before and after.
@@ -409,7 +411,10 @@ function alignFrame(f) {
   const g = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: SIMPLIFY_TOL });
   const raw = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: 0 });
   const before = alignedShare(g, boundaryRing);
-  alignPlan(g, boundaryRing, { tol: alignTolerance });
+  alignPlan(g, boundaryRing, {
+    mergeTol: pointMergeInput.valueAsNumber,
+    snapTol: wallSnapInput.valueAsNumber,
+  });
   return { raw, aligned:g, rooms: Array.from({ length: n }, (_, r) => roomRings(g, r)), before, after: alignedShare(g, boundaryRing) };
 }
 $('walls').addEventListener('click', e => {
@@ -493,11 +498,11 @@ $('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubble
 $('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
 
 // ---------- inputs ----------
-const SLIDERS = ['sites','wall','align_tol','w_wall','w_jog','w_area','w_lloyd','w_topo','iters','lr','seed'];
+const SLIDERS = ['sites','wall','merge_tol','align_tol','w_wall','w_jog','w_area','w_lloyd','w_topo','iters','lr','seed'];
 const IMPORTANCE_IDS = new Set(['w_wall','w_jog','w_area','w_lloyd','w_topo']);
 // Shared slider -> readout formatter (used by the live listeners and applyPreset).
 function fmtVal(id, v) {
-  return (id === 'lr' || id === 'wall' || id === 'align_tol') ? (+v).toFixed(3)
+  return (id === 'lr' || id === 'wall' || id.endsWith('_tol')) ? (+v).toFixed(3)
        : IMPORTANCE_IDS.has(id) ? (+v).toFixed(2)
        : (+v % 1 ? (+v).toFixed(1) : String(+v));
 }
@@ -512,10 +517,11 @@ $('wall').addEventListener('input', () => {
   wallWidth = +$('wall').value;
   if (lastFrame) drawFrame(lastFrame);
 });
-$('align_tol').addEventListener('input', () => {
-  alignTolerance = +$('align_tol').value;
-  if (lastFrame) drawFrame(lastFrame);
-});
+for (const input of [pointMergeInput, wallSnapInput]) {
+  input.addEventListener('input', () => {
+    if (lastFrame) drawFrame(lastFrame);
+  });
+}
 
 // sites / rooms change the optimizer geometry (site count, room count), so rebuild
 // and preview live — no need to press Reset. Debounced so a drag rebuilds once on

@@ -34,7 +34,7 @@ test("preset E run to the end: Aligned walls show a higher aligned-wall share th
     }
 });
 
-test("alignment tolerance redraws the current plan without restarting it", { timeout: 30_000 }, async () => {
+test("point and wall sliders redraw independently without restarting the plan", { timeout: 30_000 }, async () => {
     const { url, proc } = await serve();
     const browser = await chromium.launch();
     try {
@@ -51,19 +51,39 @@ test("alignment tolerance redraws the current plan without restarting it", { tim
         await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
         await page.locator("button[data-open=display]").click();
         await page.locator("#walls button[data-walls=aligned]").click();
-        const control = page.getByRole("slider", { name: "Alignment tolerance" });
-        assert.equal(await control.count(), 1, "Display lets users change the alignment tolerance");
-        assert.equal(await control.inputValue(), "0.02", "keep the original tolerance on load");
+        const merge = page.getByRole("slider", { name: "Point merge" });
+        const snap = page.getByRole("slider", { name: "Wall snap" });
+        assert.equal(await merge.count(), 1, "Display has a point merge control");
+        assert.equal(await snap.count(), 1, "Display has a wall snap control");
+        assert.equal(await merge.inputValue(), "0.02");
+        assert.equal(await snap.inputValue(), "0.02");
 
         const share = page.locator("#align_v");
         const originalShare = await share.textContent();
         const builds = await page.evaluate(() => window.buildCount);
-        await control.press("End");
-        assert.equal(await control.inputValue(), "1");
+        const pixels = () => page.locator("#plan").evaluate(canvas => canvas.toDataURL());
+        const setTolerance = (input, value) => input.evaluate((el, current) => {
+            el.value = current;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+        }, value);
+        const originalPixels = await pixels();
+        await setTolerance(merge, "0.04");
+        assert.equal(await snap.inputValue(), "0.02");
+        assert.notEqual(await pixels(), originalPixels, "raising the point tolerance redraws the wall geometry");
+        // On E's first frame, raising only the point tolerance keeps the rounded share.
+        assert.equal(await share.textContent(), originalShare);
+        await merge.press("End");
+        assert.equal(await page.locator("#merge_tol_v").textContent(), "1.000");
+        await merge.press("Home");
+
+        await setTolerance(snap, "0.04");
+        assert.equal(await merge.inputValue(), "0.02");
+        // Independently applying 0.02 merge and 0.04 snap on the same frame gives 65%.
+        assert.match(await share.textContent(), /→ 65%$/);
+        await snap.press("End");
         assert.equal(await page.locator("#align_tol_v").textContent(), "1.000");
-        assert.notEqual(await share.textContent(), originalShare, "the raised tolerance changes the aligned geometry");
-        await control.press("Home");
-        assert.equal(await share.textContent(), originalShare, "the lower tolerance restores the original alignment");
+        await snap.press("Home");
+        assert.equal(await share.textContent(), originalShare);
         assert.equal(await page.evaluate(() => window.buildCount), builds, "the display changes without a new optimization");
     } finally {
         await browser.close();

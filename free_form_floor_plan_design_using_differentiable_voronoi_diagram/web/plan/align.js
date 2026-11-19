@@ -39,16 +39,16 @@ export function alignedShare(g, boundary) {
 }
 
 /**
- * Clean the walls in place, in two passes with one threshold `tol` (GSDiff uses 1% of its canvas):
- * 1. merge: corners closer than `tol` (Chebyshev) become one corner; a group holding two
+ * Clean the walls in place. The optional `tol` sets a shared default for both passes.
+ * 1. merge: corners closer than `mergeTol` (Chebyshev) become one corner; a group holding two
  *    boundary corners is left alone, so the boundary never moves;
  * 2. align: in each edge's local frame (the nearest boundary segment), chains of edges whose two
- *    ends differ by at most `tol` along one axis are snapped to one shared coordinate, so walls
+ *    ends differ by at most `snapTol` along one axis are snapped to one shared coordinate, so walls
  *    beside a diagonal boundary straighten along the diagonal instead of along x and y.
  */
-export function alignPlan(g, boundary, { tol }) {
-    mergeCorners(g, tol);
-    snapChains(g, boundary, tol);
+export function alignPlan(g, boundary, { tol, mergeTol = tol, snapTol = tol }) {
+    mergeCorners(g, mergeTol);
+    snapChains(g, boundary, snapTol);
 }
 
 function mergeCorners(g, tol) {
