@@ -1,7 +1,7 @@
 import { isSimpleBoundary, openRing } from './geom.js';
 
 const SNAP_RADIUS = 10; // CSS pixels, independent of zoom.
-const PARALLEL_ANGLE = Math.sin(5 * Math.PI / 180);
+const SNAP_ANGLE_SINE = Math.sin(5 * Math.PI / 180);
 const samePoint = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9;
 const segments = points => points.slice(1).map((end, i) => [points[i], end]);
 
@@ -21,7 +21,8 @@ export function snapBoundaryPoint({ point, screen, project, vertices, reference,
     }
 
     const ring = openRing(reference);
-    const edges = [...segments(vertices), ...segments(ring.length ? [...ring, ring[0]] : [])];
+    const draftEdges = segments(vertices);
+    const referenceEdges = segments(ring.length ? [...ring, ring[0]] : []);
     let nearest = SNAP_RADIUS;
     let candidate = null;
     function consider(p, kind) {
@@ -31,14 +32,16 @@ export function snapBoundaryPoint({ point, screen, project, vertices, reference,
             candidate = { point: p, kind };
         }
     }
-    for (const p of [...vertices, ...ring]) {
-        if ((!last || !samePoint(p, last)) && onAxis(p)) consider(p, 'vertex');
+    for (const [points, edges] of [[vertices, draftEdges], [ring, referenceEdges]]) {
+        for (const p of points) {
+            if ((!last || !samePoint(p, last)) && onAxis(p)) consider(p, 'vertex');
+        }
+        for (const [a, b] of edges) {
+            const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+            if (onAxis(mid)) consider(mid, 'midpoint');
+        }
+        if (candidate) return candidate;
     }
-    for (const [a, b] of edges) {
-        const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-        if (onAxis(mid)) consider(mid, 'midpoint');
-    }
-    if (candidate) return candidate;
 
     if (fixedAxis !== null) {
         const constrained = [...point];
@@ -48,15 +51,24 @@ export function snapBoundaryPoint({ point, screen, project, vertices, reference,
 
     const length = Math.hypot(dx, dy);
     if (last && length > 0) {
-        for (const [a, b] of edges) {
-            const ex = b[0] - a[0], ey = b[1] - a[1];
-            const edgeLength = Math.hypot(ex, ey);
-            if (edgeLength === 0 || Math.abs(dx * ey - dy * ex) > length * edgeLength * PARALLEL_ANGLE) continue;
-            const along = (dx * ex + dy * ey) / (edgeLength * edgeLength);
-            consider([last[0] + along * ex, last[1] + along * ey], 'parallel');
+        for (const edges of [draftEdges, referenceEdges]) {
+            for (const [a, b] of edges) {
+                const ex = b[0] - a[0], ey = b[1] - a[1];
+                const edgeLength = Math.hypot(ex, ey);
+                if (edgeLength === 0) continue;
+                const limit = length * edgeLength * SNAP_ANGLE_SINE;
+                const parallel = Math.abs(dx * ey - dy * ex) <= limit;
+                const perpendicular = Math.abs(dx * ex + dy * ey) <= limit;
+                if (!parallel && !perpendicular) continue;
+
+                const [ux, uy] = parallel ? [ex, ey] : [-ey, ex];
+                const along = (dx * ux + dy * uy) / (edgeLength * edgeLength);
+                consider([last[0] + along * ux, last[1] + along * uy], parallel ? 'parallel' : 'perpendicular');
+            }
+            if (candidate) return candidate;
         }
     }
-    return candidate ?? { point, kind: 'free' };
+    return { point, kind: 'free' };
 }
 
 /** A temporary sketch in the existing camera's plan coordinates. */
@@ -66,7 +78,7 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
     const start = overlay.querySelector('[data-first]');
     const marker = overlay.querySelector('[data-cursor]');
     const label = overlay.querySelector('text');
-    const snapLabels = { close: 'Close', vertex: 'Vertex', midpoint: 'Midpoint', axis: 'X/Y', parallel: 'Parallel' };
+    const snapLabels = { close: 'Close', vertex: 'Vertex', midpoint: 'Midpoint', axis: 'X/Y', parallel: 'Parallel', perpendicular: 'Perpendicular' };
     let active = false;
     let vertices = [];
     let pointer = null;
