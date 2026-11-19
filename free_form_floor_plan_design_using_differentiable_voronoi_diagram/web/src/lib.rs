@@ -42,6 +42,8 @@ struct Frame {
     /// Weighted contributions of the selected wall model and the room program.
     /// The demo's bb/cell weights remain zero.
     wall: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cosine: Option<f32>,
     jog: f32,
     area: f32,
     lloyd: f32,
@@ -143,6 +145,11 @@ impl WasmOpt {
         self.weights.wall_mode = loss::WallLossMode::CosineProduct;
     }
 
+    /// Set the raw cosine contribution independently of the existing Wall term.
+    pub fn set_cosine_weight(&mut self, weight: f64) -> Result<(), JsValue> {
+        self.configure_cosine_weight(weight).map_err(|message| JsValue::from_str(&message))
+    }
+
     /// Set the step weight without changing the wall model.
     pub fn set_wall_loss(&mut self, jog_weight:f64)->Result<(),JsValue>{
         self.configure_wall_loss(jog_weight).map_err(|e|JsValue::from_str(&e))
@@ -183,6 +190,14 @@ impl WasmOpt {
     fn configure_wall_loss(&mut self, jog_weight:f64)->Result<(),String>{
         if !jog_weight.is_finite() || jog_weight<0. {return Err("Step weight must be finite and nonnegative.".into());}
         self.weights.w_jog=jog_weight;
+        Ok(())
+    }
+
+    fn configure_cosine_weight(&mut self, weight: f64) -> Result<(), String> {
+        if !weight.is_finite() || weight < 0. {
+            return Err("Cos weight must be finite and nonnegative.".into());
+        }
+        self.weights.w_cosine = weight;
         Ok(())
     }
 
@@ -308,6 +323,7 @@ impl WasmOpt {
             iteration: self.iteration,
             loss: bd.total,
             wall: bd.wall,
+            cosine: (self.weights.w_cosine > 0.).then_some(bd.cosine),
             jog: bd.jog,
             area: bd.area,
             lloyd: bd.lloyd,

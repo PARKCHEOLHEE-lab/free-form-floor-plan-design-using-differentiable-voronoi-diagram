@@ -72,6 +72,53 @@ test('cosine experiment replaces L1 in the browser without changing Step', {time
     }finally{await browser.close();proc.kill();}
 });
 
+test('mixed wall sliders zero L1 and Cos independently', {timeout:60000}, async()=>{
+    const {url,proc}=await serve();
+    const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage();
+        await observeWorker(page);
+        await page.goto(new URL('?wall=mixed',url).href);
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('button[data-open=weights]');
+        const l1=page.getByRole('slider',{name:'L1',exact:true});
+        const cos=page.getByRole('slider',{name:'Cos',exact:true});
+        assert.equal(await l1.count(),1,'mixed experiment exposes a separate L1 slider');
+        assert.equal(await cos.count(),1,'mixed experiment exposes a separate Cos slider');
+        assert.equal(Number(await l1.inputValue()),0.5);
+        assert.equal(Number(await cos.inputValue()),1);
+        assert.equal(await page.locator('#sp_cosine').count(),1,'the loss graph includes Cos');
+        const frame=()=>page.evaluate(()=>wallProof.frames.at(-1).frame);
+        const preview=async()=>{
+            const before=await page.evaluate(()=>wallProof.builds.at(-1).gen);
+            await page.click('#reset');
+            await page.waitForFunction(gen=>wallProof.frames.at(-1)?.gen>gen&&document.querySelector('#status').textContent.includes('ready'),before);
+            return frame();
+        };
+        const mixed=await frame();
+        assert.ok(mixed.wall>0 && mixed.cosine>0 && mixed.jog>0);
+        await cos.press('Home');
+        const onlyL1=await preview();
+        assert.equal(onlyL1.cosine??0,0);
+        assert.equal(onlyL1.wall,mixed.wall);
+        await cos.press('End');
+        await l1.press('Home');
+        const onlyCos=await preview();
+        assert.equal(onlyCos.wall,0);
+        assert.equal(onlyCos.cosine,mixed.cosine);
+        for(const pure of [onlyL1,onlyCos]){
+            assert.deepEqual(pure.cells,mixed.cells);
+            assert.equal(pure.jog,mixed.jog);
+        }
+        await l1.evaluate(input=>{input.value='0.5';input.dispatchEvent(new Event('input',{bubbles:true}));});
+        await page.click('#run');
+        await page.waitForFunction(()=>wallProof.frames.some(message=>message.mode==='step'));
+        const first=await page.evaluate(()=>wallProof.frames.find(message=>message.mode==='step').frame);
+        assert.ok(Math.abs(first.wall-mixed.wall)<1e-5);
+        assert.ok(Math.abs(first.cosine-mixed.cosine)<1e-5);
+    }finally{await browser.close();proc.kill();}
+});
+
 test('wall and step controls reach real WASM without changing the camera',{timeout:180000},async()=>{
     const {url,proc}=await serve();const browser=await chromium.launch();
     try{

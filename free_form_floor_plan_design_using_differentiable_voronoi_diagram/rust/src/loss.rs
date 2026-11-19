@@ -294,6 +294,7 @@ pub struct LossWeights {
     pub wall_mode: WallLossMode,
     pub w_jog: f64,
     pub w_wall: f64,
+    pub w_cosine: f64,
     pub w_area: f64,
     pub w_lloyd: f64,
     pub w_topo: f64,
@@ -303,7 +304,9 @@ pub struct LossWeights {
 
 impl LossWeights {
     pub(crate) fn shared_wall_shape(&self) -> (bool, bool) {
-        (self.w_wall > 0. && matches!(self.wall_mode, WallLossMode::CosineSquared | WallLossMode::CosineProduct), self.w_jog > 0.)
+        let direction = self.w_cosine > 0.
+            || (self.w_wall > 0. && matches!(self.wall_mode, WallLossMode::CosineSquared | WallLossMode::CosineProduct));
+        (direction, self.w_jog > 0.)
     }
 }
 
@@ -312,6 +315,7 @@ pub struct LossBreakdown {
     pub jog: f32,
     pub total: f32,
     pub wall: f32,
+    pub cosine: f32,
     pub area: f32,
     pub lloyd: f32,
     pub topo: f32,
@@ -329,7 +333,7 @@ pub(crate) fn compute_wall_terms(
     shared: Option<&crate::walls::SharedWalls>,
     wall_shape: Option<&crate::wall_shape::WallShapeCache<'_>>,
     legacy_wall: impl FnOnce() -> f32,
-) -> (f32, f32, f32) {
+) -> (f32, f32, f32, f32) {
     let (score_direction, score_jog) = w.shared_wall_shape();
     let generated = if shared.is_none()
         && (score_direction || score_jog || program.is_some_and(|p| p.has_connections()))
@@ -353,8 +357,9 @@ pub(crate) fn compute_wall_terms(
         WallLossMode::CosineSquared=>((4. * direction) as f32)*(w.w_wall as f32),
         WallLossMode::CosineProduct=>(direction as f32)*(w.w_wall as f32),
     }};
+    let cosine = if w.w_cosine > 0. { (direction as f32) * (w.w_cosine as f32) } else { 0. };
     let connection=if let (Some(p),Some(edges))=(program,shared){p.connection_loss_cells(groups,edges)}else{0.};
-    (wall,if w.w_jog>0. {(jog as f32)*(w.w_jog as f32)}else{0.},connection)
+    (wall, cosine, if w.w_jog>0. {(jog as f32)*(w.w_jog as f32)}else{0.},connection)
 }
 
 /// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
@@ -384,7 +389,7 @@ pub fn floor_plan_loss_with_program(
     };
 
     let legacy_wall = || compute_wall_local_loss(&unions, boundary, w.w_wall);
-    let (wall,jog,connection) = compute_wall_terms(&groups,boundary,w,program,None,None,legacy_wall);
+    let (wall,cosine,jog,connection) = compute_wall_terms(&groups,boundary,w,program,None,None,legacy_wall);
     let area = if w.w_area > 0.0 {
         compute_area_loss(&geom.cells_sorted, target_areas, room_indices, w.w_area)
     } else {
@@ -411,11 +416,13 @@ pub fn floor_plan_loss_with_program(
         0.0
     };
     // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
-    let total = wall + area + lloyd + topo + bb + cell + connection + jog;
+    let walls = if w.w_cosine > 0. { wall + cosine } else { wall };
+    let total = walls + area + lloyd + topo + bb + cell + connection + jog;
     LossBreakdown {
         jog,
         total,
         wall,
+        cosine,
         area,
         lloyd,
         topo,

@@ -6,7 +6,7 @@
 //
 // Protocol
 //   main -> worker : {cmd:'build', gen, mode, sites, ratios, w[6], seed, lr, iters,
-//                    cosineWall?: boolean, jogWeight?: number,
+//                    cosineWall?: boolean, cosineWeight?: number, jogWeight?: number,
 //                    program?: {rooms:[{center:[x,y],radius}],links:[[a,b]],doorWidth}, then:'preview'|'start'}
 //                    {cmd:'dispose'}
 //   worker -> main : {type:'ready'} | {type:'built', gen, boundary} | {type:'error', gen?, msg}
@@ -65,6 +65,7 @@ function build(msg) {
   if (!next) throw new Error('Unknown boundary.');
   try {
     if (msg.cosineWall === true) next.use_cosine_wall_loss();
+    if (msg.cosineWeight !== undefined) next.set_cosine_weight(msg.cosineWeight);
     next.set_wall_loss(msg.jogWeight ?? 0);
     if (program) next.set_program(program.circles,program.links,program.doorWidth);
     else next.fit_preset_areas();

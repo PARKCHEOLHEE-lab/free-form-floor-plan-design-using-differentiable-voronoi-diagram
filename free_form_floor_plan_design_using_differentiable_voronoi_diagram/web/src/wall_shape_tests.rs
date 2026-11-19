@@ -57,3 +57,23 @@ fn cosine_wall_experiment_preserves_independent_step_weight() {
     opt.configure_wall_loss(0.).unwrap();
     assert!(matches!(opt.weights.wall_mode, WallLossMode::CosineProduct));
 }
+
+#[test]
+fn mixed_cosine_weight_keeps_the_l1_and_step_weights() {
+    let mut opt = WasmOpt::from_shape(
+        "shape_e", 24, &[0.5, 0.3, 0.2], 0.5 / 13., 0., 0., 0., 0., 0., 4971, 0.005,
+    ).unwrap();
+    opt.configure_wall_loss(0.01).unwrap();
+    opt.set_cosine_weight(1.).unwrap();
+    for bad in [-1., f64::NAN, f64::INFINITY] {
+        assert!(opt.configure_cosine_weight(bad).is_err());
+    }
+    assert_eq!(opt.weights.w_cosine, 1.);
+    assert_eq!(opt.weights.w_wall, 0.5 / 13.);
+    assert_eq!(opt.weights.w_jog, 0.01);
+    assert!(matches!(opt.weights.wall_mode, WallLossMode::LegacyL1));
+    let frame = opt.advance();
+    assert!(frame.wall > 0. && frame.cosine.unwrap() > 0.);
+    opt.set_cosine_weight(0.).unwrap();
+    assert!(opt.advance().cosine.is_none());
+}

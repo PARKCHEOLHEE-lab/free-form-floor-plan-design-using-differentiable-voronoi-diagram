@@ -12,6 +12,33 @@ fn fixture()->(Polygon<f64>,Vec<[f32;2]>,Vec<usize>,RoomProgram){
     program.set_connections(&[[0,1]],0.1).unwrap();
     (boundary,sites,labels,program)
 }
+
+#[test]
+fn l1_and_cosine_have_independent_weights() {
+    let (boundary, mut sites, labels, _) = fixture();
+    sites[5][0] += 0.015;
+    let targets = [2., 2.];
+    let evaluate = |l1, cosine| {
+        let weights = LossWeights { w_wall: l1, w_cosine: cosine, w_jog: 0.01, ..Default::default() };
+        let full = floor_plan_loss_with_program(&sites, &boundary, &targets, &labels, &weights, None, None);
+        let local = LocalGradContext::new(&sites, &boundary, &targets, &labels, &weights).base_breakdown();
+        assert!((local.wall - full.wall).abs() < 1e-5);
+        assert_eq!(local.cosine, full.cosine);
+        assert_eq!(local.jog, full.jog);
+        full
+    };
+    let l1 = evaluate(0.5 / 13., 0.);
+    let cosine = evaluate(0., 1.);
+    let mixed = evaluate(0.5 / 13., 1.);
+    assert!(l1.wall > 0. && cosine.cosine > 0., "both costs must contribute independently");
+    assert_eq!(l1.cosine, 0.);
+    assert_eq!(cosine.wall, 0.);
+    assert_eq!(mixed.wall, l1.wall);
+    assert_eq!(mixed.cosine, cosine.cosine);
+    assert_eq!(mixed.jog, l1.jog);
+    assert_eq!(mixed.jog, cosine.jog);
+    assert_eq!(mixed.total, mixed.wall + mixed.cosine + mixed.jog);
+}
 fn rooms(sites:&[[f32;2]],labels:&[usize],boundary:&Polygon<f64>)->Vec<MultiPolygon<f64>>{
     let cells=voronoi::render_cells(sites,boundary);
     (0..2).map(|r|voronoi_floorplan::loss::union_group(&cells.iter().filter(|(i,_)|labels[*i]==r).map(|(_,p)|p).collect::<Vec<_>>())).collect()

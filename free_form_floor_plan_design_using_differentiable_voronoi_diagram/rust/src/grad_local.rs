@@ -46,12 +46,13 @@ fn breakdown_from(
     wall_shape: Option<&WallShapeCache<'_>>,
     legacy_wall: impl FnOnce() -> f32,
 ) -> LossBreakdown {
-    let (wall,jog,connection) = compute_wall_terms(groups,boundary,w,program,shared,wall_shape,legacy_wall);
+    let (wall,cosine,jog,connection) = compute_wall_terms(groups,boundary,w,program,shared,wall_shape,legacy_wall);
     let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
     let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
-    let total = wall + area + lloyd + topo + bb + cell + connection + jog;
-    LossBreakdown { jog, total, wall, area, lloyd, topo, bb, cell, connection }
+    let walls = if w.w_cosine > 0. { wall + cosine } else { wall };
+    let total = walls + area + lloyd + topo + bb + cell + connection + jog;
+    LossBreakdown { jog, total, wall, cosine, area, lloyd, topo, bb, cell, connection }
 }
 
 /// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
