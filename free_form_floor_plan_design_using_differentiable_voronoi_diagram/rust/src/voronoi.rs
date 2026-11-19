@@ -17,7 +17,7 @@
 //! iteration order and, at MultiPolygon splits, the piece iteration order
 //! (given as piece areas). It is injected by the checkpoint tests only.
 
-use geo::{Contains, LineString, MultiPolygon, Point, Polygon};
+use geo::{Contains, Coord, LineString, MultiPolygon, Point, Polygon};
 use geo_booleanop::boolean::BooleanOp;
 use voronoice::{BoundingBox, Point as VPoint, VoronoiBuilder};
 
@@ -90,27 +90,77 @@ fn build_voronoi(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> voronoice::
 
 /// Voronoi cell polygon per site (site order).
 pub fn raw_cells_per_site(sites_f64: &[[f64; 2]], boundary: &Polygon<f64>) -> Vec<Polygon<f64>> {
-    raw_cells_per_site_using(sites_f64,boundary,None)
+    let mut cells = Vec::with_capacity(sites_f64.len());
+    visit_raw_rings(sites_f64, boundary, None, |_, ring| {
+        cells.push(raw_cell_polygon(ring));
+    });
+    cells
 }
 
-pub(crate) fn raw_cells_per_site_using(sites_f64:&[[f64;2]],boundary:&Polygon<f64>,base:Option<&VertexWelder>)->Vec<Polygon<f64>>{
-    let diagram=build_voronoi(sites_f64,boundary);
-    let mut welder=VertexWelder::with_capacity(diagram.vertices().len());
-    let mut coordinates=vec![None;diagram.vertices().len()];
+#[cfg(test)]
+thread_local! {
+    pub(crate) static RAW_POLYGONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn affected_raw_cells(
+    sites: &[[f64; 2]],
+    boundary: &Polygon<f64>,
+    base_cells: &[Polygon<f64>],
+    base_vertices: &VertexWelder,
+    moved: usize,
+) -> Vec<(usize, Polygon<f64>)> {
+    let mut affected = Vec::new();
+    visit_raw_rings(sites, boundary, Some(base_vertices), |site, ring| {
+        let base = &base_cells[site].exterior().0;
+        let open_base = &base[..base.len().saturating_sub(1)];
+        if site == moved || ring != open_base {
+            affected.push((site, raw_cell_polygon(ring)));
+        }
+    });
+    affected
+}
+
+fn visit_raw_rings(
+    sites: &[[f64; 2]],
+    boundary: &Polygon<f64>,
+    base: Option<&VertexWelder>,
+    mut visit: impl FnMut(usize, &[Coord<f64>]),
+) {
+    let diagram = build_voronoi(sites, boundary);
+    let mut welder = VertexWelder::with_capacity(diagram.vertices().len());
+    let mut coordinates = vec![None; diagram.vertices().len()];
+    let mut ring = Vec::new();
     // Visit sites in the original order, but weld each shared global vertex
     // only once before clipping. Cocircular twin IDs still pass through weld.
-    diagram.iter_cells().map(|cell|{
-        let mut ring=Vec::new();
-        for &id in cell.triangles(){
-            let point=*coordinates[id].get_or_insert_with(||{
-                let p=&diagram.vertices()[id];welder.point(p.x,p.y,base)
+    for (site, cell) in diagram.iter_cells().enumerate() {
+        ring.clear();
+        for &id in cell.triangles() {
+            let point = *coordinates[id].get_or_insert_with(|| {
+                let p = &diagram.vertices()[id];
+                let (x, y) = welder.point(p.x, p.y, base);
+                Coord { x, y }
             });
-            if ring.last()!=Some(&point){ring.push(point);}
+            if ring.last() != Some(&point) {
+                ring.push(point);
+            }
         }
-        while ring.len()>1&&ring.first()==ring.last(){ring.pop();}
-        if ring.len()<3{empty_cell()}else{Polygon::new(LineString::from(ring),vec![])}
-    }).collect()
+        while ring.len() > 1 && ring.first() == ring.last() {
+            ring.pop();
+        }
+        if ring.len() < 3 {
+            ring.clear();
+        }
+        visit(site, &ring);
+    }
+}
 
+fn raw_cell_polygon(ring: &[Coord<f64>]) -> Polygon<f64> {
+    #[cfg(test)]
+    RAW_POLYGONS_BUILT.set(RAW_POLYGONS_BUILT.get() + 1);
+    let mut closed = Vec::with_capacity(ring.len() + usize::from(!ring.is_empty()));
+    closed.extend_from_slice(ring);
+    closed.extend(ring.first().copied());
+    Polygon::new(LineString::new(closed), vec![])
 }
 
 /// Voronoi neighbor site indices per site (the sites sharing a Voronoi edge).
@@ -475,6 +525,68 @@ mod interior_tests {
     use super::*;
     use crate::{init, shapes};
     use geo::Area;
+
+    #[test]
+    fn affected_raw_cells_follow_a_delaunay_diagonal_flip() {
+        let boundary = Polygon::new(LineString::from(vec![
+            (-1., -1.), (1., -1.), (1., 1.), (-1., 1.),
+        ]), vec![]);
+        let sites = [[-0.4, -0.4], [0.4, -0.4], [0.4, 0.4], [-0.4, 0.4]];
+        let base = raw_cells_per_site(&sites, &boundary);
+        let weld = VertexWelder::for_cells(&base);
+        let mut neighbors = Vec::new();
+        let coordinates = |cell: &Polygon<f64>| {
+            cell.exterior().0.iter().map(|p| [p.x.to_bits(), p.y.to_bits()]).collect::<Vec<_>>()
+        };
+        for offset in [-1e-6, 1e-6] {
+            let mut moved = sites;
+            moved[0][0] += offset;
+            let mut links = site_neighbors(&moved, &boundary);
+            links.iter_mut().for_each(|row| row.sort_unstable());
+            neighbors.push(links);
+
+            let mut full = Vec::new();
+            visit_raw_rings(&moved, &boundary, Some(&weld), |_, ring| {
+                full.push(raw_cell_polygon(ring));
+            });
+            let expected: Vec<_> = full.iter().enumerate()
+                .filter(|&(i, raw)| i == 0 || *raw != base[i])
+                .map(|(i, raw)| (i, coordinates(raw)))
+                .collect();
+            let actual: Vec<_> = affected_raw_cells(&moved, &boundary, &base, &weld, 0)
+                .iter().map(|(i, raw)| (*i, coordinates(raw))).collect();
+            assert_eq!(actual, expected);
+        }
+        assert_ne!(neighbors[0], neighbors[1], "the two perturbations must flip a real diagonal");
+    }
+
+    #[test]
+    fn finite_differences_reuse_cell_workspace() {
+        use crate::grad_local::{LocalGradContext, CELL_WORKSPACES_BUILT};
+        use crate::loss::LossWeights;
+
+        let boundary = shapes::by_name("shape_e").unwrap().polygon();
+        let sites = init::initialize_sites(&boundary, 32, 4971);
+        let labels = init::kmeans_labels(&sites, 6, 4971);
+        let weights = LossWeights { w_area: 1., w_wall: 0.1, w_jog: 0.01, ..Default::default() };
+        let targets = [boundary.unsigned_area() / 6.; 6];
+        let context = LocalGradContext::new(&sites, &boundary, &targets, &labels, &weights);
+        CELL_WORKSPACES_BUILT.set(0);
+        let gradients = context.gradients(&sites);
+        assert_eq!(CELL_WORKSPACES_BUILT.get(), 1, "use one cell workspace per serial gradient batch");
+        let mut probe = sites.clone();
+        for (i, original) in sites.iter().enumerate() {
+            for axis in 0..2 {
+                probe[i][axis] = original[axis] + 1e-6;
+                let plus = context.local_total(&probe, i);
+                probe[i][axis] = original[axis] - 1e-6;
+                let minus = context.local_total(&probe, i);
+                probe[i][axis] = original[axis];
+                assert_eq!(gradients[i][axis].to_bits(), ((plus - minus) / (2. * 1e-6)).to_bits(),
+                    "restore the workspace before the next perturbation");
+            }
+        }
+    }
 
     // KR1: `cell_inside_boundary` is a SOUND trivial-accept predicate — every
     // cell it calls "inside" must have clip-identity (the boolean clip leaves the

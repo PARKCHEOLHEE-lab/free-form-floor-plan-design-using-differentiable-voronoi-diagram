@@ -131,10 +131,25 @@ pub fn compute_area_loss(
     room_indices: &[usize],
     w_area: f64,
 ) -> f32 {
+    area_loss_from_areas(cells_sorted.iter().map(cell_area_for_loss), target_areas, room_indices, w_area)
+}
+
+pub(crate) fn cell_area_for_loss(cell: &Polygon<f64>) -> f64 {
+    #[cfg(test)]
+    count_cell_loss_work(0);
+    cell.unsigned_area()
+}
+
+pub(crate) fn area_loss_from_areas(
+    areas: impl Iterator<Item = f64>,
+    target_areas: &[f64],
+    room_indices: &[usize],
+    w_area: f64,
+) -> f32 {
     // f64 accumulation of shapely-style cell areas per room
     let mut current_areas: Vec<f64> = vec![0.0; target_areas.len()];
-    for (cell, &ri) in cells_sorted.iter().zip(room_indices) {
-        current_areas[ri] += cell.unsigned_area();
+    for (area, &ri) in areas.zip(room_indices) {
+        current_areas[ri] += area;
     }
     // torch.tensor(...) casts both vectors to f32
     let mut sum: f32 = 0.0;
@@ -145,6 +160,18 @@ pub fn compute_area_loss(
     sum * sum * (w_area as f32)
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CELL_LOSS_WORK: std::cell::Cell<[usize; 2]> = const { std::cell::Cell::new([0; 2]) };
+}
+
+#[cfg(test)]
+fn count_cell_loss_work(term: usize) {
+    let mut counts = CELL_LOSS_WORK.get();
+    counts[term] += 1;
+    CELL_LOSS_WORK.set(counts);
+}
+
 /// `compute_lloyd_loss`: zip(sites, cells) truncates to the shorter list;
 /// empty cells are filtered; centroids and sites materialize as f32 tensors;
 /// per-row L2 norm and the sum run in f32.
@@ -153,17 +180,27 @@ pub fn compute_lloyd_loss(
     sites: &[[f32; 2]],
     w_lloyd: f64,
 ) -> f32 {
+    let distances = sites.iter().zip(cells_sorted).filter_map(|(site, cell)| {
+        lloyd_cell_distance(cell, site)
+    });
+    lloyd_loss_from_distances(distances, w_lloyd)
+}
+
+pub(crate) fn lloyd_cell_distance(cell: &Polygon<f64>, site: &[f32; 2]) -> Option<f32> {
     use geo::Centroid;
-    let mut sum: f32 = 0.0;
-    for (site, cell) in sites.iter().zip(cells_sorted) {
-        if crate::voronoi::is_empty_cell(cell) {
-            continue;
-        }
-        let c = cell.centroid().expect("nonempty cell has a centroid");
-        let dx = (c.x() as f32) - site[0];
-        let dy = (c.y() as f32) - site[1];
-        sum += (dx * dx + dy * dy).sqrt();
+    #[cfg(test)]
+    count_cell_loss_work(1);
+    if crate::voronoi::is_empty_cell(cell) {
+        return None;
     }
+    let c = cell.centroid().expect("nonempty cell has a centroid");
+    let dx = (c.x() as f32) - site[0];
+    let dy = (c.y() as f32) - site[1];
+    Some((dx * dx + dy * dy).sqrt())
+}
+
+pub(crate) fn lloyd_loss_from_distances(distances: impl Iterator<Item = f32>, w_lloyd: f64) -> f32 {
+    let sum = distances.fold(0.0_f32, |sum, distance| sum + distance);
     // loss_lloyd **= 2; loss_lloyd *= w_lloyd  (both f32)
     sum * sum * (w_lloyd as f32)
 }
