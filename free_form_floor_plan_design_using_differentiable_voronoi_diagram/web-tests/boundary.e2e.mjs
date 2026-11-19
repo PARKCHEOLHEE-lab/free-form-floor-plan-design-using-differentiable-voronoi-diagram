@@ -17,10 +17,25 @@ async function withPlan(callback, query = '', coverageName = 'sketch') {
             window.Worker = class extends NativeWorker {
                 constructor(...args) {
                     super(...args);
-                    this.addEventListener('message', event => planProof.messages.push(event.data));
+                    this.addEventListener('message', event => {
+                        const message = event.data;
+                        if (message.type === 'frame' && message.gen === planProof.rejectPreviewGen) {
+                            delete planProof.rejectPreviewGen;
+                            event.stopImmediatePropagation();
+                            this.dispatchEvent(new MessageEvent('message', {
+                                data: { type: 'error', gen: message.gen, msg: 'Preview could not be rendered.' },
+                            }));
+                            return;
+                        }
+                        planProof.messages.push(message);
+                    });
                 }
                 postMessage(message, ...args) {
                     if (message.cmd === 'build') planProof.builds.push(message);
+                    if (message.kind === 'custom' && planProof.rejectNextPreview) {
+                        planProof.rejectNextPreview = false;
+                        planProof.rejectPreviewGen = message.gen;
+                    }
                     if (message.kind === 'custom' && planProof.rejectNextCustom) {
                         planProof.rejectNextCustom = false;
                         message = {...message, boundary:[[0,0],[2,2],[0,3],[3,0]]};
@@ -106,7 +121,7 @@ test('boundary sketch uses a temporary overlay, snaps with Shift, rejects crossi
     });
 });
 
-test('a drawn boundary runs with room bubbles and doors and restores both designs after switching', { timeout: 90000 }, async () => {
+test('a drawn boundary runs with rooms and retains one custom design across replacements', { timeout: 90000 }, async () => {
     await withPlan(async page => {
         const ready = name => page.waitForFunction(name => document.querySelector('#status').textContent.includes(name + ' · ready'), name);
         const drawRoom = async (x, y, radius) => {
@@ -134,7 +149,7 @@ test('a drawn boundary runs with room bubbles and doors and restores both design
             await page.getByRole('button',{ name:'Draw boundary', exact:true }).click();
             for (const p of [[420,285],[790,285],[790,555],[420,555],[420,285]]) await page.mouse.click(...p);
         };
-        const custom = page.getByRole('button',{ name:'Custom 1', exact:true });
+        const custom = page.getByRole('button',{ name:'Custom', exact:true });
         await page.evaluate(() => { planProof.rejectNextCustom = true; });
         await sketchRectangle();
         await page.waitForFunction(() => document.querySelector('#boundary-message').textContent.includes('must enclose'));
@@ -142,7 +157,7 @@ test('a drawn boundary runs with room bubbles and doors and restores both design
         assert.deepEqual(await labels(),presetRooms,'a Worker rejection leaves the current design active');
 
         await sketchRectangle();
-        await ready('custom_1');
+        await ready('custom');
         assert.equal(await custom.count(),1,'closing the sketch creates a selectable custom boundary');
         assert.deepEqual(await labels(),[],'the custom outline starts with its own room program');
         const drawn = await page.evaluate(() => planProof.builds.at(-1));
@@ -154,16 +169,16 @@ test('a drawn boundary runs with room bubbles and doors and restores both design
         await selectPanel('rooms');
         await page.click('button[data-bubble-tool=draw]');
         await drawRoom(500,420,32);
-        await ready('custom_1');
+        await ready('custom');
         await drawRoom(710,420,36);
-        await ready('custom_1');
+        await ready('custom');
         const customRooms = await labels();
         assert.equal(customRooms.length,2);
         await page.click('button[data-bubble-tool=link]');
         await page.mouse.click(500,420);
         await page.mouse.click(710,420);
         await page.waitForFunction(() => document.querySelectorAll('.connection-row').length === 1);
-        await ready('custom_1');
+        await ready('custom');
 
         await selectPanel('optimize');
         await page.locator('#iters').focus();
@@ -190,10 +205,57 @@ test('a drawn boundary runs with room bubbles and doors and restores both design
         await ready('shape_a');
         assert.deepEqual(await labels(),presetRooms);
         await custom.click();
-        await ready('custom_1');
+        await ready('custom');
         assert.deepEqual(await labels(),customRooms);
         assert.equal(await page.locator('.connection-row').count(),1);
         assert.deepEqual(await captureBoundary(await page.evaluate(() => planProof.builds.at(-1).gen)),outline);
+
+        const startReplacement = async () => {
+            await page.click('.gizmo [data-axis="+z"]');
+            await page.getByRole('button',{ name:'Draw boundary', exact:true }).click();
+        };
+        const drawReplacement = async () => {
+            await startReplacement();
+            for (const point of [[470,250],[830,250],[830,500],[630,590],[470,500],[470,250]]) await page.mouse.click(...point);
+        };
+        const customButtons = page.locator('#custom-boundaries button:visible');
+
+        const beforeCancel = await page.evaluate(() => planProof.builds.length);
+        await startReplacement();
+        await page.mouse.click(470,250);
+        await page.mouse.click(830,250);
+        await page.keyboard.press('Escape');
+        assert.equal(await page.evaluate(() => planProof.builds.length),beforeCancel);
+        assert.deepEqual(await labels(),customRooms,'cancelling keeps the old rooms and outline');
+
+        await page.evaluate(() => { planProof.rejectNextPreview = true; });
+        await drawReplacement();
+        await page.waitForFunction(() => planProof.messages.some(m => m.gen === planProof.builds.at(-1).gen && m.type === 'error'));
+        assert.equal(await customButtons.count(),1,'a replacement is not installed when its first preview fails');
+        assert.deepEqual(await labels(),customRooms);
+        assert.equal(await page.locator('.connection-row').count(),1);
+        assert.match(await page.locator('#boundary-message').textContent(),/preview could not be rendered/i);
+        await page.click('#reset');
+        await page.waitForFunction(() => planProof.messages.some(m => m.gen === planProof.builds.at(-1).gen && m.type === 'frame'));
+        assert.deepEqual(await captureBoundary(await page.evaluate(() => planProof.builds.at(-1).gen)),outline);
+        assert.deepEqual(await labels(),customRooms,'rebuilding after a failed preview still uses the old outline and rooms');
+
+        await drawReplacement();
+        await page.waitForFunction(() => planProof.messages.some(m => m.gen === planProof.builds.at(-1).gen && m.type === 'frame'));
+        assert.equal(await customButtons.count(),1,'a second successful outline replaces the first');
+        const latest = await captureBoundary(await page.evaluate(() => planProof.builds.at(-1).gen));
+        assert.notDeepEqual(latest,outline);
+        assert.deepEqual(await labels(),[],'the replaced custom rooms are removed');
+        assert.equal(await page.locator('.connection-row').count(),0);
+        assert.equal(await page.locator('#plan').getAttribute('data-doors'),'0');
+
+        await page.click('button[data-mode=shape_a]');
+        await ready('shape_a');
+        assert.deepEqual(await labels(),presetRooms,'replacement leaves preset rooms intact');
+        await custom.click();
+        await page.waitForFunction(() => planProof.messages.some(m => m.gen === planProof.builds.at(-1).gen && m.type === 'frame'));
+        assert.deepEqual(await captureBoundary(await page.evaluate(() => planProof.builds.at(-1).gen)),latest);
+        assert.deepEqual(await labels(),[]);
 
     }, '?wall=mixed', 'run');
 });

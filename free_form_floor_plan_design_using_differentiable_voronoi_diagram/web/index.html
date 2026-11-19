@@ -249,7 +249,8 @@
   #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
   #plan[data-boundary-drawing] { cursor:crosshair !important; }
   #boundary-sketch text { font:600 12px var(--font); fill:currentColor; stroke:var(--light); stroke-width:4px; paint-order:stroke; }
-  .boundary-actions, #custom-boundaries:not(:empty) { margin-top:10px; }
+  .boundary-actions, #custom-boundaries { margin-top:10px; }
+  #custom-boundaries[hidden] { display:none; }
   #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
   .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
   .bubble-label.selected { background:var(--ui-fg); color:white; }
@@ -341,7 +342,7 @@
           <button data-mode="shape_d">D</button>
           <button data-mode="shape_e" class="active">E</button>
         </div>
-        <div class="seg" id="custom-boundaries"></div>
+        <div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
         <div class="seg boundary-actions"><button id="boundary-draw" type="button" aria-pressed="false" disabled>Draw boundary</button></div>
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
       </section>
@@ -474,7 +475,8 @@ let resizeTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
 
 let mode = 'shape_e';     // active preset or custom boundary
-const customBoundaries = new Map();
+const CUSTOM_MODE = 'custom';
+let customBoundary = null;
 let pendingBoundary = null;
 let built = false;        // the worker holds an optimizer for the current params
 let running = false;
@@ -657,12 +659,12 @@ function sendBuild(then, candidate = null) {
   clearTimeout(rebuildTimer);rebuildTimer=0;
   if (!candidate) runFinished=false;
   const input = candidate ? null : currentProgram()?.snapshot();
-  const custom = candidate ?? customBoundaries.get(mode);
+  const custom = candidate ?? (mode === CUSTOM_MODE ? customBoundary : null);
   if(input&&!input.rooms.length){$('status').textContent='Draw at least one room.';$('program-status').textContent='Draw at least one room.';clearHist();hidePlayhead();redraw();return false;}
   const p = params(input?.ratios ?? custom?.ratios ?? roomRatios);
   maxIters = p.iters;
   curGen = ++gen;
-  worker.postMessage({ cmd: 'build', gen: curGen, mode: candidate?.mode ?? mode,
+  worker.postMessage({ cmd: 'build', gen: curGen, mode: candidate ? CUSTOM_MODE : mode,
     ...(custom ? { kind: 'custom', boundary: custom.ring } : { kind: 'shape' }),
     sites: p.sites, ratios: p.ratios, w: p.w, cosineWall, jogWeight: p.jogWeight, seed: p.seed, lr: p.lr, iters: p.iters, then,
     ...(mixedWall ? {cosineWeight: $('w_cosine').valueAsNumber} : {}),
@@ -691,26 +693,29 @@ worker.onmessage = (e) => {
       running = false; paused = false; setButtons();
       break;
     case 'built':
+      if (pendingBoundary) {
+        pendingBoundary.normalized = m.boundary;
+        break;
+      }
       built = true;
       boundaryRing = m.boundary;
-      if (pendingBoundary) {
-        const added = pendingBoundary;
-        pendingBoundary = null;
-        customBoundaries.set(added.mode, added);
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.dataset.mode = added.mode;
-        button.setAttribute('aria-pressed', 'false');
-        button.textContent = 'Custom ' + customBoundaries.size;
-        $('custom-boundaries').append(button);
-        activateBoundary(added.mode);
-        $('boundary-message').hidden = true;
-        runFinished = false;
-      }
       editor.setProgram(currentProgram());
       setButtons();
       break;
     case 'frame':
+      if (pendingBoundary) {
+        // The constructor can succeed before the first preview fails.
+        const { ring, ratios, normalized } = pendingBoundary;
+        pendingBoundary = null;
+        customBoundary = { ring, ratios };
+        programs.delete(CUSTOM_MODE);
+        boundaryRing = normalized;
+        built = true;
+        runFinished = false;
+        $('custom-boundaries').hidden = false;
+        $('boundary-message').hidden = true;
+        activateBoundary(CUSTOM_MODE);
+      }
       lastFrame = m.frame;
       if (m.mode === 'preview') {
         $('status').textContent = mode + ' · ready to Run';
@@ -808,14 +813,13 @@ function activateBoundary(nextMode) {
   });
   editor.setProgram(null);
   editingBubbles = false;
-  const custom = customBoundaries.get(mode);
-  if (custom) roomRatios = custom.ratios;
+  if (mode === CUSTOM_MODE) roomRatios = customBoundary.ratios;
   else applyPreset(mode);
   setBubbleTool('select');
 }
 
 function addBoundary(ring) {
-  pendingBoundary = { mode: 'custom_' + (customBoundaries.size + 1), ring, ratios: roomRatios.slice() };
+  pendingBoundary = { ring, ratios: roomRatios.slice() };
   const message = $('boundary-message');
   message.hidden = false;
   message.textContent = 'Building boundary…';
