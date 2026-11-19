@@ -1,0 +1,187 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { chromium } from 'playwright';
+import { serve } from './serve.mjs';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+async function withPlan(callback, query = '', coverageName = 'sketch') {
+    const { url, proc } = await serve();
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({ viewport: { width: 1200, height: 840 } });
+        if (process.env.VORONOI_COVERAGE_DIR) await page.coverage.startJSCoverage({resetOnNavigation:false});
+        await page.addInitScript(() => {
+            const NativeWorker = Worker;
+            window.planProof = { builds: [], messages: [] };
+            window.Worker = class extends NativeWorker {
+                constructor(...args) {
+                    super(...args);
+                    this.addEventListener('message', event => planProof.messages.push(event.data));
+                }
+                postMessage(message, ...args) {
+                    if (message.cmd === 'build') planProof.builds.push(message);
+                    if (message.kind === 'custom' && planProof.rejectNextCustom) {
+                        planProof.rejectNextCustom = false;
+                        message = {...message, boundary:[[0,0],[2,2],[0,3],[3,0]]};
+                    }
+                    super.postMessage(message, ...args);
+                }
+            };
+        });
+        await page.goto(url + query);
+        await page.waitForFunction(() => document.querySelector('#status').textContent.includes('ready'));
+        await callback(page);
+        if (process.env.VORONOI_COVERAGE_DIR) {
+            const coverage = (await page.coverage.stopJSCoverage()).filter(entry => entry.url.startsWith(url));
+            await writeFile(join(process.env.VORONOI_COVERAGE_DIR, 'boundary-' + coverageName + '.json'),JSON.stringify(coverage));
+        }
+    } finally {
+        await browser.close();
+        proc.kill();
+    }
+}
+
+test('boundary sketch uses a temporary overlay, snaps with Shift, rejects crossings and cancels', { timeout: 30000 }, async () => {
+    await withPlan(async page => {
+        await page.click('button[data-open=boundary]');
+        const draw = page.getByRole('button', { name: 'Draw boundary', exact: true });
+        assert.equal(await draw.count(), 1, 'Boundary offers a drawing tool on the plan');
+        await draw.click();
+
+        const sketch = page.locator('#boundary-sketch');
+        const camera = () => page.locator('#plan').evaluate(c => [c.dataset.azimuth, c.dataset.elevation, c.dataset.zoom]);
+        const before = await camera();
+        await page.mouse.click(420, 290);
+        await page.mouse.move(625, 310);
+        await page.keyboard.down('Shift');
+        assert.equal(await sketch.getAttribute('data-snap'),'axis','pressing Shift updates the current snap without moving the pointer');
+        await page.mouse.click(625, 310);
+        await page.keyboard.up('Shift');
+        assert.deepEqual(await camera(), before, 'the draft never refits or rotates the view');
+
+        await page.mouse.move(850, 350);
+        await page.mouse.down({button:'right'});
+        await page.mouse.move(890, 380, {steps:5});
+        await page.mouse.up({button:'right'});
+        assert.notDeepEqual(await camera(), before, 'right-drag still controls the view while sketching');
+        await page.keyboard.press('Escape');
+        assert.equal(await draw.getAttribute('aria-pressed'), 'false');
+        assert.equal(await sketch.getAttribute('data-snap'), null);
+
+        await page.click('.gizmo [data-axis="+z"]');
+        await draw.click();
+        await page.mouse.click(420,290);
+        await page.mouse.click(580,450);
+        await page.mouse.move(421,290);
+        assert.equal(await sketch.getAttribute('data-snap'),'vertex');
+        await page.mouse.move(502,370);
+        assert.equal(await sketch.getAttribute('data-snap'),'midpoint');
+        await page.mouse.move(720,586);
+        assert.equal(await sketch.getAttribute('data-snap'),'parallel');
+        assert.equal(await sketch.locator('text').textContent(),'Parallel');
+        if (process.env.BOUNDARY_SCREEN) await page.screenshot({path:process.env.BOUNDARY_SCREEN.replace('.png','-sketch.png')});
+        await draw.click();
+        assert.equal(await sketch.getAttribute('data-snap'),null);
+        await draw.click();
+        for (const point of [[410,300],[760,550],[410,510],[710,290],[410,300]]) await page.mouse.click(...point);
+        assert.match(await page.locator('#boundary-message').textContent(), /cross/i);
+        assert.equal(await draw.getAttribute('aria-pressed'), 'true', 'an invalid ring remains a draft');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.evaluate(() => planProof.builds.length), 1, 'cancel and rejected closure never build a new plan');
+        assert.equal(await page.getByRole('button', {name:'Run', exact:true}).isEnabled(), true);
+    });
+});
+
+test('a drawn boundary runs with room bubbles and doors and restores both designs after switching', { timeout: 90000 }, async () => {
+    await withPlan(async page => {
+        const ready = name => page.waitForFunction(name => document.querySelector('#status').textContent.includes(name + ' · ready'), name);
+        const drawRoom = async (x, y, radius) => {
+            await page.mouse.move(x,y);
+            await page.mouse.down();
+            await page.mouse.move(x + radius,y,{ steps:8 });
+            await page.mouse.up();
+        };
+        const labels = () => page.locator('.bubble-label:not(.draft)').evaluateAll(all => all.map(node => ({...node.dataset})));
+        const selectPanel = name => page.click('button[data-open=' + name + ']');
+
+        await selectPanel('boundary');
+        await page.click('button[data-mode=shape_a]');
+        await ready('shape_a');
+        await page.click('.gizmo [data-axis="+z"]');
+        await selectPanel('rooms');
+        await page.click('button[data-bubble-tool=draw]');
+        await drawRoom(550,530,33);
+        await ready('shape_a');
+        const presetRooms = await labels();
+        assert.equal(presetRooms.length,1);
+
+        await selectPanel('boundary');
+        const sketchRectangle = async () => {
+            await page.getByRole('button',{ name:'Draw boundary', exact:true }).click();
+            for (const p of [[420,285],[790,285],[790,555],[420,555],[420,285]]) await page.mouse.click(...p);
+        };
+        const custom = page.getByRole('button',{ name:'Custom 1', exact:true });
+        await page.evaluate(() => { planProof.rejectNextCustom = true; });
+        await sketchRectangle();
+        await page.waitForFunction(() => document.querySelector('#boundary-message').textContent.includes('must enclose'));
+        assert.equal(await custom.count(),0);
+        assert.deepEqual(await labels(),presetRooms,'a Worker rejection leaves the current design active');
+
+        await sketchRectangle();
+        await ready('custom_1');
+        assert.equal(await custom.count(),1,'closing the sketch creates a selectable custom boundary');
+        assert.deepEqual(await labels(),[],'the custom outline starts with its own room program');
+        const drawn = await page.evaluate(() => planProof.builds.at(-1));
+        assert.equal(drawn.kind,'custom');
+        assert.equal(drawn.boundary.length,4);
+        const captureBoundary = gen => page.evaluate(gen => planProof.messages.find(m => m.gen === gen && m.type === 'built').boundary, gen);
+        const outline = await captureBoundary(drawn.gen);
+
+        await selectPanel('rooms');
+        await page.click('button[data-bubble-tool=draw]');
+        await drawRoom(500,420,32);
+        await ready('custom_1');
+        await drawRoom(710,420,36);
+        await ready('custom_1');
+        const customRooms = await labels();
+        assert.equal(customRooms.length,2);
+        await page.click('button[data-bubble-tool=link]');
+        await page.mouse.click(500,420);
+        await page.mouse.click(710,420);
+        await page.waitForFunction(() => document.querySelectorAll('.connection-row').length === 1);
+        await ready('custom_1');
+
+        await selectPanel('optimize');
+        await page.locator('#iters').focus();
+        await page.keyboard.press('Home');
+        await page.getByRole('button',{ name:'Run', exact:true }).click();
+        await page.waitForFunction(() => planProof.messages.some(m => m.gen === planProof.builds.at(-1).gen && m.type === 'done'));
+        const run = await page.evaluate(() => {
+            const build = planProof.builds.at(-1);
+            const frames = planProof.messages.filter(m => m.type === 'frame' && m.gen === build.gen);
+            return { build, frame: frames.at(-1).frame };
+        });
+        assert.equal(run.frame.iteration,50);
+        if (process.env.BOUNDARY_SCREEN) await page.screenshot({path:process.env.BOUNDARY_SCREEN});
+        assert.equal(run.build.cosineWeight,1,'the drawn boundary uses the active loss controls');
+        assert.deepEqual(await captureBoundary(run.build.gen),outline,'rebuilds keep the same normalized plan');
+        assert.equal(run.build.program.links.length,1);
+        run.build.program.rooms.forEach((r,i) => r.center.forEach((coordinate,j) => {
+            assert.ok(Math.abs(run.frame.sites[i][j] - coordinate) < 1e-6,'the fixed centers reach the real optimizer');
+        }));
+        assert.equal(await page.locator('#plan').getAttribute('data-doors'),'1','the requested door is rendered');
+
+        await selectPanel('boundary');
+        await page.click('button[data-mode=shape_a]');
+        await ready('shape_a');
+        assert.deepEqual(await labels(),presetRooms);
+        await custom.click();
+        await ready('custom_1');
+        assert.deepEqual(await labels(),customRooms);
+        assert.equal(await page.locator('.connection-row').count(),1);
+        assert.deepEqual(await captureBoundary(await page.evaluate(() => planProof.builds.at(-1).gen)),outline);
+
+    }, '?wall=mixed', 'run');
+});

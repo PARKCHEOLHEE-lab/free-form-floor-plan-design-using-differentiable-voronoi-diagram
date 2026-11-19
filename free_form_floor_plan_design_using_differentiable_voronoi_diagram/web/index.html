@@ -240,6 +240,16 @@
     .seg button:hover:not(.active) { background: var(--ui-muted); }
     .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
     .panel .seg { margin-bottom: 4px; }
+  #boundary-sketch { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; color:var(--featured); }
+  #boundary-sketch [hidden], #boundary-sketch[hidden] { display:none; }
+  #boundary-sketch polyline, #boundary-sketch line { fill:none; stroke:currentColor; stroke-width:2; }
+  #boundary-sketch line { stroke-dasharray:5 4; }
+  #boundary-sketch circle { fill:var(--light); stroke:currentColor; stroke-width:2; }
+  #boundary-sketch [data-first] { fill:currentColor; }
+  #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
+  #plan[data-boundary-drawing] { cursor:crosshair !important; }
+  #boundary-sketch text { font:600 12px var(--font); fill:currentColor; stroke:var(--light); stroke-width:4px; paint-order:stroke; }
+  .boundary-actions, #custom-boundaries:not(:empty) { margin-top:10px; }
   #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
   .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
   .bubble-label.selected { background:var(--ui-fg); color:white; }
@@ -266,7 +276,9 @@
 <div class="wrap">
   <div class="stage">
     <div class="canvas-card">
-      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div></div>
+      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div>
+        <svg id="boundary-sketch" aria-hidden="true" hidden><polyline></polyline><line hidden></line><circle data-first r="4" hidden></circle><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
+      </div>
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->
       <span id="status" hidden></span>
@@ -329,6 +341,9 @@
           <button data-mode="shape_d">D</button>
           <button data-mode="shape_e" class="active">E</button>
         </div>
+        <div class="seg" id="custom-boundaries"></div>
+        <div class="seg boundary-actions"><button id="boundary-draw" type="button" aria-pressed="false" disabled>Draw boundary</button></div>
+        <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
       </section>
 
       <section class="panel" data-panel="rooms">
@@ -395,6 +410,7 @@ const R = 1.18; // normalized boundaries fit within radius 1
 import { createPlanView } from './plan/view3d.js';
 import { BubbleProgram } from './plan/bubbles.js';
 import { createBubbleEditor } from './plan/bubble-editor.js';
+import { createBoundaryEditor } from './plan/boundary-editor.js';
 const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo') });
 const $ = id => document.getElementById(id);
 const wallExperiment = new URLSearchParams(location.search).get('wall');
@@ -457,7 +473,9 @@ function redraw() {
 let resizeTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
 
-let mode = 'shape_e';     // active preset shape
+let mode = 'shape_e';     // active preset or custom boundary
+const customBoundaries = new Map();
+let pendingBoundary = null;
 let built = false;        // the worker holds an optimizer for the current params
 let running = false;
 let paused = false;
@@ -493,7 +511,33 @@ const editor = createBubbleEditor($('plan'),view,{
     $('bubble-message').classList.toggle('error',error);
   }
 });
+const boundaryHint = 'Click to add a point. Click the first point to close. Hold Shift for X/Y. Backspace undoes a point. Esc cancels.';
+function boundaryMessage(error = '') {
+  const message = $('boundary-message');
+  message.textContent = error || boundaryHint;
+  message.classList.toggle('error', !!error);
+}
+const boundaryEditor = createBoundaryEditor($('plan'), view, {
+  overlay: $('boundary-sketch'),
+  isBuilding: () => !!pendingBoundary,
+  reference: () => boundaryRing ?? [],
+  onActive(active) {
+    $('boundary-draw').setAttribute('aria-pressed', String(active));
+    $('boundary-draw').classList.toggle('active', active);
+    $('boundary-message').hidden = !active;
+    if (active) boundaryMessage();
+    setButtons();
+  },
+  onClose: addBoundary,
+  onError: boundaryMessage,
+});
+$('boundary-draw').addEventListener('click', () => {
+  if (boundaryEditor.active) boundaryEditor.cancel();
+  else boundaryEditor.start();
+});
 function setBubbleTool(name) {
+  if (pendingBoundary) return;
+  boundaryEditor.cancel();
   if(name==='draw'){
     if(!boundaryRing)return;
     if(!currentProgram()){
@@ -511,7 +555,7 @@ document.querySelectorAll('[data-bubble-tool]').forEach(b=>b.addEventListener('c
 $('bubble-delete').addEventListener('click',()=>editor.deleteSelection());
 $('roomareas').addEventListener('click',e=>{const b=e.target.closest('[data-room-id]');if(b)editor.selectRoom(+b.dataset.roomId);});
 $('connections').addEventListener('click',e=>{const b=e.target.closest('[data-from]');if(b)editor.selectLink(+b.dataset.from,+b.dataset.to);});
-window.addEventListener('pagehide',()=>editor.dispose());
+window.addEventListener('pagehide',()=>{editor.dispose();boundaryEditor.dispose();});
 $('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubbles').checked));
 $('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
 
@@ -546,6 +590,7 @@ for (const input of [pointMergeInput, wallSnapInput]) {
 // settle (and stops any running optimization), not on every intermediate step.
 let rebuildTimer = 0;
 function rebuildPreviewSoon() {
+  if (pendingBoundary) return;
   clearTimeout(rebuildTimer);
   $('status').textContent=mode+' · building...';
   rebuildTimer = setTimeout(() => {
@@ -584,8 +629,8 @@ function refreshRoomReadout() {
 // retain the previous reference scales measured for the demo (2026-06).
 const LOSS_SCALES = { w_wall: 13.0, w_jog: 1.0, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0 };
 
-function params() {
-  const weights = (currentProgram()?.snapshot().ratios ?? roomRatios).map(r => Math.max(0, r));
+function params(ratios) {
+  const weights = ratios.map(r => Math.max(0, r));
   const wsum = weights.reduce((a, b) => a + b, 0) || 1;
   // Importance is divided by the corresponding native scale; bb/cell stay off.
   const imp = id => +$(id).value;
@@ -606,17 +651,19 @@ function params() {
   };
 }
 
-// Build (or rebuild) the optimizer for the selected preset in the worker.
+// Build (or rebuild) the optimizer for the selected boundary in the worker.
 // `then` is what the worker does once built: 'preview' or 'start' (run).
-function sendBuild(then) {
+function sendBuild(then, candidate = null) {
   clearTimeout(rebuildTimer);rebuildTimer=0;
-  runFinished=false;
-  const input=currentProgram()?.snapshot();
+  if (!candidate) runFinished=false;
+  const input = candidate ? null : currentProgram()?.snapshot();
+  const custom = candidate ?? customBoundaries.get(mode);
   if(input&&!input.rooms.length){$('status').textContent='Draw at least one room.';$('program-status').textContent='Draw at least one room.';clearHist();hidePlayhead();redraw();return false;}
-  const p = params();
+  const p = params(input?.ratios ?? custom?.ratios ?? roomRatios);
   maxIters = p.iters;
   curGen = ++gen;
-  worker.postMessage({ cmd: 'build', gen: curGen, kind: 'shape', mode,
+  worker.postMessage({ cmd: 'build', gen: curGen, mode: candidate?.mode ?? mode,
+    ...(custom ? { kind: 'custom', boundary: custom.ring } : { kind: 'shape' }),
     sites: p.sites, ratios: p.ratios, w: p.w, cosineWall, jogWeight: p.jogWeight, seed: p.seed, lr: p.lr, iters: p.iters, then,
     ...(mixedWall ? {cosineWeight: $('w_cosine').valueAsNumber} : {}),
     ...(input?{program:{...input,doorWidth:DOOR_WIDTH}}:{}) });
@@ -632,6 +679,12 @@ worker.onmessage = (e) => {
     case 'ready':
       break;
     case 'error':
+      if (pendingBoundary) {
+        pendingBoundary = null;
+        boundaryMessage(m.msg);
+        setButtons();
+        break;
+      }
       $('status').textContent = m.msg;
       if(currentProgram())$('program-status').textContent=m.msg;
       $('program-status').dataset.state='error';
@@ -640,7 +693,22 @@ worker.onmessage = (e) => {
     case 'built':
       built = true;
       boundaryRing = m.boundary;
+      if (pendingBoundary) {
+        const added = pendingBoundary;
+        pendingBoundary = null;
+        customBoundaries.set(added.mode, added);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mode = added.mode;
+        button.setAttribute('aria-pressed', 'false');
+        button.textContent = 'Custom ' + customBoundaries.size;
+        $('custom-boundaries').append(button);
+        activateBoundary(added.mode);
+        $('boundary-message').hidden = true;
+        runFinished = false;
+      }
       editor.setProgram(currentProgram());
+      setButtons();
       break;
     case 'frame':
       lastFrame = m.frame;
@@ -731,16 +799,42 @@ function applyPreset(mode) {
   return true;
 }
 
-$('presets').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  [...$('presets').children].forEach(x => x.classList.toggle('active', x === b));
-  mode = b.dataset.mode;
-  editor.setProgram(null);setBubbleTool('select');editingBubbles=false;
-  applyPreset(mode);  // load this boundary's preset, if it has one
+function activateBoundary(nextMode) {
+  mode = nextMode;
+  document.querySelectorAll('#presets button, #custom-boundaries button').forEach(button => {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle('active', active);
+    if (button.parentElement.id === 'custom-boundaries') button.setAttribute('aria-pressed', String(active));
+  });
+  editor.setProgram(null);
+  editingBubbles = false;
+  const custom = customBoundaries.get(mode);
+  if (custom) roomRatios = custom.ratios;
+  else applyPreset(mode);
+  setBubbleTool('select');
+}
+
+function addBoundary(ring) {
+  pendingBoundary = { mode: 'custom_' + (customBoundaries.size + 1), ring, ratios: roomRatios.slice() };
+  const message = $('boundary-message');
+  message.hidden = false;
+  message.textContent = 'Building boundary…';
+  setButtons();
+  sendBuild('preview', pendingBoundary);
+}
+
+function selectBoundary(e) {
+  const button = e.target.closest('button[data-mode]');
+  if (!button || pendingBoundary) return;
+  activateBoundary(button.dataset.mode);
+  boundaryRing = currentProgram()?.boundary ?? null;
+  $('boundary-message').hidden = true;
   stop();
   $('status').textContent = mode + ' · building…';
   sendBuild('preview');
-});
+}
+$('presets').addEventListener('click', selectBoundary);
+$('custom-boundaries').addEventListener('click', selectBoundary);
 
 // ---------- drawing ----------
 // Hand one frame to the view. Raw shows the optimizer's cells: pastel fills (matplotlib Accent
@@ -870,7 +964,10 @@ function setButtons() {
   const label = running ? 'Pause' : (paused ? 'Resume' : 'Run');
   $('run').setAttribute('aria-label', label);   // also its hover name
   $('run').querySelector('use').setAttribute('href', running ? '#i-pause' : '#i-play');
-  $('run').disabled=editingBubbles||!!(currentProgram()&&!roomCount());
+  const sketching = boundaryEditor.active || !!pendingBoundary;
+  $('run').disabled=sketching||editingBubbles||!!(currentProgram()&&!roomCount());
+  $('boundary-draw').disabled = !boundaryRing || running || paused || !!pendingBoundary;
+  $('reset').disabled = sketching;
 }
 
 // ---------- toolbars ----------
@@ -878,6 +975,7 @@ function setButtons() {
 // icon closes it.
 let openPanel = null;
 function showPanel(name) {
+  if (pendingBoundary) return;
   openPanel = openPanel === name ? null : name;
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('open', p.dataset.panel === openPanel));
   document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));

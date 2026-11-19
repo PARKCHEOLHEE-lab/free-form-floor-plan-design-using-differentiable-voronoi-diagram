@@ -97,6 +97,26 @@ test('the real worker installs room inputs rejects invalid links and cancels sup
         assert.equal(wallOnly.frame.wall,active.frame.wall,'the separate step weight does not change the wall contribution');
         for(const [i,weight] of [-1,NaN,Infinity].entries())assert.equal((await send({...shape,gen:45+i, jogWeight:weight})).type,'error','invalid step weight cannot silently choose legacy walls');
         assert.equal((await send({...shape,gen:48,jogWeight:0.35})).type,'frame');
+        const rectangle = [[2,1],[6,1],[6,3],[2,3]];
+        const custom = {...base, mode:'custom', kind:'custom', boundary:rectangle, gen:49};
+        const drawn = await send(custom);
+        assert.equal(drawn.type, 'frame', 'the Worker builds a user-drawn boundary through WASM');
+        const drawnBoundary = await harness.evaluate(h=>h.messages.find(m=>m.type==='built'&&m.gen===49).boundary);
+        const expected = [[-2,-1],[2,-1],[2,1],[-2,1],[-2,-1]].map(p=>p.map(v=>v/Math.sqrt(5)));
+        assert.deepEqual(drawnBoundary, expected, 'the engine keeps the drawn outline after normalization');
+        const invalidOutlines = [
+            null, [[0,0],[1,1]], [[0,0],[1,0],[0,Infinity]],
+            [[0,0],[1,0],[2,0]], [[0,0],[2,2],[0,3],[3,0]],
+            [[0,0],[2,0],[1,0],[2,2],[0,2]],
+        ];
+        for (const [i,boundary] of invalidOutlines.entries()) {
+            const rejected = await send({...custom, gen:50+i, boundary});
+            assert.equal(rejected.type, 'error', 'invalid outline is rejected before replacing the optimizer');
+            assert.match(rejected.msg, /boundary/i);
+            assert.equal(await harness.evaluate((h,gen)=>h.messages.some(m=>m.type==='built'&&m.gen===gen),50+i),false);
+        }
+        const rebuilt = await send({...custom, gen:56});
+        assert.deepEqual(rebuilt.frame, drawn.frame, 'a rejected outline leaves the Worker usable and the custom build repeatable');
         const malformed=await page.evaluate(async()=>{
             const {default:init,WasmOpt}=await import('./pkg/voronoi_floorplan_web.js');
             await init();

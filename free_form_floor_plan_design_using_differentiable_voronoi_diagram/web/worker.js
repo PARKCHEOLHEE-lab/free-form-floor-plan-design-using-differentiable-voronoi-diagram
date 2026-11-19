@@ -6,12 +6,14 @@
 //
 // Protocol
 //   main -> worker : {cmd:'build', gen, mode, sites, ratios, w[6], seed, lr, iters,
+//                    kind?: 'shape'|'custom', boundary?: [[x,y],...],
 //                    cosineWall?: boolean, cosineWeight?: number, jogWeight?: number,
 //                    program?: {rooms:[{center:[x,y],radius}],links:[[a,b]],doorWidth}, then:'preview'|'start'}
 //                    {cmd:'dispose'}
 //   worker -> main : {type:'ready'} | {type:'built', gen, boundary} | {type:'error', gen?, msg}
 //                    {type:'frame', frame, mode:'preview'|'step'} | {type:'done'}
 import init, { WasmOpt } from './pkg/voronoi_floorplan_web.js';
+import { isSimpleBoundary } from './plan/geom.js';
 
 let opt = null;
 let maxIters = 0;
@@ -60,8 +62,13 @@ function build(msg) {
   const program = msg.program === undefined ? null : programInput(msg.program,msg.sites);
   if (!Number.isInteger(msg.iters) || msg.iters<1) throw new Error('Iterations must be a positive integer.');
   const ratios = Float64Array.from(msg.ratios);
-  const w = msg.w; // [w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell]
-  const next = WasmOpt.from_shape(msg.mode, msg.sites, ratios, w[0], w[1], w[2], w[3], w[4], w[5], msg.seed, msg.lr);
+  const [wall, area, lloyd, topo, bb, cell] = msg.w;
+  const args = [msg.sites, ratios, wall, area, lloyd, topo, bb, cell, msg.seed, msg.lr];
+  const custom = msg.kind === 'custom';
+  if (custom && !isSimpleBoundary(msg.boundary)) throw new Error('Boundary must enclose an area without crossing or retracing itself.');
+  const next = custom
+    ? new WasmOpt(Float64Array.from(msg.boundary.flat()), ...args)
+    : WasmOpt.from_shape(msg.mode, ...args);
   if (!next) throw new Error('Unknown boundary.');
   try {
     if (msg.cosineWall === true) next.use_cosine_wall_loss();

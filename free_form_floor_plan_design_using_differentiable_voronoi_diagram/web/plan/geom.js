@@ -40,3 +40,35 @@ export function inside([px, py], ring) {
     }
     return hit;
 }
+
+/** A finite, open ring enclosing area without crossing or retracing its edges. */
+export function isSimpleBoundary(ring) {
+    if (!Array.isArray(ring) || ring.length < 3 ||
+        !ring.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite))) return false;
+
+    const [x, y] = ring[0];
+    const local = ring.map(([px, py]) => [px - x, py - y]);
+    const span = local.reduce((max, [dx, dy]) => Math.max(max, Math.abs(dx), Math.abs(dy)), 0);
+    if (!(span > 0) || !Number.isFinite(span)) return false;
+
+    const points = local.map(([dx, dy]) => [dx / span, dy / span]);
+    const tolerance = 1e-9;
+    if (ringArea(points) <= tolerance) return false;
+    const side = (a, b, p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    const n = points.length;
+
+    for (let i = 0; i < n; i++) {
+        const a = points[i], b = points[(i + 1) % n], next = points[(i + 2) % n];
+        if (Math.hypot(a[0] - b[0], a[1] - b[1]) <= tolerance ||
+            segmentDistance(next, a, b) <= tolerance || segmentDistance(a, b, next) <= tolerance) return false;
+
+        for (let j = i + 2; j < n; j++) {
+            if (i === 0 && j === n - 1) continue;
+            const c = points[j], d = points[(j + 1) % n];
+            if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) return false;
+            if (segmentDistance(a, c, d) <= tolerance || segmentDistance(b, c, d) <= tolerance ||
+                segmentDistance(c, a, b) <= tolerance || segmentDistance(d, a, b) <= tolerance) return false;
+        }
+    }
+    return true;
+}
