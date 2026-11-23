@@ -1,5 +1,5 @@
 {
-  "source": "Approximation based on the attached frame: affine fit to all 8 outline corners, 6 apparent site dots chosen in room interiors, and the verified rounded shares. Fixed-site identities, radius scale and exact centers are unknown. A shared radius multiplier of .24 keeps every circle inside; Rust uses the normalized squared radius, so changing that multiplier leaves area targets fixed.",
+  "source": "Approximation based on a screenshot of the app: affine fit to all 8 outline corners, 6 apparent site dots chosen in room interiors, and the verified rounded shares. Fixed-site identities, radius scale and exact centers are unknown. A shared radius multiplier of .24 keeps every circle inside; Rust uses the normalized squared radius, so changing that multiplier leaves area targets fixed.",
   "shape": "shape_e",
   "sites": 80,
   "seed": 4971,
