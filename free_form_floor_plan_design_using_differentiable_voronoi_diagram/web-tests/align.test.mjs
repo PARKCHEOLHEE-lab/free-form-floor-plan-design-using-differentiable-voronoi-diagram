@@ -1,4 +1,4 @@
-// Wall alignment on the five sample runs (final frames from PORTFOLIO/voronoi/data).
+// Wall alignment on the five sample runs (final frames in fixtures/shape_*.json).
 // Run: node --test web-tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,17 +8,17 @@ import { fromCells, roomRings } from "../web/plan/graph.js";
 import { openRing, ringArea, signedArea2 } from "../web/plan/geom.js";
 
 const load = (f) => JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url)));
-// after: voronoi/postprocess.py on its own shapely graph; same_graph_after: its merge + align run
+// after: the earlier Python version on its own shapely graph; same_graph_after: its merge + align run
 // on this corner graph (the fair comparison: shapely's union adds stub edges, 9 extra corners on
 // shape C, that this model does not have)
 const python = load("python-align.json");
 
-// Same thresholds as voronoi/postprocess.py, in the optimizer's unit-radius space.
+// Same thresholds as the earlier Python version, in the optimizer's unit-radius space.
 const TOL = 0.02;
 const SIMPLIFY = 0.004;
 
 for (const name of ["shape_a", "shape_b", "shape_c", "shape_d", "shape_e"]) {
-    test(`${name} align keeps every room, covers the boundary, and aligns at least as much wall as postprocess.py`, () => {
+    test(`${name} align keeps every room, covers the boundary, and aligns at least as much wall as the Python version`, () => {
         const run = load(`${name}.json`);
         const g = fromCells(run.cells, run.boundary, { roomCount: run.ratios.length, simplifyTol: SIMPLIFY });
         const before = alignedShare(g, run.boundary);
@@ -35,8 +35,8 @@ for (const name of ["shape_a", "shape_b", "shape_c", "shape_d", "shape_e"]) {
         assert.ok(Math.abs(total - ringArea(openRing(run.boundary))) < 1e-9, `rooms cover the boundary (${total})`);
 
         assert.ok(after > before, `aligned share rose (${before} -> ${after})`);
-        assert.ok(after >= py.same_graph_after - 1e-4, `${after} >= postprocess.py on this graph ${py.same_graph_after}`);
-        assert.ok(after >= py.after - 0.01, `${after} >= postprocess.py ${py.after} - 0.01`);
+        assert.ok(after >= py.same_graph_after - 1e-4, `${after} >= Python version on this graph ${py.same_graph_after}`);
+        assert.ok(after >= py.after - 0.01, `${after} >= Python version ${py.after} - 0.01`);
     });
 }
 

@@ -1,4 +1,4 @@
-// Wall alignment, ported from voronoi/postprocess.py (after GSDiff's test-time post-process).
+// Wall alignment, ported from an earlier Python version (after GSDiff's test-time post-process).
 import { openRing, segmentDistance } from "./geom.js";
 import { wallEdges } from "./graph.js";
 
@@ -109,7 +109,7 @@ function snapChains(g, boundary, tol) {
         byFrame.set(phi, [...(byFrame.get(phi) ?? []), [a, b]]);
     }
     // A corner on walls of two frames ends where the last frame snaps it, so the frame with the
-    // most walls goes last. postprocess.py takes frames in graph order; on shape D that leaves
+    // most walls goes last. The Python version takes frames in graph order; on shape D that leaves
     // 0.63 of the wall aligned instead of 0.69.
     const frames = [...byFrame].sort((x, y) => x[1].length - y[1].length);
     for (const [phi, edges] of frames) {

@@ -421,7 +421,7 @@ const mixedWall = wallExperiment === 'mixed';
 
 // ---------- wall alignment (web/plan) ----------
 // Raw draws the optimizer's cells as they are; Aligned welds them into rooms that share
-// corners and snaps nearly parallel walls (voronoi/postprocess.py, after GSDiff).
+// corners and snaps nearly parallel walls (after GSDiff's test-time post-process).
 import { fromCells, roomRings } from './plan/graph.js';
 import { alignPlan, alignedShare } from './plan/align.js';
 import { evaluatePlan } from './plan/openings.js';
