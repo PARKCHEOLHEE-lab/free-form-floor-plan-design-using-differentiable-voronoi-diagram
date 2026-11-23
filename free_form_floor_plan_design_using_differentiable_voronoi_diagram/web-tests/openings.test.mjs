@@ -68,3 +68,15 @@ test('shared corner walls make only requested doors and expose center or wall vi
     assert.ok(evaluatePlan(missing,program,0.2).issues.some(i=>i.kind==='center' && i.room===2),'a missing room cannot satisfy its center');
     assert.deepEqual(g.rooms,[[[0,1,4,5]],[[1,2,3,4]],[[2,6,7,3]]],'checking does not edit the generated plan');
 });
+
+test('messages name rooms by their panel label, not by their position',()=>{
+    // R1 was deleted, so R2 and R3 sit at positions 0 and 1. R2 misses its center and the two share no wall.
+    const corners=new Map([[0,{x:0,y:0}],[1,{x:1,y:0}],[2,{x:1,y:1}],[3,{x:0,y:1}],
+                           [4,{x:2,y:0}],[5,{x:3,y:0}],[6,{x:3,y:1}],[7,{x:2,y:1}]]);
+    const program={rooms:[{id:2,center:[5,5]},{id:3,center:[2.5,0.5]}],links:[[0,1]]};
+    const result=evaluatePlan({corners,rooms:[[[0,1,2,3]],[[4,5,6,7]]]},program,0.1,{finished:true});
+    assert.deepEqual(result.issues.map(i=>i.message),[
+        'R2 does not contain its bubble center.',
+        'R2 and R3 need a shared wall wide enough for a door.',
+    ]);
+});

@@ -7,10 +7,12 @@ export function evaluatePlan(g, program, width, {finished=false,running=false}={
     const issues=[], doors=[];
     const rings=g.rooms.map((_,r)=>roomRings(g,r));
     const contains=(r,p)=>(rings[r]??[]).reduce((hit,ring)=>hit!==inside(p,ring),false);
+    // The panel's label: the editor's stable id, which deleting a room does not renumber.
+    const name=r=>`R${program.rooms[r]?.id ?? r+1}`;
     if (!program.rooms.length) issues.push({kind:'input',message:'Draw at least one room.'});
     if (g.rooms.length!==program.rooms.length) issues.push({kind:'rooms',message:'The generated room count does not match the bubbles.'});
     program.rooms.forEach((room,r)=>{
-        if (!contains(r,room.center)) issues.push({kind:'center',room:r,message:`Room ${r+1} does not contain its bubble center.`});
+        if (!contains(r,room.center)) issues.push({kind:'center',room:r,message:`${name(r)} does not contain its bubble center.`});
         const parts=[];
         // A walk through a corner shared by two lobes may contain several loops.
         for(const ring of g.rooms[r]??[]){
@@ -27,7 +29,7 @@ export function evaluatePlan(g, program, width, {finished=false,running=false}={
         // Even nesting depth denotes an outer region; odd depth denotes a hole.
         // Use containment rather than winding so reversed rings keep their meaning.
         const components=parts.filter((ring,i)=>parts.filter((outer,j)=>i!==j&&ring.ids.every((id,k)=>outer.ids.includes(id)||inside(ring.points[k],outer.points))).length%2===0).length;
-        if(components>1)issues.push({kind:'disconnected',room:r,message:`Room ${r+1} is split into ${components} separate regions.`});
+        if(components>1)issues.push({kind:'disconnected',room:r,message:`${name(r)} is split into ${components} separate regions.`});
     });
     const edges=wallEdges(g);
     for (const pair of program.links) {
@@ -38,7 +40,7 @@ export function evaluatePlan(g, program, width, {finished=false,running=false}={
         }).sort((a,b)=>b.length-a.length);
         const edge=candidates.find(e=>e.length>=width);
         if (!edge) {
-            issues.push({kind:'connection',rooms:[...pair],message:`Rooms ${r+1} and ${s+1} need a shared wall wide enough for a door.`});
+            issues.push({kind:'connection',rooms:[...pair],message:`${name(r)} and ${name(s)} need a shared wall wide enough for a door.`});
             continue;
         }
         const dx=(edge.b.x-edge.a.x)/edge.length, dy=(edge.b.y-edge.a.y)/edge.length;
