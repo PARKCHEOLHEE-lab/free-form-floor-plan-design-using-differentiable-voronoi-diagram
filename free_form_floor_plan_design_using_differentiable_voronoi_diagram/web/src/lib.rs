@@ -182,8 +182,11 @@ impl WasmOpt {
             return Err("Fit preset areas before running without drawn rooms.".into());
         }
         let initial = init::kmeans_labels(&self.sites, self.target_areas.len().max(1), self.seed);
-        self.room_indices =
-            RoomProgram::fit_automatic_labels(&self.sites, &self.boundary, &initial, &self.target_areas)?;
+        // A preset has no drawn rooms to adjust. When no start has every room in one piece
+        // (a concave boundary can cut a cell in two), keep the KMeans start; the topology
+        // term joins split rooms during the run, as before area fitting.
+        self.room_indices = RoomProgram::fit_automatic_labels(&self.sites, &self.boundary, &initial, &self.target_areas)
+            .unwrap_or(initial);
         Ok(())
     }
 

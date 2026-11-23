@@ -29,3 +29,14 @@ fn anchors_stay_fixed_during_real_optimizer_steps() {
     assert!(opt.configure_program(&[1.,2.], &[], 0.1).is_err());
     assert!(opt.configure_program(&circles.concat(), &[0], 0.1).is_err());
 }
+
+#[test]
+fn preset_without_a_one_piece_start_keeps_the_kmeans_start() {
+    // With 20 sites at seed 145 the notch of shape_a cuts one cell in two, so no start
+    // has every room in one piece. A preset has no drawn rooms to adjust.
+    let boundary = shapes::by_name("shape_a").unwrap().polygon();
+    let mut opt = WasmOpt::build(boundary, 20, vec![0.13,0.30,0.23,0.13,0.21], LossWeights::default(), 145, 0.005);
+    let kmeans = opt.room_indices.clone();
+    assert_eq!(opt.configure_preset_areas(), Ok(()), "a preset must start without drawn rooms");
+    assert_eq!(opt.room_indices, kmeans, "the start stays the KMeans one");
+}
