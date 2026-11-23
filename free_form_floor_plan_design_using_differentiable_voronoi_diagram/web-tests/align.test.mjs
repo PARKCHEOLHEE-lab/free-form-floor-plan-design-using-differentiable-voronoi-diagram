@@ -40,6 +40,29 @@ for (const name of ["shape_a", "shape_b", "shape_c", "shape_d", "shape_e"]) {
     });
 }
 
+test("point merge joins only the two ends of a wall piece shorter than the value", () => {
+    const merged = (cells, boundary) => {
+        const g = fromCells(cells, boundary, { roomCount: cells.length, simplifyTol: 0 });
+        const before = g.corners.size;
+        alignPlan(g, boundary, { mergeTol: 0.02, snapTol: 0 });
+        return before - g.corners.size;
+    };
+    const unit = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    const step = [
+        { room: 0, ring: [[0, 0], [1, 0], [1, 0.5], [0.5, 0.5], [0.5, 0.515], [0, 0.515]] },
+        { room: 1, ring: [[0, 0.515], [0.5, 0.515], [0.5, 0.5], [1, 0.5], [1, 1], [0, 1]] },
+    ];
+    assert.equal(merged(step, unit), 1, "a 0.015 step riser becomes one point");
+    const apart = [
+        { room: 0, ring: [[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5]] },
+        { room: 1, ring: [[0.51, 0], [1, 0], [1, 0.5], [0.51, 0.5]] },
+    ];
+    assert.equal(merged(apart, unit), 0, "corners 0.01 apart with no wall between them stay apart");
+    const wide = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    const diagonal = [{ room: 0, ring: [[0, 0], [0.6, 0], [0.6, 0.6], [0.0177, 0.6177], [0, 0.6]] }];
+    assert.equal(merged(diagonal, wide), 0, "a diagonal piece 0.025 long stays, though x and y differ by 0.0177");
+});
+
 test("point merging and wall snapping use independent tolerances", () => {
     const boundary = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const polygon = [[0, 0], [0.6, 0.012], [0.6, 0.6], [0.014, 0.61], [0, 0.6]];

@@ -40,8 +40,9 @@ export function alignedShare(g, boundary) {
 
 /**
  * Clean the walls in place. The optional `tol` sets a shared default for both passes.
- * 1. merge: corners closer than `mergeTol` (Chebyshev) become one corner; a group holding two
- *    boundary corners is left alone, so the boundary never moves;
+ * 1. merge: the two ends of a wall piece shorter than `mergeTol` become one corner; corners with
+ *    no wall between them stay apart however close, and a group holding two boundary corners is
+ *    left alone, so the boundary never moves;
  * 2. align: in each edge's local frame (the nearest boundary segment), chains of edges whose two
  *    ends differ by at most `snapTol` along one axis are snapped to one shared coordinate, so walls
  *    beside a diagonal boundary straighten along the diagonal instead of along x and y.
@@ -58,12 +59,10 @@ function mergeCorners(g, tol) {
         while (parent.get(x) !== x) x = parent.get(x);
         return x;
     };
-    for (let i = 0; i < ids.length; i++) {
-        const p = g.corners.get(ids[i]);
-        for (let j = i + 1; j < ids.length; j++) {
-            const q = g.corners.get(ids[j]);
-            if (Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y)) < tol) parent.set(find(ids[i]), find(ids[j]));
-        }
+    for (const { a, b } of wallEdges(g)) {
+        const p = g.corners.get(a);
+        const q = g.corners.get(b);
+        if (Math.hypot(p.x - q.x, p.y - q.y) < tol) parent.set(find(a), find(b));
     }
     const groups = new Map();
     for (const id of ids) groups.set(find(id), [...(groups.get(find(id)) ?? []), id]);
