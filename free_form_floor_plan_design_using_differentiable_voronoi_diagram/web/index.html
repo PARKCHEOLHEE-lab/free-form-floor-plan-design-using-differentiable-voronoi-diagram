@@ -281,6 +281,7 @@
         <symbol id="i-door" viewBox="0 0 24 24"><path d="M2 20h5"/><path d="M19 20h3"/><path d="M7 20V8"/><path d="M7 8a12 12 0 0 1 12 12"/></symbol>
         <symbol id="i-bubbles" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49"/><path d="M15.41 6.51 8.59 10.49"/></symbol>
         <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 2v20"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="m5 9-3 3 3 3"/><path d="m9 5 3-3 3 3"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
         <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
         <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
         <symbol id="i-vector-square" viewBox="0 0 24 24"><path d="M19.5 7a24 24 0 0 1 0 10"/><path d="M4.5 7a24 24 0 0 0 0 10"/><path d="M7 19.5a24 24 0 0 0 10 0"/><path d="M7 4.5a24 24 0 0 1 10 0"/><rect x="17" y="17" width="5" height="5" rx="1"/><rect x="17" y="2" width="5" height="5" rx="1"/><rect x="2" y="17" width="5" height="5" rx="1"/><rect x="2" y="2" width="5" height="5" rx="1"/></symbol>
@@ -292,6 +293,7 @@
       <button class="tool" data-open="rooms" aria-label="Rooms"><svg class="ic"><use href="#i-rooms"/></svg></button>
       <button class="tool" data-open="optimize" aria-label="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
       <button class="tool" data-open="adjust" aria-label="Adjustment"><svg class="ic"><use href="#i-move"/></svg></button>
+      <button class="tool" data-export aria-label="Export JSON"><svg class="ic"><use href="#i-download"/></svg></button>
     </nav>
 
     <!-- top-right: the view gizmo (web/plan/gizmo.js fills it) -->
@@ -392,6 +394,7 @@ import { createBubbleEditor } from './plan/bubble-editor.js';
 import { createBoundaryEditor } from './plan/boundary-editor.js';
 import { createWallEditor } from './plan/wall-editor.js';
 import { roomShares } from './plan/wall-edit.js';
+import { exportName, exportPlan } from './plan/export.js';
 const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo') });
 const $ = id => document.getElementById(id);
 
@@ -828,6 +831,31 @@ worker.onmessage = (e) => {
       break;
   }
 };
+
+// ---------- export ----------
+// The last toolbar icon downloads the state on screen as JSON at once; it never asks and never
+// changes the plan. Weights are the slider values, as the user set them (params() rescales them).
+document.querySelector('.toolbar [data-export]').addEventListener('click', () => {
+  const plan = adjusted ?? lastAligned;
+  if (!plan || !lastFrame || !boundaryRing) return;
+  const now = new Date();
+  const data = exportPlan({
+    mode, boundary: boundaryRing, program: currentProgram()?.snapshot() ?? null,
+    settings: {
+      sites: +$('sites').value,
+      weights: { l1: +$('w_wall').value, cos: +$('w_cosine').value, area: +$('w_area').value, lloyd: +$('w_lloyd').value, topo: +$('w_topo').value },
+      iterations: +$('iters').value, lr: +$('lr').value, seed: +$('seed').value | 0,
+      wallWidth, pointMerge: +pointMergeInput.value, wallSnap: +wallSnapInput.value,
+      walls: wallsMode, doors: $('show-doors').checked, bubbles: $('show-bubbles').checked,
+    },
+    frame: lastFrame, finished: runFinished, plan, edited: !!adjusted, now,
+  });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  link.download = exportName(mode, now);
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 0);
+});
 
 // ---------- presets ----------
 // Per-boundary starting configuration. A boundary listed here loads that full

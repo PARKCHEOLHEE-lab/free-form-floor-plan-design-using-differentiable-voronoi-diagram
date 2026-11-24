@@ -2,6 +2,7 @@
 // Run: cd web-tests && npm install && npm run e2e
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { serve } from "./serve.mjs";
 
@@ -35,7 +36,7 @@ async function findWall(page) {
 
 test("adjustment: dragging a wall moves it, updates the room areas beside it, shows a snap label, and undoes", { timeout: 120_000 }, async () => {
     await onPage(async (page) => {
-        assert.deepEqual(await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label"))), ["Rooms", "Optimization", "Adjustment"]);
+        assert.deepEqual(await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label"))), ["Rooms", "Optimization", "Adjustment", "Export JSON"]);
         await page.click("button[data-open=adjust]");
         assert.equal(await page.locator(".panel[data-panel=adjust] .label").first().textContent(), "Adjustment");
         assert.equal(await page.locator("[data-walls=aligned].active").count(), 1, "opening Adjustment shows the Aligned walls");
@@ -371,5 +372,46 @@ test("adjustment: clicking a wall shows a round rotate handle, dragging it turns
         await page.mouse.up();
         assert.equal(await selectedWall(page), null, "a locked wall is not selected");
         assert.equal(await handle(page), null, "and shows no handle");
+    });
+});
+
+test("export: the last toolbar icon downloads the state as JSON at once, without asking or changing the plan, and wall edits show as an edited plan", { timeout: 180_000 }, async () => {
+    await onPage(async (page) => {
+        const tools = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
+        assert.equal(tools.at(-1), "Export JSON", `the last toolbar icon: ${tools}`);
+        const button = page.locator(".toolbar .tool").last();
+        assert.equal(await button.locator("use").getAttribute("href"), "#i-download");
+        assert.equal(await button.evaluate((b) => getComputedStyle(b, "::after").content), '"Export JSON"', "the toolbar tooltip names it");
+        const download = async () => {
+            const [file] = await Promise.all([page.waitForEvent("download"), button.click()]);
+            assert.match(file.suggestedFilename(), /^plan-shape_e-\d{8}-\d{6}\.json$/);
+            return JSON.parse(readFileSync(await file.path(), "utf8"));
+        };
+
+        const shot = await pixels(page);
+        const first = await download();
+        assert.deepEqual(Object.keys(first), ["format", "version", "exportedAt", "boundary", "program", "settings", "frame", "plan"]);
+        assert.deepEqual([first.format, first.version, first.boundary.mode], ["voronoi-plan", 1, "shape_e"]);
+        const preset = JSON.parse(readFileSync(new URL("./fixtures/shape_e.json", import.meta.url), "utf8")).boundary;
+        assert.equal(first.boundary.ring.length, preset.length, "the ring of preset E");
+        first.boundary.ring.forEach((p, i) => assert.ok(Math.hypot(p[0] - preset[i][0], p[1] - preset[i][1]) < 1e-6, `corner ${i} of preset E`));
+        assert.equal(first.program, null, "a preset keeps its automatic rooms until a room is drawn (index.html ensureProgram)");
+        assert.equal(first.settings.walls, "raw");
+        assert.equal(first.frame.iteration, 0);
+        assert.equal(first.frame.cells.length, first.settings.sites);
+        assert.equal(first.plan.source, "aligned");
+        assert.equal(first.plan.areaShares.length, (await areasNow(page)).length, "one share per room in the area list");
+        assert.equal(await pixels(page), shot, "exporting does not change the plan");
+
+        await page.click("button[data-open=adjust]");
+        await dragWall(page);
+        const edited = await pixels(page);
+        const second = await download();
+        assert.equal(await dialogOpen(page), false, "exporting never asks");
+        assert.equal(await hasEdits(page), true, "and keeps the wall edits");
+        assert.equal(await pixels(page), edited);
+        assert.equal(second.plan.source, "edited");
+        assert.equal(second.settings.walls, "aligned");
+        assert.notDeepEqual(second.plan.corners, first.plan.corners, "the dragged wall is in the file");
     });
 });

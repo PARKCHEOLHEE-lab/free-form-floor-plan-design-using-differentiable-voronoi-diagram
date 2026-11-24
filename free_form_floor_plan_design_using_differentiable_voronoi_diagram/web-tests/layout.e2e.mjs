@@ -161,7 +161,7 @@ test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s
                     return { text: s.content, opacity: +s.opacity, left: parseFloat(s.left), width: b.getBoundingClientRect().width };
                 });
             const tools = await page.$$(".toolbar .tool");
-            assert.equal(tools.length, 3);
+            assert.equal(tools.length, 4);
             for (const tool of tools) {
                 const name = await tool.getAttribute("aria-label");
                 assert.equal((await tip(tool)).opacity, 0, `${name}: the tooltip shows before hover`);
@@ -213,7 +213,7 @@ test("optimization: one icon opens the loss weights, the run settings and the si
     try {
         await atSize(url, [1145, 820], async (page) => {
             const labels = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
-            assert.deepEqual(labels, ["Rooms", "Optimization", "Adjustment"]);
+            assert.deepEqual(labels, ["Rooms", "Optimization", "Adjustment", "Export JSON"]);
             assert.equal(await page.locator(".losscard").count(), 0, "no separate loss card");
             assert.equal(await page.locator(".panel[data-panel=weights]").count(), 0, "no separate weights panel");
             for (const id of ["w_wall", "w_cosine", "w_area", "w_lloyd", "w_topo", "iters", "lr", "seed", "losspanel"])
@@ -273,7 +273,7 @@ test("rooms: one icon opens the boundary choice above the room bubbles", { timeo
     try {
         await atSize(url, [1145, 820], async (page) => {
             const labels = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
-            assert.deepEqual(labels, ["Rooms", "Optimization", "Adjustment"]);
+            assert.deepEqual(labels, ["Rooms", "Optimization", "Adjustment", "Export JSON"]);
             assert.equal(await page.locator(".panel[data-panel=boundary]").count(), 0, "no separate boundary panel");
             for (const sel of ["#presets", "#custom-boundaries", "#boundary-draw", "#bubble-message", "#roomareas", "#connections"])
                 assert.equal(await page.$eval(sel, (e) => e.closest(".panel")?.dataset.panel ?? null), "rooms", `${sel} is in the Rooms panel`);
@@ -678,11 +678,11 @@ const presetCell = async (page) => {
     return cell;
 };
 
-test("toolbar: only the Rooms, Optimization and Adjustment icons", { timeout: 60_000 }, async () => {
+test("toolbar: only the Rooms, Optimization, Adjustment and Export JSON icons", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            assert.deepEqual(await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label"))), ["Rooms", "Optimization", "Adjustment"]);
+            assert.deepEqual(await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label"))), ["Rooms", "Optimization", "Adjustment", "Export JSON"]);
             assert.equal(await page.locator("#reset").count(), 0, "no Reset");
             assert.equal(await page.locator("button[data-open=display]").count(), 0, "no Display icon");
             assert.equal(await page.locator(".toolbar #run").count(), 0, "Run is not in the toolbar");
