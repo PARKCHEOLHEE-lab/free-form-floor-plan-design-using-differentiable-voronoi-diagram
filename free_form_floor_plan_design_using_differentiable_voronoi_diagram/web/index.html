@@ -951,6 +951,8 @@ function showPanel(name) {
   openPanel = openPanel === name ? null : name;
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('open', p.dataset.panel === openPanel));
   document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));
+  // The playhead measures the graph, which has no size while its panel is closed.
+  if (openPanel === 'optimize' && lastFrame) movePlayhead(lastFrame.iteration);
 }
 document.querySelectorAll('button[data-open]').forEach(b => b.addEventListener('click', () => showPanel(b.dataset.open)));
 

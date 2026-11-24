@@ -234,3 +234,33 @@ test("optimization: one icon opens the loss weights, the run settings and the si
         proc.kill();
     }
 });
+
+test("optimization: after a run with the panel closed, opening it puts the playhead and value tags in the graph", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("#run");
+            await page.waitForFunction(() => +(/iter (\d+)/.exec(document.getElementById("tick").textContent)?.[1] ?? 0) >= 20);
+            await page.click("#run"); // pause
+            await page.waitForTimeout(300);
+            await page.click("button[data-open=optimize]");
+            const m = await page.evaluate(() => {
+                const box = (el) => el.getBoundingClientRect();
+                const first = box(document.getElementById("sp_total").closest(".spark"));
+                const last = box(document.getElementById("sp_topo").closest(".spark"));
+                const line = box(document.getElementById("playhead"));
+                const tag = box(document.getElementById("vt_total"));
+                return { first: first.toJSON(), last: last.toJSON(), line: line.toJSON(), tag: tag.toJSON(),
+                    text: document.getElementById("vt_total").textContent };
+            });
+            const near = (a, b) => Math.abs(a - b) <= 1;
+            assert.ok(near(m.line.top, m.first.top) && near(m.line.bottom, m.last.bottom), `the line spans the graph rows: ${JSON.stringify(m.line)}`);
+            assert.ok(m.line.left > m.first.left && m.line.left < m.first.right, `the line sits inside the graph: ${m.line.left} in ${m.first.left}..${m.first.right}`);
+            assert.ok(m.text.length > 0, "the total tag shows a value");
+            assert.ok(near((m.tag.top + m.tag.bottom) / 2, (m.first.top + m.first.bottom) / 2), "the total tag sits on its row");
+            assert.ok(m.tag.left >= m.first.left - 1 && m.tag.right <= m.first.right + 1, `the total tag stays inside the graph: ${m.tag.left}..${m.tag.right}`);
+        });
+    } finally {
+        proc.kill();
+    }
+});
