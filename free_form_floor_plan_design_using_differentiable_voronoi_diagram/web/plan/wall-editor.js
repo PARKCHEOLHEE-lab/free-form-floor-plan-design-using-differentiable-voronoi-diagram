@@ -6,7 +6,7 @@
 import { segmentDistance } from './geom.js';
 import { wallEdges } from './graph.js';
 import { SNAP_LABELS } from './boundary-editor.js';
-import { addCorner, moveCorner, moveRun, removeCorner, rotateRun, snapAngle, snapCorner, snapOffset, wallRun } from './wall-edit.js';
+import { addCorner, movableParts, moveCorner, moveRun, removeCorner, rotateRun, snapAngle, snapCorner, snapOffset, wallRun } from './wall-edit.js';
 
 const PICK = 6;        // css px from a wall that still picks it (as the bubble editor picks a door link)
 const CORNER_PICK = 8; // css px from a corner that picks the corner before the walls through it
@@ -32,6 +32,8 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
     const guide = overlay.querySelector('[data-guide]');
     const marker = overlay.querySelector('[data-cursor]');
     const label = overlay.querySelector('text');
+    const marks = overlay.querySelector('[data-movable]');
+    let marked = null;  // { g, corners: [[id, circle]], walls: [[a, b, line]] } marked on plan g
     let enabled = false;
     let hover = null;   // { g, run } (a wall) or { g, id } (a corner) under the pointer
     let press = null;   // hover plus { start, screen, dragged, result }
@@ -107,9 +109,37 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
         drawSelection();
     }
 
+    /**
+     * Mark every corner and wall a drag can move, so the panel shows what to grab before any
+     * hover; listed once per plan, placed again on every redraw. Returns whether marks show.
+     */
+    function drawMarks() {
+        const g = plan();
+        const shown = enabled && !!g && canEdit();
+        marks.toggleAttribute('hidden', !shown);
+        if (!shown) return false;
+        if (marked?.g !== g) {
+            const make = (tag) => document.createElementNS(marks.namespaceURI, tag);
+            const { corners, walls } = movableParts(g);
+            marked = { g, corners: corners.map((id) => [id, make('circle')]), walls: walls.map(([a, b]) => [a, b, make('line')]) };
+            for (const [, c] of marked.corners) c.setAttribute('r', 3.5);
+            marks.replaceChildren(...marked.walls.map((w) => w[2]), ...marked.corners.map((c) => c[1]));
+        }
+        for (const [id, c] of marked.corners) {
+            const [x, y] = screenOf(g, id);
+            c.setAttribute('cx', x);
+            c.setAttribute('cy', y);
+        }
+        for (const [a, b, l] of marked.walls) {
+            const [[x1, y1], [x2, y2]] = [screenOf(g, a), screenOf(g, b)];
+            for (const [k, v] of Object.entries({ x1, y1, x2, y2 })) l.setAttribute(k, v);
+        }
+        return true;
+    }
+
     function draw(g, item, snap) {
         drawSelection();
-        overlay.toggleAttribute('hidden', !item && !selected);
+        overlay.toggleAttribute('hidden', !drawMarks() && !item && !selected);
         path.toggleAttribute('hidden', !item?.run);
         spot.toggleAttribute('hidden', !item || !!item.run);
         if (!item) { for (const el of [guide, marker, label]) el.toggleAttribute('hidden', true); return; }

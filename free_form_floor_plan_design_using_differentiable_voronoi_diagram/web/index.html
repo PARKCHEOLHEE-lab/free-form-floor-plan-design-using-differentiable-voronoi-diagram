@@ -181,6 +181,8 @@
   :is(#boundary-sketch, #wall-sketch) circle { fill:var(--light); stroke:currentColor; stroke-width:2; }
   #wall-sketch [data-selected] { fill:currentColor; }   /* the selected corner */
   #wall-sketch [data-handle] { fill:white; stroke:var(--ui-fg); stroke-width:1; }   /* the rotate handle, as .bubble-handle */
+  #wall-sketch [data-movable] line { stroke-width:1; stroke-dasharray:4 3; }   /* a wall that can move, marked before any hover */
+  #wall-sketch [data-movable] circle { stroke-width:1.5; }   /* a corner that can move */
   #boundary-sketch [data-first] { fill:currentColor; }
   #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
   #plan[data-boundary-drawing] { cursor:crosshair !important; }
@@ -252,7 +254,7 @@
             <div class="dialog-actions"><button value="cancel">Cancel</button><button value="discard" class="primary">Discard</button></div>
           </form>
         </dialog>
-        <svg id="wall-sketch" aria-hidden="true" hidden><path data-wall></path><circle data-corner r="6" hidden></circle><circle data-selected r="6" hidden></circle><path data-chosen hidden></path><circle data-handle r="4.5" hidden></circle><line data-guide hidden></line><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
+        <svg id="wall-sketch" aria-hidden="true" hidden><g data-movable hidden></g><path data-wall></path><circle data-corner r="6" hidden></circle><circle data-selected r="6" hidden></circle><path data-chosen hidden></path><circle data-handle r="4.5" hidden></circle><line data-guide hidden></line><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
         <svg id="boundary-sketch" aria-hidden="true" hidden><polyline></polyline><line data-edge-guide hidden></line><line data-tracking-guide hidden></line><circle data-first r="4" hidden></circle><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
       </div>
       <!-- status text is no longer shown (the playhead + buttons convey run state);

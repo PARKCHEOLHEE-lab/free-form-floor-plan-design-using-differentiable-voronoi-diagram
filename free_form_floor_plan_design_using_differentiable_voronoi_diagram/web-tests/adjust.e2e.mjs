@@ -415,3 +415,50 @@ test("export: the last toolbar icon downloads the state as JSON at once, without
         assert.notDeepEqual(second.plan.corners, first.plan.corners, "the dragged wall is in the file");
     });
 });
+
+/** The always-on marks of the corners and walls that can move, or null while they are hidden. */
+const movableMarks = (page) => page.$eval("#wall-sketch", (s) => {
+    const g = s.querySelector("[data-movable]");
+    if (s.hasAttribute("hidden") || !g || g.hasAttribute("hidden")) return null;
+    return {
+        corners: [...g.querySelectorAll("circle")].map((c) => [+c.getAttribute("cx"), +c.getAttribute("cy")]),
+        walls: [...g.querySelectorAll("line")].map((l) => ["x1", "y1", "x2", "y2"].map((k) => +l.getAttribute(k))),
+    };
+});
+/** Whether screen point p is on the plan canvas (not under a panel, the edit bar or the gizmo). */
+const onCanvas = (page, p) => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id === "plan", p);
+
+test("adjustment: with the panel open, every corner and wall that can move is marked without hover, each mark picks its corner or wall, and the marks hide while a run goes and come back when it ends", { timeout: 240_000 }, async () => {
+    await onPage(async (page) => {
+        assert.equal(await movableMarks(page), null, "no marks before Adjustment opens");
+        await page.click("button[data-open=adjust]");
+        const marks = await movableMarks(page);
+        assert.ok(marks && marks.corners.length >= 10 && marks.walls.length >= 10, `marks without hover: ${JSON.stringify(marks && [marks.corners.length, marks.walls.length])}`);
+
+        let corners = 0, walls = 0;
+        for (const p of marks.corners) {
+            if (!(await onCanvas(page, p))) continue;
+            await page.mouse.move(...p);
+            assert.notEqual((await hovered(page)).corner, null, `the corner mark at ${p} picks a corner`);
+            corners++;
+        }
+        // the middle of a wall mark, away from the corners (a corner within 8 px is picked first)
+        for (const [x1, y1, x2, y2] of marks.walls) {
+            const m = [(x1 + x2) / 2, (y1 + y2) / 2];
+            if (Math.hypot(x2 - x1, y2 - y1) < 30 || marks.corners.some((c) => Math.hypot(c[0] - m[0], c[1] - m[1]) < 12) || !(await onCanvas(page, m))) continue;
+            await page.mouse.move(...m);
+            assert.equal((await hovered(page)).wall, true, `the wall mark through ${m} picks a wall`);
+            walls++;
+        }
+        assert.ok(corners >= 10 && walls >= 5, `checked ${corners} corner marks and ${walls} wall marks`);
+
+        await page.click("button[data-open=optimize]");
+        await page.click("#run");
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Pause");
+        await page.click("button[data-open=adjust]");
+        assert.equal(await movableMarks(page), null, "no marks while the plan is changing");
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Run", null, { timeout: 150_000 });
+        const after = await movableMarks(page);
+        assert.ok(after && after.corners.length >= 10 && after.walls.length >= 10, "the marks come back when the run ends, with no pointer move");
+    });
+});
