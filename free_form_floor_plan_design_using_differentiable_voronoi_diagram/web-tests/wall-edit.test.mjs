@@ -126,3 +126,32 @@ test("a dragged wall snaps to a corner or a wall midpoint within 10 screen pixel
     assert.equal(snapOffset(g, stem, 0.3, screen(100)).kind, "free", "20 px away at 100 px per unit");
     assert.equal(snapOffset(g, stem, 0.3, screen(20)).offset, 0.5, "4 px away at 20 px per unit");
 });
+
+test("walls of the preset E preview move although alignment left two corners on one point", () => {
+    // the step 0 preview the page shows first; alignment snaps some corner pairs onto one point,
+    // so a few room outlines already touch themselves before any edit
+    const preview = JSON.parse(readFileSync(new URL("./fixtures/preview_e.json", import.meta.url)));
+    const plan = fromCells(preview.cells, preview.boundary, { roomCount: preview.roomCount, simplifyTol: 0.004 });
+    alignPlan(plan, preview.boundary, { mergeTol: 0.02, snapTol: 0.02 });
+    const before = areas(plan);
+    const length = (w) => Math.hypot(plan.corners.get(w.a).x - plan.corners.get(w.b).x, plan.corners.get(w.a).y - plan.corners.get(w.b).y);
+    const walls = wallEdges(plan).filter((w) => w.rooms.length === 2 && length(w) > 0);
+    assert.ok(wallEdges(plan).some((w) => length(w) === 0), "the preview has two corners on one point");
+    assert.equal(wallEdges(plan).filter((w) => w.rooms.length === 2 && length(w) === 0).map((w) => wallRun(plan, w.a, w.b)).filter(Boolean).length, 0, "a wall of no length cannot be picked");
+    let moved = 0;
+    for (const w of walls) {
+        const run = wallRun(plan, w.a, w.b);
+        if (run.locked) continue;
+        const range = run.range[1] - run.range[0];
+        const step = Math.min(0.01, run.range[1] / 2);
+        const result = moveRun(plan, run, step);
+        if (Math.abs(result.offset) < 1e-9) continue;
+        moved++;
+        const after = areas(result.graph);
+        assert.ok(after.every(Number.isFinite), "every room keeps a real area");
+        assert.ok(Math.abs(after.reduce((s, a) => s + a) - before.reduce((s, a) => s + a)) < 1e-9, "the total area stays");
+        after.forEach((a, k) => { if (!run.rooms.includes(k)) assert.ok(Math.abs(a - before[k]) < 1e-12, `room ${k} keeps its area`); });
+        assert.ok(range > 0, "a movable wall has room to move");
+    }
+    assert.ok(moved >= walls.length / 2, `${moved} of ${walls.length} walls of the preview move`);
+});

@@ -3,7 +3,7 @@
 import { components } from "./align.js";
 import { SNAP_RADIUS, visitSnapTargets } from "./boundary-editor.js";
 import { roomRings, wallEdges } from "./graph.js";
-import { isSimpleBoundary, signedArea2 } from "./geom.js";
+import { segmentDistance, signedArea2 } from "./geom.js";
 
 const TOL = 1e-9;
 const KINK = Math.sin(10 * Math.PI / 180); // walls within 10 degrees count as one straight line (alignment leaves small kinks)
@@ -22,14 +22,16 @@ const unit = (v) => { const l = Math.hypot(v[0], v[1]); return [v[0] / l, v[1] /
  * walls meet at different angles (a Y junction) it slides along the one most across the run and
  * the others turn about their far ends. A boundary corner slides along the boundary, so a run that
  * ends where the boundary bends, or where the boundary runs on in the wall's direction, is
- * `locked`. Returns null when a-b is not an interior wall.
+ * `locked`. Alignment can snap two corners onto one point; such twins move together. Returns null
+ * when a-b is not an interior wall of some length.
  * The normal points right (+x), or up for a horizontal wall; a positive offset moves that way.
  */
 export function wallRun(g, a, b) {
     const all = wallEdges(g);
     const interior = all.filter((e) => e.rooms.length === 2);
     const pick = interior.find((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
-    if (!pick) return null;
+    const length = (e) => Math.hypot(...sub(point(g, e.a), point(g, e.b)));
+    if (!pick || length(pick) < TOL) return null;
     const origin = point(g, pick.a);
     const u = unit(sub(point(g, pick.b), origin));
     let normal = [-u[1], u[0]];
@@ -40,16 +42,25 @@ export function wallRun(g, a, b) {
     const inRun = new Set(edges.map(([x, y]) => `${x},${y}`));
     const corners = [...new Set(edges.flat())];
 
+    // a corner and the corners on the same point (joined by walls of no length)
+    const twinsOf = (id) => {
+        const group = new Set([id]);
+        for (const x of group) for (const e of all) if ((e.a === x || e.b === x) && length(e) < TOL) group.add(e.a === x ? e.b : e.a);
+        return group;
+    };
     const slides = new Map(); // corner -> its movement per unit of offset
     let lo = -Infinity, hi = Infinity, locked = false;
     for (const id of corners) {
+        if (slides.has(id)) continue; // a twin already placed
+        const twins = twinsOf(id);
         const p = point(g, id);
-        const meeting = all.filter((e) => (e.a === id || e.b === id) && !inRun.has(`${e.a},${e.b}`));
-        if (!meeting.length) { slides.set(id, normal); continue; } // a point inside the straight wall moves with it
-        const fixed = g.corners.get(id).fixed;
+        const meeting = all.filter((e) => (twins.has(e.a) || twins.has(e.b)) && !inRun.has(`${e.a},${e.b}`) && length(e) >= TOL);
+        const place = (v) => { for (const x of twins) slides.set(x, v); };
+        if (!meeting.length) { place(normal); continue; } // a point inside the straight wall moves with it
+        const fixed = [...twins].some((x) => g.corners.get(x).fixed);
         // a boundary corner slides along the boundary; an inner one along the wall most across the run
         const guides = fixed ? meeting.filter((e) => e.rooms.length === 1) : meeting;
-        const ends = guides.map((e) => point(g, e.a === id ? e.b : e.a));
+        const ends = guides.map((e) => point(g, twins.has(e.a) ? e.b : e.a));
         const dirs = ends.map((q) => unit(sub(q, p)));
         const lead = fixed ? dirs[0] : dirs.reduce((best, d) => (Math.abs(dot(d, normal)) > Math.abs(dot(best, normal)) ? d : best));
         const onGuide = dirs.map((d) => Math.abs(cross(lead, d)) <= KINK); // the guide wall, on both sides of the corner
@@ -59,7 +70,7 @@ export function wallRun(g, a, b) {
         const along = dot(w, normal);
         if (Math.abs(along) < KINK) { locked = true; break; }
         const rate = 1 / along;
-        slides.set(id, [w[0] * rate, w[1] * rate]);
+        place([w[0] * rate, w[1] * rate]);
         // stop before any wall this corner slides along gets shorter than MIN_WALL
         for (const q of others) {
             const k = dot(sub(q, p), w);
@@ -72,9 +83,11 @@ export function wallRun(g, a, b) {
 }
 
 /**
- * Move a run by `offset` along its normal, clamped to its range and then to the largest offset
- * that keeps every room beside it a simple ring facing the same way. Returns { graph, offset }, or
- * null for a locked run.
+ * Move a run by `offset` along its normal, clamped to its range and then to the largest offset at
+ * which no moved wall crosses or newly touches another wall or corner or gets shorter than
+ * MIN_WALL (or than it already was), and every room beside it keeps its orientation.
+ * (Rings are not required to be simple: alignment can leave a ring touching itself.)
+ * Returns { graph, offset }, or null for a locked run.
  */
 export function moveRun(g, run, offset) {
     if (!run || run.locked) return null;
@@ -88,7 +101,33 @@ export function moveRun(g, run, offset) {
         return { corners, rooms: g.rooms.map((rings) => rings.map((ring) => [...ring])) };
     };
     const sides = run.rooms.map((r) => roomRings(g, r).map((ring) => Math.sign(signedArea2(ring))));
-    const valid = (h) => run.rooms.every((r, k) => roomRings(h, r).every((ring, i) => isSimpleBoundary(ring) && Math.sign(signedArea2(ring)) === sides[k][i]));
+    const edges = wallEdges(g);
+    const movedEdges = edges.filter((e) => run.slides.has(e.a) || run.slides.has(e.b));
+    const side = (a, b, c) => cross(sub(b, a), sub(c, a));
+    const crosses = (h, e, f) => {
+        if (e.a === f.a || e.a === f.b || e.b === f.a || e.b === f.b) return false;
+        const [p1, p2, q1, q2] = [point(h, e.a), point(h, e.b), point(h, f.a), point(h, f.b)];
+        return side(p1, p2, q1) * side(p1, p2, q2) < 0 && side(q1, q2, p1) * side(q1, q2, p2) < 0;
+    };
+    // a corner lying on a moved wall it does not end (corners on one point as its ends are its twins)
+    const touches = (h) => {
+        const found = new Set();
+        for (const e of movedEdges) {
+            const a = point(h, e.a), b = point(h, e.b);
+            for (const [id, c] of h.corners) {
+                const p = [c.x, c.y];
+                if (Math.hypot(...sub(p, a)) < TOL || Math.hypot(...sub(p, b)) < TOL) continue;
+                if (segmentDistance(p, a, b) < TOL) found.add(`${id}:${e.a},${e.b}`);
+            }
+        }
+        return found;
+    };
+    const touching = touches(g);
+    const span = (h, e) => Math.hypot(...sub(point(h, e.a), point(h, e.b)));
+    const valid = (h) => movedEdges.every((e) => span(h, e) >= Math.min(MIN_WALL, span(g, e)) - TOL) &&
+        movedEdges.every((e) => edges.every((f) => !crosses(h, e, f))) &&
+        [...touches(h)].every((k) => touching.has(k)) &&
+        run.rooms.every((r, k) => roomRings(h, r).every((ring, i) => Math.sign(signedArea2(ring)) === sides[k][i]));
     let t = Math.min(Math.max(offset, run.range[0]), run.range[1]);
     if (!valid(moved(t))) {
         let ok = 0;
@@ -116,7 +155,7 @@ export function roomShares(g) {
  * the given offset when nothing is close enough.
  */
 export function snapOffset(g, run, offset, project) {
-    const moving = new Set(run.corners);
+    const moving = new Set(run.slides.keys());
     const points = [...g.corners].filter(([id]) => !moving.has(id)).map(([, c]) => [c.x, c.y]);
     const edges = wallEdges(g).filter((e) => !moving.has(e.a) && !moving.has(e.b)).map((e) => [point(g, e.a), point(g, e.b)]);
     let nearest = SNAP_RADIUS;
