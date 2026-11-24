@@ -1,15 +1,18 @@
 // Pointer editing of walls while the Adjustment panel is open: hover a wall to see the straight
 // run that would move, drag it to slide that run (wall-edit.js), with the Draw boundary snaps.
 // Near a corner (8 px) the corner is picked instead, and a drag moves that corner. A click selects
-// a corner, Delete or Backspace removes it, and a double click on a wall adds a corner there.
+// a corner, Delete or Backspace removes it, and a double click on a wall adds a corner there. A click
+// on a wall selects it and shows a round handle; dragging the handle turns the wall about its middle.
 import { segmentDistance } from './geom.js';
 import { wallEdges } from './graph.js';
 import { SNAP_LABELS } from './boundary-editor.js';
-import { addCorner, moveCorner, moveRun, removeCorner, snapCorner, snapOffset, wallRun } from './wall-edit.js';
+import { addCorner, moveCorner, moveRun, removeCorner, rotateRun, snapAngle, snapCorner, snapOffset, wallRun } from './wall-edit.js';
 
 const PICK = 6;        // css px from a wall that still picks it (as the bubble editor picks a door link)
 const CORNER_PICK = 8; // css px from a corner that picks the corner before the walls through it
 const DRAG_START = 3;  // css px a press must travel before it drags
+const HANDLE = 28;     // css px from the middle of a selected wall to its rotate handle, along its normal
+const HANDLE_HIT = 9;  // css px around the handle that grab it (as the bubble editor's resize handle)
 
 /**
  * `plan()` is the graph on screen (the edited copy, or the live aligned plan) or null;
@@ -24,13 +27,15 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
     const path = overlay.querySelector('[data-wall]');
     const spot = overlay.querySelector('[data-corner]');
     const chosen = overlay.querySelector('[data-selected]');
+    const chosenWall = overlay.querySelector('[data-chosen]');
+    const knob = overlay.querySelector('[data-handle]');
     const guide = overlay.querySelector('[data-guide]');
     const marker = overlay.querySelector('[data-cursor]');
     const label = overlay.querySelector('text');
     let enabled = false;
     let hover = null;   // { g, run } (a wall) or { g, id } (a corner) under the pointer
     let press = null;   // hover plus { start, screen, dragged, result }
-    let selected = null; // { id } of the selected corner
+    let selected = null; // { id } of the selected corner, or { wall: [a, b] } of the selected wall
 
     const screenOf = (g, id) => view.screenPoint([g.corners.get(id).x, g.corners.get(id).y]);
 
@@ -56,18 +61,44 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
         if (corner !== null && moveCorner(g, corner, [g.corners.get(corner).x, g.corners.get(corner).y])) return { g, id: corner }; // not a boundary bend
         const best = wallAt(g, x, y);
         const run = best && wallRun(g, best.a, best.b);
-        return run && !run.locked ? { g, run } : null;
+        return run && !run.locked ? { g, run, a: best.a, b: best.b } : null;
+    }
+
+    const runPath = (g, run) => run.edges.map(([a, b]) => `M${screenOf(g, a).join(',')}L${screenOf(g, b).join(',')}`).join('');
+    /** The rotate handle of a run, HANDLE px from its middle along its normal, on screen. */
+    function handleAt(run) {
+        const m = view.screenPoint(run.mid);
+        const q = view.screenPoint([run.mid[0] + run.normal[0], run.mid[1] + run.normal[1]]);
+        const l = Math.hypot(q[0] - m[0], q[1] - m[1]) || 1;
+        return [m[0] + (q[0] - m[0]) / l * HANDLE, m[1] + (q[1] - m[1]) / l * HANDLE];
+    }
+    /** The selected wall's run on the plan now, or null. */
+    function selectedRun() {
+        const g = plan();
+        const run = selected?.wall && g && wallRun(g, ...selected.wall);
+        return run && !run.locked ? run : null;
     }
 
     function drawSelection() {
         const g = plan();
-        if (selected && !g?.corners.has(selected.id)) selected = null; // undone or rebuilt
-        if (selected) canvas.dataset.selectedCorner = selected.id; else delete canvas.dataset.selectedCorner;
-        chosen.toggleAttribute('hidden', !selected);
-        if (!selected) return;
-        const [cx, cy] = screenOf(g, selected.id);
-        chosen.setAttribute('cx', cx);
-        chosen.setAttribute('cy', cy);
+        const run = selectedRun();
+        if (selected?.wall ? !run : selected && !g?.corners.has(selected.id)) selected = null; // undone or rebuilt
+        const corner = !!selected && !selected.wall;
+        if (corner) canvas.dataset.selectedCorner = selected.id; else delete canvas.dataset.selectedCorner;
+        if (selected?.wall) canvas.dataset.selectedWall = selected.wall.join(','); else delete canvas.dataset.selectedWall;
+        chosen.toggleAttribute('hidden', !corner);
+        chosenWall.toggleAttribute('hidden', !selected?.wall);
+        knob.toggleAttribute('hidden', !selected?.wall);
+        if (corner) {
+            const [cx, cy] = screenOf(g, selected.id);
+            chosen.setAttribute('cx', cx);
+            chosen.setAttribute('cy', cy);
+        } else if (selected) {
+            chosenWall.setAttribute('d', runPath(g, run));
+            const [hx, hy] = handleAt(run);
+            knob.setAttribute('cx', hx);
+            knob.setAttribute('cy', hy);
+        }
     }
 
     function select(next) {
@@ -83,7 +114,7 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
         spot.toggleAttribute('hidden', !item || !!item.run);
         if (!item) { for (const el of [guide, marker, label]) el.toggleAttribute('hidden', true); return; }
         const run = item.run;
-        if (run) path.setAttribute('d', run.edges.map(([a, b]) => `M${screenOf(g, a).join(',')}L${screenOf(g, b).join(',')}`).join(''));
+        if (run) path.setAttribute('d', runPath(g, run));
         else {
             const [cx, cy] = screenOf(g, item.id);
             spot.setAttribute('cx', cx);
@@ -126,8 +157,23 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
         draw(hover?.g, hover, null);
     }
 
+    const onKnob = (e) => {
+        const run = selectedRun();
+        return run && Math.hypot(...handleAt(run).map((v, i) => v - [e.clientX, e.clientY][i])) <= HANDLE_HIT ? run : null;
+    };
+
     function down(e) {
         if (!enabled || e.button !== 0 || !canEdit()) return;
+        const turning = onKnob(e);
+        if (turning) {
+            const start = view.pointOnPlan(e.clientX, e.clientY);
+            if (!start) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            canvas.setPointerCapture?.(e.pointerId);
+            press = { g: plan(), run: turning, turn: true, wall: selected.wall, start, screen: [e.clientX, e.clientY], dragged: false, result: null };
+            return;
+        }
         const hit = pick(e.clientX, e.clientY);
         if (!hit) { if (selected) select(null); return; }
         const start = view.pointOnPlan(e.clientX, e.clientY);
@@ -141,11 +187,37 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
 
     function move(e) {
         if (!enabled) return;
-        if (!press) { setHover(canEdit() ? pick(e.clientX, e.clientY) : null); return; }
+        if (!press) {
+            const hit = canEdit() ? pick(e.clientX, e.clientY) : null;
+            setHover(hit);
+            // a wall that cannot move (it ends where the boundary bends) shows a not-allowed cursor
+            const g = plan(), wall = !hit && canEdit() && g && wallAt(g, e.clientX, e.clientY);
+            canvas.toggleAttribute('data-wall-locked', !!wall && !!wallRun(g, wall.a, wall.b)?.locked);
+            canvas.toggleAttribute('data-handle-hover', canEdit() && !!onKnob(e));
+            return;
+        }
         if (!press.dragged && Math.hypot(e.clientX - press.screen[0], e.clientY - press.screen[1]) < DRAG_START) return;
         press.dragged = true;
         const p = view.pointOnPlan(e.clientX, e.clientY);
         if (!p) return;
+        if (press.turn) {
+            const { run } = press;
+            const from = Math.atan2(press.start[1] - run.mid[1], press.start[0] - run.mid[0]);
+            const turn = Math.atan2(p[1] - run.mid[1], p[0] - run.mid[0]) - from;
+            const snap = snapAngle(run, Math.atan2(Math.sin(turn), Math.cos(turn)), { boundary: boundary(), shift: e.shiftKey });
+            press.result = rotateRun(press.g, run, snap.angle);
+            onChange(press.result.graph, false);
+            draw(press.result.graph, null, null);
+            // the turned wall and its handle are drawn as the selection; the snap names the line-up
+            const text = Math.abs(press.result.angle - snap.angle) < 1e-12 ? SNAP_LABELS[snap.kind] : null;
+            label.toggleAttribute('hidden', !text);
+            if (text) {
+                label.textContent = text;
+                label.setAttribute('x', +knob.getAttribute('cx') + 12);
+                label.setAttribute('y', +knob.getAttribute('cy') - 8);
+            }
+            return;
+        }
         if (!press.run) {
             const snap = snapCorner(press.g, press.id, p, { project: view.screenPoint, shift: e.shiftKey, start: press.start, boundary: boundary() });
             press.result = moveCorner(press.g, press.id, snap.point);
@@ -164,10 +236,10 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
 
     function up() {
         if (!press) return;
-        const { dragged, result, run, id } = press;
+        const { dragged, result, run, id, a, b, turn, wall } = press;
         press = null;
         if (dragged && result) onChange(result.graph, true);
-        select(run ? null : { id });   // a click or drag on a corner selects it
+        select(turn ? { wall } : run ? { wall: [a, b] } : { id });   // a click or drag selects what it pressed
         setHover(null);
     }
 
@@ -192,7 +264,7 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
             if (press) { press = null; onCancel(); setHover(null); } else if (selected) select(null);
             return;
         }
-        if ((e.key !== 'Delete' && e.key !== 'Backspace') || !selected || press || !canEdit()) return;
+        if ((e.key !== 'Delete' && e.key !== 'Backspace') || !selected || selected.wall || press || !canEdit()) return;
         if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
         e.preventDefault();
         const h = removeCorner(plan(), selected.id);

@@ -291,3 +291,85 @@ test("adjustment: a click selects a corner, Delete removes it, a double click on
         assert.equal(await selectedCorner(page), refused, "a refused delete keeps the corner selected");
     });
 });
+
+const handle = (page) => page.$eval("#wall-sketch [data-handle]", (h) => (h.hasAttribute("hidden") || h.closest("svg").hasAttribute("hidden") ? null : [+h.getAttribute("cx"), +h.getAttribute("cy")]));
+const selectedWall = (page) => page.$eval("#plan", (c) => c.dataset.selectedWall ?? null);
+/** The screen segments of the selected wall's highlight. */
+const chosenSegments = (page) => page.$eval("#wall-sketch [data-chosen]", (p) => [...p.getAttribute("d").matchAll(/M([-\d.e]+),([-\d.e]+)L([-\d.e]+),([-\d.e]+)/g)].map((m) => m.slice(1, 5).map(Number)));
+function footOn(segments, [x, y]) {
+    let best = null;
+    for (const [ax, ay, bx, by] of segments) {
+        const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+        const foot = [ax + t * dx, ay + t * dy], d = Math.hypot(x - foot[0], y - foot[1]);
+        if (!best || d < best.d) best = { foot, d };
+    }
+    return best;
+}
+
+test("adjustment: clicking a wall shows a round rotate handle, dragging it turns the wall with Parallel or Perpendicular labels, Escape clears it, and a locked wall shows none", { timeout: 240_000 }, async () => {
+    await onPage(async (page) => {
+        await page.click("button[data-open=adjust]");
+        assert.match(await page.locator("#adjust-message").textContent(), /drag.*wall.*corner.*click.*rotate.*double.click.*Delete/i, "the help line names the four actions");
+        const wall = await findWall(page);
+        assert.ok(wall);
+        await page.mouse.down();
+        await page.mouse.up();
+        assert.ok(await selectedWall(page), "a click selects the wall");
+        const h = await handle(page);
+        assert.ok(h, "the rotate handle shows");
+        const { foot, d } = footOn(await chosenSegments(page), h);
+        assert.ok(Math.abs(d - 28) < 2, `the handle sits about 28 px from the wall: ${d}`);
+        assert.equal(await page.$eval("#wall-sketch [data-handle]", (c) => getComputedStyle(c).fill), "rgb(255, 255, 255)", "a white dot like the room resize handle");
+
+        // swing the handle sideways in 2 px steps (about 4 degrees each): some angle lines up with the boundary
+        const before = await areasNow(page), shot = await pixels(page);
+        const heading = async () => { const [[ax, ay, bx, by]] = await chosenSegments(page); return Math.atan2(by - ay, bx - ax); };
+        const was = await heading();
+        const n = [(h[0] - foot[0]) / d, (h[1] - foot[1]) / d], t = [-n[1], n[0]];
+        const labels = new Set();
+        await page.mouse.move(...h);
+        await page.mouse.down();
+        const swing = [];
+        for (let s = -4; s >= -28; s -= 2) swing.push(s);
+        for (let s = -26; s <= 14; s += 2) swing.push(s);
+        for (const s of swing) {
+            await page.mouse.move(h[0] + t[0] * s, h[1] + t[1] * s);
+            const label = await page.$eval("#wall-sketch text", (x) => (x.hasAttribute("hidden") ? "" : x.textContent));
+            if (label) labels.add(label);
+        }
+        await page.mouse.up();
+        assert.ok(labels.has("Parallel") || labels.has("Perpendicular"), `a lined-up turn shows its label: ${[...labels]}`);
+        assert.notEqual(await pixels(page), shot, "the drawn walls change");
+        // a turn about the middle moves one triangle out of a room and an equal one in, so the areas
+        // may stay the same (exactly, when the two end walls are parallel); the wall's direction must not
+        const turned = Math.abs(Math.atan2(Math.sin((await heading()) - was), Math.cos((await heading()) - was)));
+        assert.ok(turned > 5 * Math.PI / 180, `the selected wall turned ${(turned * 180 / Math.PI).toFixed(1)} degrees`);
+        await page.click("#undo");
+        assert.deepEqual(await areasNow(page), before, "one Undo turns it back");
+
+        await page.mouse.move(1100, 700);
+        await page.keyboard.press("Escape");
+        assert.equal(await selectedWall(page), null, "Escape clears the selection");
+        assert.equal(await handle(page), null, "and hides the handle");
+
+        // after a full run, preset C has a wall that ends where the boundary bends: it cannot be picked, so no handle
+        await page.click("button[data-open=rooms]");
+        await page.click("button[data-mode=shape_c]");
+        await page.waitForFunction(() => { const s = document.getElementById("status").textContent; return s.startsWith("shape_c") && s.includes("ready"); });
+        await page.click("button[data-open=optimize]");
+        await page.click("#run");
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Pause");
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Run", null, { timeout: 120_000 });
+        await page.click("button[data-open=adjust]");
+        let locked = null;
+        for (let y = 450; y <= 620 && !locked; y += 10) for (let x = 400; x <= 700 && !locked; x += 10) {
+            await page.mouse.move(x, y);
+            if (await page.$eval("#plan", (c) => c.hasAttribute("data-wall-locked"))) locked = [x, y];
+        }
+        assert.ok(locked, "a locked wall of preset C can be found");
+        await page.mouse.down();
+        await page.mouse.up();
+        assert.equal(await selectedWall(page), null, "a locked wall is not selected");
+        assert.equal(await handle(page), null, "and shows no handle");
+    });
+});
