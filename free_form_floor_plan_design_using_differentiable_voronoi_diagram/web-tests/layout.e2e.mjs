@@ -21,7 +21,7 @@ test('floating controls keep 32px edge spacing and fit desktop and narrow window
             const near=(a,b)=>Math.abs(a-b)<1;
             assert.ok(near(toolbar.left,32)&&near(toolbar.top,32),'toolbar has 32px outer spacing');
             assert.ok(near(gizmo.top,32)&&near(size[0]-gizmo.right,32),'gizmo has matching top/right spacing');
-            for(const name of ['rooms','optimize','display']){
+            for(const name of ['rooms','optimize']){
                 await page.click(`button[data-open=${name}]`);
                 const panel=await rect(`.panel[data-panel=${name}]`);
                 assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
@@ -89,28 +89,26 @@ test("toolbar: an icon opens only its panel, another icon swaps it, the same ico
             assert.deepEqual(await openPanels(page), ["optimize"]);
             await page.click("button[data-open=optimize]");
             assert.deepEqual(await openPanels(page), []);
-            await page.click("button[data-open=display]");
-            assert.deepEqual(await openPanels(page), ["display"]);
         });
     } finally {
         proc.kill();
     }
 });
 
-test("one toolbar: every icon sits in the top-left toolbar, and the Display panel opens beside it", { timeout: 120_000 }, async () => {
+test("one toolbar: every icon sits in the top-left toolbar, and the Rooms panel opens beside it", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1440, 900], async (page) => {
             const bars = await page.$$eval(".toolbar", (ts) => ts.map((t) => t.getBoundingClientRect()));
             assert.equal(bars.length, 1, "one toolbar");
             assert.ok(bars[0].left < 40 && bars[0].top < 40, `toolbar at ${bars[0].left},${bars[0].top}`);
-            for (const sel of ["button[data-open=display]", "button[data-open=optimize]", "#run", "#reset"])
+            for (const sel of ["button[data-open=rooms]", "button[data-open=optimize]"])
                 assert.equal(await page.$eval(sel, (b) => !!b.closest(".toolbar")), true, `${sel} is in the toolbar`);
-            await page.click("button[data-open=display]");
-            const panel = await page.$eval(".panel[data-panel=display]", (p) => p.getBoundingClientRect().toJSON());
-            const tool = await page.$eval("button[data-open=display]", (b) => b.getBoundingClientRect().toJSON());
-            assert.ok(panel.left >= bars[0].right && panel.left - bars[0].right <= 16, `Display panel starts at ${panel.left}, toolbar ends at ${bars[0].right}`);
-            assert.ok(panel.top <= tool.top, `Display panel top ${panel.top} is below its icon ${tool.top}`);
+            await page.click("button[data-open=rooms]");
+            const panel = await page.$eval(".panel[data-panel=rooms]", (p) => p.getBoundingClientRect().toJSON());
+            const tool = await page.$eval("button[data-open=rooms]", (b) => b.getBoundingClientRect().toJSON());
+            assert.ok(panel.left >= bars[0].right && panel.left - bars[0].right <= 16, `Rooms panel starts at ${panel.left}, toolbar ends at ${bars[0].right}`);
+            assert.ok(panel.top <= tool.top, `Rooms panel top ${panel.top} is below its icon ${tool.top}`);
         });
     } finally {
         proc.kill();
@@ -137,7 +135,7 @@ test("panels: an open panel is see-through, so the plan shows behind it", { time
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            for (const name of ["rooms", "optimize", "display"]) {
+            for (const name of ["rooms", "optimize"]) {
                 await page.click(`button[data-open=${name}]`);
                 const alpha = await page.$eval(`.panel[data-panel=${name}]`, (p) => {
                     const m = getComputedStyle(p).backgroundColor.match(/rgba?\(([^)]+)\)/);
@@ -163,7 +161,7 @@ test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s
                     return { text: s.content, opacity: +s.opacity, left: parseFloat(s.left), width: b.getBoundingClientRect().width };
                 });
             const tools = await page.$$(".toolbar .tool");
-            assert.equal(tools.length, 5);
+            assert.equal(tools.length, 2);
             for (const tool of tools) {
                 const name = await tool.getAttribute("aria-label");
                 assert.equal((await tip(tool)).opacity, 0, `${name}: the tooltip shows before hover`);
@@ -175,9 +173,11 @@ test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s
                 assert.ok(t.left >= t.width, `${name}: tooltip starts at ${t.left}px, inside the ${t.width}px button`);
                 assert.equal(await tool.getAttribute("title"), null, `${name}: the browser's own title tooltip is still set`);
             }
+            await page.click("button[data-open=optimize]");
+            await page.hover("#run");
             await page.click("#run");
             await page.waitForTimeout(300);
-            assert.equal((await tip(await page.$("#run"))).text, '"Pause"', "Run's tooltip follows its label while running");
+            assert.equal(await page.locator(".tip").textContent(), "Pause", "Run's tooltip follows its label while running");
         });
     } finally {
         proc.kill();
@@ -197,7 +197,7 @@ test("narrow: at 600px the toolbar and each open panel stay inside the window", 
                         .map(([name, b]) => `${name} ${Math.round(b.left)},${Math.round(b.top)}-${Math.round(b.right)},${Math.round(b.bottom)}`),
                 );
             assert.deepEqual(await outside(".toolbar"), []);
-            for (const name of ["rooms", "optimize", "display"]) {
+            for (const name of ["rooms", "optimize"]) {
                 await page.click(`button[data-open=${name}]`);
                 assert.deepEqual(await outside(".panel"), [], `${name} panel`);
                 await page.click(`button[data-open=${name}]`);
@@ -213,7 +213,7 @@ test("optimization: one icon opens the loss weights, the run settings and the si
     try {
         await atSize(url, [1145, 820], async (page) => {
             const labels = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
-            assert.deepEqual(labels, ["Run", "Reset", "Rooms", "Optimization", "Display"]);
+            assert.deepEqual(labels, ["Rooms", "Optimization"]);
             assert.equal(await page.locator(".losscard").count(), 0, "no separate loss card");
             assert.equal(await page.locator(".panel[data-panel=weights]").count(), 0, "no separate weights panel");
             for (const id of ["w_wall", "w_cosine", "w_area", "w_lloyd", "w_topo", "iters", "lr", "seed", "losspanel"])
@@ -240,11 +240,13 @@ test("optimization: after a run with the panel closed, opening it puts the playh
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=optimize]");
             await page.click("#run");
+            await page.click("button[data-open=optimize]"); // close the panel while it runs
             await page.waitForFunction(() => +(/iter (\d+)/.exec(document.getElementById("tick").textContent)?.[1] ?? 0) >= 20);
+            await page.click("button[data-open=optimize]");
             await page.click("#run"); // pause
             await page.waitForTimeout(300);
-            await page.click("button[data-open=optimize]");
             const m = await page.evaluate(() => {
                 const box = (el) => el.getBoundingClientRect();
                 const first = box(document.getElementById("sp_total").closest(".spark"));
@@ -271,7 +273,7 @@ test("rooms: one icon opens the boundary choice above the room bubbles", { timeo
     try {
         await atSize(url, [1145, 820], async (page) => {
             const labels = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
-            assert.deepEqual(labels, ["Run", "Reset", "Rooms", "Optimization", "Display"]);
+            assert.deepEqual(labels, ["Rooms", "Optimization"]);
             assert.equal(await page.locator(".panel[data-panel=boundary]").count(), 0, "no separate boundary panel");
             for (const sel of ["#presets", "#custom-boundaries", "#boundary-draw", "#bubble-message", "#roomareas", "#connections", "#sites"])
                 assert.equal(await page.$eval(sel, (e) => e.closest(".panel")?.dataset.panel ?? null), "rooms", `${sel} is in the Rooms panel`);
@@ -292,10 +294,10 @@ test("loss graph: value tags stay hidden until the mouse is on their row", { tim
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=optimize]");
             await page.click("#run");
             await page.waitForFunction(() => +(/iter (\d+)/.exec(document.getElementById("tick").textContent)?.[1] ?? 0) >= 10);
             await page.click("#run"); // pause
-            await page.click("button[data-open=optimize]");
             const shown = () =>
                 page.$$eval(".playhead .vtag", (ts) => ts.filter((t) => getComputedStyle(t).visibility === "visible" && t.textContent.length > 0).map((t) => t.id));
             assert.deepEqual(await shown(), [], "no value shows until the mouse is on a row");
@@ -506,12 +508,12 @@ test("polish: the selected preset and room look different from hovered ones", { 
     } finally { proc.kill(); }
 });
 
-test("polish: Display panel labels fit on one line", { timeout: 60_000 }, async () => {
+test("polish: Display section labels fit on one line", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            await page.click("button[data-open=display]");
-            const heights = await page.$$eval(".panel[data-panel=display] .row > label", (ls) => ls.map((l) => [l.textContent, l.getBoundingClientRect().height, parseFloat(getComputedStyle(l).lineHeight)]));
+            await page.click("button[data-open=rooms]");
+            const heights = await page.$$eval(".display-rows .row > label", (ls) => ls.map((l) => [l.textContent, l.getBoundingClientRect().height, parseFloat(getComputedStyle(l).lineHeight)]));
             for (const [text, height, line] of heights) assert.ok(height < line * 1.5, `"${text}" is ${height}px tall, one line is ${line}px`);
         });
     } finally { proc.kill(); }
@@ -521,7 +523,7 @@ test("polish: panel titles are larger than their section labels", { timeout: 60_
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            for (const name of ["rooms", "display", "optimize"]) {
+            for (const name of ["rooms", "optimize"]) {
                 const sizes = await page.$$eval(`.panel[data-panel=${name}] .label`, (ls) => ls.map((l) => parseFloat(getComputedStyle(l).fontSize)));
                 for (const size of sizes.slice(1)) assert.ok(sizes[0] > size, `${name}: title ${sizes[0]}px vs label ${size}px`);
             }
@@ -544,11 +546,11 @@ test("polish: every section label has the same space above it", { timeout: 60_00
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 900], async (page) => {
-            for (const name of ["rooms", "display", "optimize"]) {
+            for (const name of ["rooms", "optimize"]) {
                 await page.click(`button[data-open=${name}]`);
                 const gaps = await page.$$eval(`.panel[data-panel=${name}] .label`, (ls) => ls.slice(1).map((l) => {
                     let prev = l.previousElementSibling;
-                    while (prev && !prev.getClientRects().length) prev = prev.previousElementSibling;
+                    while (prev && !prev.getBoundingClientRect().height) prev = prev.previousElementSibling;
                     return [l.textContent, Math.round(l.getBoundingClientRect().top - prev.getBoundingClientRect().bottom)];
                 }));
                 for (const [text, gap] of gaps) assert.equal(gap, gaps[0][1], `${name}: ${text} has ${gap}px above it, ${gaps[0][0]} has ${gaps[0][1]}px`);
@@ -611,22 +613,16 @@ test("polish: disabled buttons get no hover fill, and rows fade their hover like
     } finally { proc.kill(); }
 });
 
-test("display: Raw and Aligned are small plan icons in the Display title row", { timeout: 60_000 }, async () => {
+test("walls: Raw and Aligned are plan icons that switch the walls", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
-            const cell = await page.locator("[data-mode=shape_a]").boundingBox();
-            await page.click("button[data-open=display]");
-            const title = await page.locator(".panel[data-panel=display] .label").first().boundingBox();
             for (const [mode, name] of [["raw", "Raw walls"], ["aligned", "Aligned walls"]]) {
                 const button = page.locator(`#walls [data-walls=${mode}]`);
                 assert.equal((await button.textContent()).trim(), "", `${name} shows an icon, not text`);
                 assert.equal(await button.getAttribute("aria-label"), name);
                 assert.equal(await button.locator("svg use").getAttribute("href"), `#i-walls-${mode}`);
-                const box = await button.boundingBox();
-                assert.ok(Math.abs(box.width - cell.width) < 1 && Math.abs(box.height - cell.height) < 1, `${name} is ${box.width}x${box.height}, a preset cell is ${cell.width}x${cell.height}`);
-                assert.ok(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2)) < 4 && box.x > title.x + title.width, `${name} sits right of the Display title`);
             }
             await page.click("[data-walls=aligned]");
             assert.equal(await page.locator("[data-walls=aligned].active").count(), 1, "Aligned still switches the walls");
@@ -650,9 +646,8 @@ test("tooltips: icon names in panels show centered under the icon and are never 
                 assert.ok(t.y >= b.y + b.height, `${name} is below its icon`);
                 assert.ok(t.x >= 0 && t.x + t.width <= 1145, `${name} is inside the window`);
             };
-            await page.click("button[data-open=display]");
-            await check("[data-walls=aligned]", "Aligned walls");
             await page.click("button[data-open=rooms]");
+            await check("[data-walls=aligned]", "Aligned walls");
             await check("#boundary-draw", "Draw boundary");
             await check("[data-mode=shape_a]", "Boundary A");
             await page.mouse.move(700, 700);
@@ -666,12 +661,81 @@ test("display: no aligned readout row; the plan keeps the aligned share for chec
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            await page.click("button[data-open=display]");
-            const labels = await page.$$eval(".panel[data-panel=display] .row > label", (ls) => ls.map((l) => l.textContent));
+            await page.click("button[data-open=rooms]");
+            const labels = await page.$$eval(".display-rows .row > label", (ls) => ls.map((l) => l.textContent));
             assert.ok(!labels.includes("aligned"), `Display rows: ${labels.join(", ")}`);
             assert.equal(await page.locator("#align_v").count(), 0);
             await page.waitForFunction(() => document.getElementById("plan").dataset.alignedShare);
             assert.match(await page.$eval("#plan", (c) => c.dataset.alignedShare), /^\d+% → \d+%$/);
+        });
+    } finally { proc.kill(); }
+});
+
+const presetCell = async (page) => {
+    await page.click("button[data-open=rooms]");
+    const cell = await page.locator("[data-mode=shape_a]").boundingBox();
+    await page.click("button[data-open=rooms]");
+    return cell;
+};
+
+test("toolbar: only the Rooms and Optimization icons", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            assert.deepEqual(await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label"))), ["Rooms", "Optimization"]);
+            assert.equal(await page.locator("#reset").count(), 0, "no Reset");
+            assert.equal(await page.locator("button[data-open=display]").count(), 0, "no Display icon");
+            assert.equal(await page.locator(".toolbar #run").count(), 0, "Run is not in the toolbar");
+        });
+    } finally { proc.kill(); }
+});
+
+test("optimization: Run is an icon cell on the right of the Optimization title", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const cell = await presetCell(page);
+            await page.click("button[data-open=optimize]");
+            const run = page.locator("#run");
+            assert.equal(await run.evaluate((b) => !!b.closest(".panel[data-panel=optimize] .panel-head")), true, "Run sits in the Optimization title row");
+            const box = await run.boundingBox(), head = await page.locator(".panel[data-panel=optimize] .panel-head").boundingBox();
+            const title = await page.locator(".panel[data-panel=optimize] .panel-head .label").boundingBox();
+            assert.ok(Math.abs(box.width - cell.width) < 1 && Math.abs(box.height - cell.height) < 1, `Run is ${box.width}x${box.height}, a preset cell is ${cell.width}x${cell.height}`);
+            assert.ok(Math.abs(box.x + box.width - (head.x + head.width)) < 1, "Run is the last cell of the row");
+            assert.ok(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2)) < 4, "Run is level with the title");
+            await run.hover();
+            await page.waitForTimeout(300);
+            assert.equal(await page.locator(".tip").textContent(), "Run", "hovering shows Run under it");
+            await run.click();
+            await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Pause");
+            await run.click();
+            await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Resume");
+        });
+    } finally { proc.kill(); }
+});
+
+test("rooms: Display is part of Rooms, with Raw and Aligned in the Rooms title row", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 900], async (page) => {
+            const cell = await presetCell(page);
+            assert.equal(await page.locator(".panel[data-panel=display]").count(), 0, "no separate Display panel");
+            await page.click("button[data-open=rooms]");
+            for (const mode of ["raw", "aligned"]) {
+                const b = page.locator(`[data-walls=${mode}]`);
+                assert.equal(await b.evaluate((x) => !!x.closest(".panel[data-panel=rooms] .panel-head")), true, `${mode} sits in the Rooms title row`);
+                const box = await b.boundingBox();
+                assert.ok(Math.abs(box.width - cell.width) < 1 && Math.abs(box.height - cell.height) < 1, `${mode} is a preset-sized cell`);
+            }
+            const order = await page.$eval(".panel[data-panel=rooms]", (p) => {
+                const display = [...p.querySelectorAll(".label")].at(-1);
+                return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-doors", "show-bubbles"].map((id) => {
+                    const el = document.getElementById(id);
+                    return !!el && p.contains(el) && !!(display.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+                }) };
+            });
+            assert.equal(order.last, "Display", "Display is the last section of Rooms");
+            assert.deepEqual(order.after, [true, true, true, true, true], "the display controls sit under it");
         });
     } finally { proc.kill(); }
 });

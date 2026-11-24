@@ -109,7 +109,7 @@ test('generated plans keep centers and show only requested doors in raw and alig
         await page.waitForFunction(()=>document.querySelector('#run').getAttribute('aria-label')==='Run',null,{timeout:120000});
         assert.equal(await page.locator('#program-status').getAttribute('data-state'),'complete',await page.locator('#program-status').textContent());
         assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),1,'the actual renderer builds the requested physical door');
-        await page.click('button[data-open=display]');await page.uncheck('#show-bubbles');
+        await page.click('button[data-open=rooms]');await page.uncheck('#show-bubbles');
         const colors=await page.$eval('#plan',async c=>{
             const image=new Image();image.src=c.toDataURL();await image.decode();
             const copy=document.createElement('canvas');copy.width=image.width;copy.height=image.height;
@@ -133,7 +133,7 @@ test('generated plans keep centers and show only requested doors in raw and alig
         await page.screenshot({path:fileURLToPath(new URL('../../.agents/cache/screens/bubbles-result-top.png',import.meta.url))});
         await page.click('.gizmo [data-axis="+x"]');
         await page.screenshot({path:fileURLToPath(new URL('../../.agents/cache/screens/bubbles-result-3d.png',import.meta.url))});
-        await page.check('#show-bubbles');await page.click('button[data-open=rooms]');
+        await page.check('#show-bubbles');
         await page.locator('.connection-row').click();await page.keyboard.press('Delete');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),0,'unlinked adjacent rooms have no door');

@@ -16,12 +16,13 @@ test("preset E run to the end: Aligned walls show a higher aligned-wall share th
     try {
         const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
         await page.goto(url);
+        await page.locator("button[data-open=optimize]").click();
         await page.locator("#run").click();
         await page.waitForFunction(() => document.getElementById("status").textContent === "done", null, { timeout: 90_000 });
         if (SHOTS) await page.screenshot({ path: `${SHOTS}/raw.png` });
 
-        // the wall switch lives in the Display panel, opened from the bottom-right toolbar
-        await page.locator("button[data-open=display]").click();
+        // the wall switch sits in the Rooms title row
+        await page.locator("button[data-open=rooms]").click();
         await page.locator("#walls button[data-walls=aligned]").click();
         const text = await page.$eval("#plan", (c) => c.dataset.alignedShare);
         if (SHOTS) await page.screenshot({ path: `${SHOTS}/aligned.png` });
@@ -61,7 +62,7 @@ test("point and wall sliders redraw independently without restarting the plan", 
         });
         await page.goto(url);
         await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
-        await page.locator("button[data-open=display]").click();
+        await page.locator("button[data-open=rooms]").click();
         await page.locator("#walls button[data-walls=aligned]").click();
         const merge = page.getByRole("slider", { name: "Point merge" });
         const snap = page.getByRole("slider", { name: "Wall snap" });
@@ -107,6 +108,45 @@ test("point and wall sliders redraw independently without restarting the plan", 
         await snap.press("Home");
         assert.equal(await share.textContent(), originalShare);
         assert.equal(await page.evaluate(() => window.buildCount), builds, "the display changes without a new optimization");
+    } finally {
+        await browser.close();
+        proc.kill();
+    }
+});
+
+test("optimization: changing a loss weight or run setting rebuilds the step 0 preview and stops a run", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+        await page.addInitScript(() => {
+            window.builds = [];
+            const postMessage = Worker.prototype.postMessage;
+            Worker.prototype.postMessage = function (message, ...args) {
+                if (message.cmd === "build") window.builds.push(message);
+                return postMessage.call(this, message, ...args);
+            };
+        });
+        await page.goto(url);
+        await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
+        await page.click("button[data-open=optimize]");
+        const set = (id, value) => page.locator("#" + id).evaluate((el, v) => {
+            el.value = v;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+        }, value);
+        for (const [id, value, key] of [["w_cosine", "0.4", "cosineWeight"], ["iters", "300", "iters"], ["lr", "0.01", "lr"], ["w_area", "0.3", null]]) {
+            const before = await page.evaluate(() => builds.length);
+            await set(id, value);
+            await page.waitForFunction((n) => builds.length > n && builds.at(-1).then === "preview", before);
+            if (key) assert.equal(await page.evaluate((k) => builds.at(-1)[k], key), Number(value), `${id} reaches the new preview`);
+        }
+        await page.click("#run");
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Pause");
+        const before = await page.evaluate(() => builds.length);
+        await set("w_topo", "0.3");
+        await page.waitForFunction((n) => builds.length > n && builds.at(-1).then === "preview", before);
+        assert.equal(await page.locator("#run").getAttribute("aria-label"), "Run", "the run stops");
     } finally {
         await browser.close();
         proc.kill();

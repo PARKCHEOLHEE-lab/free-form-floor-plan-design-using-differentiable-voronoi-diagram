@@ -66,7 +66,7 @@
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: 3.4em; flex: none; color: var(--ui-muted-fg); }
-    .panel[data-panel=display] .row > label { width: 7.6em; }   /* Point merge, Wall snap, Bubble Diagram */
+    .display-rows .row > label { width: 7.6em; }   /* Point merge, Wall snap, Bubble Diagram */
     .row .val, .room-row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
 
     /* thin track + outlined thumb */
@@ -126,8 +126,6 @@
       background: transparent; color: var(--ui-fg); cursor: pointer; transition: background .12s; }
     .tool:hover:not(:disabled), .tool[aria-pressed=true] { background: var(--ui-muted); }
     .tool:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
-    .tool.primary { background: var(--ui-fg); color: var(--light); }
-    .tool.primary:hover:not(:disabled) { background: #262626; }
     .tool:disabled { opacity:.4; cursor:default; }
     /* hover names: each icon's or gizmo end's aria-label, shown beside it after a short pause
        (aria-label is the one source, so Run's name follows Pause and Resume) */
@@ -208,6 +206,9 @@
   #presets { display:contents; }
   .boundary-row button, .panel-head button { display:grid; place-items:center; }
   .boundary-row .ic, .panel-head .ic { width:20px; height:20px; stroke-width:1.6; }   /* icon cells alike */
+  /* Run, Pause and Resume: the last cell of the Optimization title row, filled as the main action */
+  .panel-head #run { grid-column:6; background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }
+  .panel-head #run:hover:not(:disabled) { background:#262626; }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -232,7 +233,6 @@
       <defs>
         <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
         <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
-        <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
         <symbol id="i-rooms" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
         <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
         <symbol id="b-shape_a" viewBox="0 0 24 24"><polygon points="3.00,19.70 21.00,19.70 21.00,13.09 17.77,13.09 17.77,7.92 16.66,7.92 16.66,4.30 11.34,4.30 11.34,5.38 5.81,5.38 5.81,14.65 3.00,14.65"/></symbol>
@@ -245,19 +245,13 @@
         <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
         <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
         <symbol id="i-vector-square" viewBox="0 0 24 24"><path d="M19.5 7a24 24 0 0 1 0 10"/><path d="M4.5 7a24 24 0 0 0 0 10"/><path d="M7 19.5a24 24 0 0 0 10 0"/><path d="M7 4.5a24 24 0 0 1 10 0"/><rect x="17" y="17" width="5" height="5" rx="1"/><rect x="17" y="2" width="5" height="5" rx="1"/><rect x="2" y="17" width="5" height="5" rx="1"/><rect x="2" y="2" width="5" height="5" rx="1"/></symbol>
-        <symbol id="i-display" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
       </defs>
     </svg>
 
-    <!-- top-left: run controls, then one icon per settings panel -->
-    <nav class="toolbar tl" aria-label="Run and settings">
-      <button id="run" class="tool primary" aria-label="Run"><svg class="ic"><use href="#i-play"/></svg></button>
-      <button id="reset" class="tool" aria-label="Reset"><svg class="ic"><use href="#i-reset"/></svg></button>
-      <span class="sep"></span>
+    <!-- top-left: one icon per settings panel -->
+    <nav class="toolbar tl" aria-label="Settings">
       <button class="tool" data-open="rooms" aria-label="Rooms"><svg class="ic"><use href="#i-rooms"/></svg></button>
       <button class="tool" data-open="optimize" aria-label="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
-      <span class="sep"></span>
-      <button class="tool" data-open="display" aria-label="Display"><svg class="ic"><use href="#i-display"/></svg></button>
     </nav>
 
     <!-- top-right: the view gizmo (web/plan/gizmo.js fills it) -->
@@ -265,7 +259,13 @@
 
     <div class="controls">
       <section class="panel" data-panel="rooms">
-        <div class="label">Rooms</div>
+        <div class="panel-head">
+          <div class="label">Rooms</div>
+          <div class="seg" id="walls">
+            <button data-walls="raw" class="active" aria-label="Raw walls"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
+            <button data-walls="aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
+          </div>
+        </div>
         <div class="label">Boundary</div>
         <div class="seg boundary-row">
         <div class="seg" id="presets">
@@ -288,25 +288,21 @@
         <div id="connections"></div>
         <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
         <div id="program-status" role="status"></div>
-      </section>
-
-      <section class="panel" data-panel="display">
-        <div class="panel-head">
-          <div class="label">Display</div>
-          <div class="seg" id="walls">
-            <button data-walls="raw" class="active" aria-label="Raw walls"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
-            <button data-walls="aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
-          </div>
+        <div class="label">Display</div>
+        <div class="display-rows">
+          <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+          <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="merge_tol_v">0.020</span></div>
+          <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="align_tol_v">0.020</span></div>
+          <div class="row"><label for="show-doors">Doors</label><input type="checkbox" id="show-doors" checked></div>
+          <div class="row"><label for="show-bubbles">Bubble Diagram</label><input type="checkbox" id="show-bubbles" checked></div>
         </div>
-        <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
-        <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="merge_tol_v">0.020</span></div>
-        <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="align_tol_v">0.020</span></div>
-        <div class="row"><label for="show-doors">Doors</label><input type="checkbox" id="show-doors" checked></div>
-        <div class="row"><label for="show-bubbles">Bubble Diagram</label><input type="checkbox" id="show-bubbles" checked></div>
       </section>
 
       <section class="panel" data-panel="optimize">
-        <div class="label">Optimization</div>
+        <div class="panel-head">
+          <div class="label">Optimization</div>
+          <div class="seg"><button id="run" aria-label="Run"><svg class="ic"><use href="#i-play"/></svg></button></div>
+        </div>
         <div class="label">Loss weight (0–1)</div>
         <div class="row"><label for="w_wall">L1</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="1.00"><span class="val" id="w_wall_v">1.00</span></div>
         <div class="row"><label for="w_cosine">Cos</label><input id="w_cosine" type="range" min="0" max="1" step="0.01" value="1"><span class="val" id="w_cosine_v">1.00</span></div>
@@ -398,6 +394,9 @@ const hideTip = () => tip.classList.remove('shown');
 document.addEventListener('pointerover', e => { const b = e.target.closest?.(TIP_CELLS); if (b) showTip(b); else hideTip(); });
 document.addEventListener('focusin', e => { const b = e.target.closest?.(TIP_CELLS); if (b?.matches(':focus-visible')) showTip(b); });
 document.addEventListener('focusout', hideTip);
+// A press moves focus, and focusout hides the name; after the click (which can rename Run to
+// Pause) the name shows again with the new label.
+document.addEventListener('click', e => { const b = e.target.closest?.(TIP_CELLS); if (b) showTip(b); });
 
 document.querySelectorAll('.lossrow').forEach(row => {
   const tag = $('vt_' + row.querySelector('polyline').id.slice(3));
@@ -536,7 +535,7 @@ for (const input of [pointMergeInput, wallSnapInput]) {
 }
 
 // sites / rooms change the optimizer geometry (site count, room count), so rebuild
-// and preview live — no need to press Reset. Debounced so a drag rebuilds once on
+// and preview live. Debounced so a drag rebuilds once on
 // settle (and stops any running optimization), not on every intermediate step.
 let rebuildTimer = 0;
 function rebuildPreviewSoon() {
@@ -552,8 +551,11 @@ function rebuildPreviewSoon() {
 }
 $('sites').addEventListener('input', rebuildPreviewSoon);
 // seed reseeds the site initialization, so a committed seed change (Enter / blur /
-// spinner) rebuilds the preview too — no need to press Run or Reset.
+// spinner) rebuilds the preview too.
 $('seed').addEventListener('change', rebuildPreviewSoon);
+// Loss weights and run settings only reach the engine in a build, so a committed change
+// rebuilds the step 0 preview too (and stops a run); there is no Reset button.
+for (const id of ['w_wall', 'w_cosine', 'w_area', 'w_lloyd', 'w_topo', 'iters', 'lr']) $(id).addEventListener('change', rebuildPreviewSoon);
 
 let roomRatios = []; // legacy preset shares; edited inputs come only from BubbleProgram
 function refreshRoomReadout() {
@@ -951,7 +953,6 @@ function setButtons() {
   const sketching = boundaryEditor.active || !!pendingBoundary;
   $('run').disabled=sketching||editingBubbles||!!(currentProgram()&&!roomCount());
   $('boundary-draw').disabled = !boundaryRing || running || paused || !!pendingBoundary;
-  $('reset').disabled = sketching;
   $('undo').disabled = boundaryEditor.active ? !boundaryEditor.canUndo : !!pendingBoundary || !history.canUndo;
   $('redo').disabled = boundaryEditor.active ? !boundaryEditor.canRedo : !!pendingBoundary || !history.canRedo;
 }
@@ -989,13 +990,6 @@ $('run').onclick = () => {
   if (!sendBuild('start')) return;
   running = true; paused = false; setButtons();
   $('status').textContent = mode + ' · optimizing…';
-};
-
-$('reset').onclick = () => {
-  stop();
-  clearHist(); drawSparks(); hidePlayhead();
-  $('status').textContent = mode + ' · building…';
-  sendBuild('preview');
 };
 
 view.resize();

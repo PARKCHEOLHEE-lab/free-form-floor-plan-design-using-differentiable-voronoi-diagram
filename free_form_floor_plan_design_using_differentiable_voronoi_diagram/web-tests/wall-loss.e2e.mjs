@@ -65,22 +65,20 @@ test('the app weighs L1 and Cos walls separately and has no step loss', {timeout
         assert.equal(build.jogWeight,undefined,'the page sends no step weight');
         assert.equal(build.cosineWall,undefined,'the page sends no cos-only switch');
         const frame=()=>page.evaluate(()=>wallProof.frames.at(-1).frame);
-        const preview=async()=>{
+        // a committed weight change rebuilds the preview by itself (there is no Reset)
+        const preview=async(act)=>{
             const before=await page.evaluate(()=>wallProof.builds.at(-1).gen);
-            await page.click('#reset');
-            await page.waitForFunction(gen=>wallProof.frames.at(-1)?.gen>gen&&document.querySelector('#status').textContent.includes('ready'),before);
+            await act();
+            await page.waitForFunction(gen=>wallProof.builds.at(-1).gen>gen&&wallProof.frames.at(-1)?.gen===wallProof.builds.at(-1).gen&&document.querySelector('#status').textContent.includes('ready'),before);
             return frame();
         };
         const both=await frame();
         assert.ok(both.wall>0 && both.cosine>0,'both wall terms reach the engine');
         assert.equal(both.jog??0,0,'the engine adds no step contribution');
-        await cos.press('Home');
-        const onlyL1=await preview();
+        const onlyL1=await preview(()=>cos.press('Home'));
         assert.equal(onlyL1.cosine??0,0);
         assert.equal(onlyL1.wall,both.wall);
-        await cos.press('End');
-        await l1.press('Home');
-        const onlyCos=await preview();
+        const onlyCos=await preview(async()=>{await cos.press('End');await l1.press('Home');});
         assert.equal(onlyCos.wall,0);
         assert.equal(onlyCos.cosine,both.cosine);
         for(const pure of [onlyL1,onlyCos])assert.deepEqual(pure.cells,both.cells);
@@ -140,8 +138,7 @@ test('L1 and Cos controls reach real WASM without changing the camera',{timeout:
         assert.ok(first.wall>0 && first.cosine>0,'both wall terms reach the engine preview');
         const change=async(id,value)=>{
             const generation=await page.evaluate(()=>wallProof.builds.at(-1).gen);
-            await page.locator('#'+id).evaluate((e,value)=>{e.value=String(value);e.dispatchEvent(new Event('input',{bubbles:true}));},value);
-            if(id==='w_cosine'||id==='iters')await page.click('#reset');
+            await page.locator('#'+id).evaluate((e,value)=>{e.value=String(value);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));},value);
             await page.waitForFunction(gen=>wallProof.frames.at(-1)?.gen>gen && document.querySelector('#status').textContent.includes('ready'),generation);
         };
         const initialWeight = +(await page.locator('#w_cosine').inputValue());
@@ -154,7 +151,7 @@ test('L1 and Cos controls reach real WASM without changing the camera',{timeout:
         await page.click('button[data-open=optimize]');await change('iters',200);await page.click('button[data-open=optimize]');
         const before=await preview();const dir=new URL('../../.agents/cache/wall-shape-browser/',import.meta.url);await mkdir(dir,{recursive:true});
         await page.screenshot({path:fileURLToPath(new URL('before-raw.png',dir))});
-        const start=Date.now();await page.click('#run');await page.waitForFunction(()=>document.querySelector('#status').textContent==='done',null,{timeout:150000});
+        await page.click('button[data-open=optimize]');const start=Date.now();await page.click('#run');await page.click('button[data-open=optimize]');await page.waitForFunction(()=>document.querySelector('#status').textContent==='done',null,{timeout:150000});
         const after=await preview();assert.ok(after.cosine<before.cosine,`raw Cos contribution falls: ${before.cosine} -> ${after.cosine}`);
         assert.ok(after.wall<before.wall,'the L1 wall loss also falls');
         assert.notDeepEqual(after.cells,before.cells,'the engine changes raw geometry');
@@ -162,7 +159,7 @@ test('L1 and Cos controls reach real WASM without changing the camera',{timeout:
         assert.ok((await page.locator('#sp_cosine').getAttribute('points')).length>0);
         assert.deepEqual(await camera(),pose,'controls and new loss rows preserve the camera');
         await page.screenshot({path:fileURLToPath(new URL('after-raw.png',dir))});
-        await page.click('button[data-open=display]');await page.click('[data-walls=aligned]');await page.click('button[data-open=display]');
+        await page.click('button[data-open=rooms]');await page.click('[data-walls=aligned]');await page.click('button[data-open=rooms]');
         assert.deepEqual(await camera(),pose);await page.screenshot({path:fileURLToPath(new URL('after-aligned.png',dir))});
         await writeFile(new URL('measurements.json',dir),JSON.stringify({before,after,elapsedMs:Date.now()-start},null,2));
         if(process.env.VORONOI_COVERAGE_DIR)await writeFile(new URL('wall-loss-coverage.json',dir),JSON.stringify((await page.coverage.stopJSCoverage()).filter(e=>e.url===url||e.url.startsWith(url+'plan/'))));
@@ -204,7 +201,7 @@ test('the six-room Raw walls have smaller visible steps and keep the room progra
         await page.goto(url);
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         const initial = await page.evaluate(()=>wallProof.frames.at(-1).frame);
-        await page.click('#run');
+        await page.click('button[data-open=optimize]');await page.click('#run');
         await page.waitForFunction(()=>wallProof.done,null,{timeout:150000});
         const {frame,boundary} = await page.evaluate(()=>({frame:wallProof.frames.at(-1).frame,boundary:wallProof.boundary}));
         assert.equal(frame.iteration,500);
@@ -255,7 +252,7 @@ test('the default E preset has fewer visible Raw steps after Run',{timeout:18000
         const previewError = Math.max(...areaErrors(preview));
         assert.ok(previewError<=.05,'the preset starts near its target room areas: '+previewError);
         assert.ok(preview.frame.cosine>0,'default preset applies the Cos weight to the engine');
-        await page.click('#run');
+        await page.click('button[data-open=optimize]');await page.click('#run');
         await page.waitForFunction(()=>wallProof.done,null,{timeout:150000});
         const {frame,boundary,build} = await page.evaluate(()=>({
             frame:wallProof.frames.at(-1).frame,boundary:wallProof.boundary,build:wallProof.builds.at(-1),

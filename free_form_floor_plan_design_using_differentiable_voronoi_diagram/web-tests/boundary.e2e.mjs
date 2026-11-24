@@ -117,7 +117,7 @@ test('boundary sketch uses a temporary overlay, snaps with Shift, rejects crossi
         await page.keyboard.press('Backspace');
         await page.keyboard.press('Escape');
         assert.equal(await page.evaluate(() => planProof.builds.length), 1, 'cancel and rejected closure never build a new plan');
-        assert.equal(await page.getByRole('button', {name:'Run', exact:true}).isEnabled(), true);
+        assert.equal(await page.locator('#run').isEnabled(), true);
     });
 });
 
@@ -279,7 +279,8 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
         assert.deepEqual(await labels(),customRooms);
         assert.equal(await page.locator('.connection-row').count(),1);
         assert.match(await page.locator('#boundary-message').textContent(),/preview could not be rendered/i);
-        await page.click('#reset');
+        // there is no Reset: a changed value rebuilds the preview
+        await page.locator('#sites').evaluate(e => { e.value = String(+e.value + 1); e.dispatchEvent(new Event('input', { bubbles: true })); });
         await page.waitForFunction(() => planProof.messages.some(m => m.gen === planProof.builds.at(-1).gen && m.type === 'frame'));
         assert.deepEqual(await captureBoundary(await page.evaluate(() => planProof.builds.at(-1).gen)),outline);
         assert.deepEqual(await labels(),customRooms,'rebuilding after a failed preview still uses the old outline and rooms');
