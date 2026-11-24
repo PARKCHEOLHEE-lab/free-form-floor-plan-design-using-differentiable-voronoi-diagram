@@ -124,6 +124,18 @@ test("mouse, as in Rhino: a left drag leaves the view alone, a right drag rotate
     });
 });
 
+test("mouse, as in CAD: a middle drag with the wheel button pans, so the plan follows the pointer without turning or zooming", { timeout: 120_000 }, async () => {
+    await withPage(async (page) => {
+        const start = await camera(page);
+        const startCentre = await drawnCentre(page);
+        await drag(page, "middle", [-100, -50]);
+        const after = await drawnCentre(page);
+        const [dx, dy] = [after[0] - startCentre[0], after[1] - startCentre[1]];
+        assert.ok(Math.abs(dx + 100) < 3 && Math.abs(dy + 50) < 3, `the plan moved by ${dx.toFixed(1)}, ${dy.toFixed(1)} px`);
+        assert.deepEqual(await camera(page), start, "a middle drag turned or zoomed the view");
+    });
+});
+
 /** Pixels on the plan canvas in the light neutral greys of the 3D wall sides (205-250). */
 const wallSidePixels = (page) =>
     page.evaluate(async () => {

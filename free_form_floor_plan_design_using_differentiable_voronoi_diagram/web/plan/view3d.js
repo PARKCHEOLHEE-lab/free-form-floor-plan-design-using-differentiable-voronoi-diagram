@@ -48,8 +48,8 @@ export function createPlanView(canvas, { gizmo } = {}) {
     controls.maxPolarAngle = THREE.MathUtils.degToRad(85); // the camera stays above the floor
     // mouse as in Rhino: right drag rotates, Shift (or Ctrl, Cmd) and right drag pans
     // (OrbitControls turns a rotate drag with those keys into a pan), and the left button is
-    // left free for drawing and picking tools
-    controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    // left free for drawing and picking tools; a middle drag pans as in CAD (with those keys it rotates)
+    controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
 
     const meshMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
     const lineMat = new THREE.LineBasicMaterial({ color: CELL_LINE.color, transparent: true, opacity: CELL_LINE.opacity });
