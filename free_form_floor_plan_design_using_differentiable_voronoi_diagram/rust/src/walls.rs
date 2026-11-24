@@ -191,51 +191,6 @@ pub(crate) fn wall_chains(segments: &[Line<f64>], tol: f64) -> Vec<Vec<[f64; 2]>
     )
 }
 
-// Trace physical pair chains through their shared endpoints. Retain line
-// geometry from the pair pass; the small graph has only junction vertices.
-pub(crate) fn stitch_room_chains(
-    chains: &[&[[f64; 2]]],
-    tol: f64,
-) -> Vec<(Vec<[f64; 2]>, Vec<[f64; 2]>)> {
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-    let mut open = Vec::new();
-    for &chain in chains {
-        let a = wall_vertex(&mut nodes, chain[0], tol);
-        let b = wall_vertex(&mut nodes, *chain.last().unwrap(), tol);
-        if a != b {
-            edges.push((a, b));
-            open.push(chain);
-        }
-    }
-    let mut paths = trace_wall_edges(
-        &edges,
-        nodes.len(),
-        |at| (vec![nodes[at]], Vec::new()),
-        |(points, joins), edge, reverse, _| {
-            let chain = open[edge];
-            if points.len() > 1 {
-                joins.push(*points.last().unwrap());
-            }
-            if reverse {
-                points.extend(chain.iter().rev().copied().skip(1));
-            } else {
-                points.extend(chain.iter().copied().skip(1));
-            }
-        },
-    );
-    paths.retain_mut(|(points, joins)| {
-        if joins.is_empty() {
-            return false;
-        }
-        if points.first() == points.last() {
-            joins.push(points[0]);
-        }
-        true
-    });
-    paths
-}
-
 fn trace_wall_edges<T>(
     edges: &[(usize, usize)],
     node_count: usize,

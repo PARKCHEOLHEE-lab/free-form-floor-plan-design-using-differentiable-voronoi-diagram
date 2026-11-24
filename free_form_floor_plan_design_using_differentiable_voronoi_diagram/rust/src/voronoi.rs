@@ -568,7 +568,7 @@ mod interior_tests {
         let boundary = shapes::by_name("shape_e").unwrap().polygon();
         let sites = init::initialize_sites(&boundary, 32, 4971);
         let labels = init::kmeans_labels(&sites, 6, 4971);
-        let weights = LossWeights { w_area: 1., w_wall: 0.1, w_jog: 0.01, ..Default::default() };
+        let weights = LossWeights { w_area: 1., w_wall: 0.1, w_cosine: 1., ..Default::default() };
         let targets = [boundary.unsigned_area() / 6.; 6];
         let context = LocalGradContext::new(&sites, &boundary, &targets, &labels, &weights);
         CELL_WORKSPACES_BUILT.set(0);

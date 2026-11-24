@@ -18,7 +18,7 @@
 
 use crate::loss::{
     area_loss_from_areas, cell_area_for_loss, compute_bb_loss, compute_cell_area_loss,
-    compute_topology_loss, compute_wall_terms, rooms_group, LossBreakdown, LossWeights, WallLossMode,
+    compute_topology_loss, compute_wall_terms, rooms_group, LossBreakdown, LossWeights,
     compute_wall_local_loss_reusing, lloyd_cell_distance, lloyd_loss_from_distances, local_wall_ring_scores,
 };
 use crate::voronoi::compute_cells;
@@ -46,13 +46,13 @@ fn breakdown_from(
     wall_shape: Option<&WallShapeCache<'_>>,
     legacy_wall: impl FnOnce() -> f32,
 ) -> LossBreakdown {
-    let (wall,cosine,jog,connection) = compute_wall_terms(groups,boundary,w,program,shared,wall_shape,legacy_wall);
+    let (wall,cosine,connection) = compute_wall_terms(groups,boundary,w,program,shared,wall_shape,legacy_wall);
     let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
     let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
     let walls = if w.w_cosine > 0. { wall + cosine } else { wall };
-    let total = walls + area + lloyd + topo + bb + cell + connection + jog;
-    LossBreakdown { jog, total, wall, cosine, area, lloyd, topo, bb, cell, connection }
+    let total = walls + area + lloyd + topo + bb + cell + connection;
+    LossBreakdown { total, wall, cosine, area, lloyd, topo, bb, cell, connection }
 }
 
 /// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
@@ -131,7 +131,7 @@ impl<'a> LocalGradContext<'a> {
             lloyd_loss_from_distances(distances.iter().copied().flatten(), w.w_lloyd)
         });
         let base_vertices=crate::voronoi::VertexWelder::for_cells(&base_cells);
-        let score_legacy_wall = w.w_wall > 0. && matches!(w.wall_mode, WallLossMode::LegacyL1);
+        let score_legacy_wall = w.w_wall > 0.;
         let need_unions = score_legacy_wall || w.w_topo > 0.0 || w.w_bb > 0.0;
         let (n_rooms, base_unions, base_breakdown, shared_cells, wall_shape, wall_rings) = {
             let groups = rooms_group(&base_cells, room_indices);
@@ -143,17 +143,14 @@ impl<'a> LocalGradContext<'a> {
             } else {
                 Vec::new()
             };
-            let (score_direction, score_jog) = w.shared_wall_shape();
-            let score_shape = score_direction || score_jog;
-            let shared_cells = if score_shape || program.is_some_and(|p| p.has_connections()) {
+            let score_direction = w.w_cosine > 0.;
+            let shared_cells = if score_direction || program.is_some_and(|p| p.has_connections()) {
                 Some(crate::walls::SharedWallCells::new(&base_cells, room_indices))
             } else {
                 None
             };
             let shared = shared_cells.as_ref().map(|cells| cells.snapshot());
-            let wall_shape = score_shape.then(|| {
-                WallShapeCache::new(shared.as_ref().unwrap(), boundary, score_direction, score_jog)
-            });
+            let wall_shape = score_direction.then(|| WallShapeCache::new(shared.as_ref().unwrap(), boundary));
             let wall_rings: Option<Vec<Vec<f32>>> = score_legacy_wall.then(|| {
                 unions.iter().map(|union| local_wall_ring_scores(union, boundary).collect()).collect()
             });
@@ -633,7 +630,7 @@ mod tests {
         let circles:Vec<[f64;3]>=fixture["rooms"].as_array().unwrap().iter().map(|r|[r["center"][0].as_f64().unwrap(),r["center"][1].as_f64().unwrap(),r["radius"].as_f64().unwrap()]).collect();
         let b=shapes::by_name("shape_e").unwrap().polygon();let mut p=RoomProgram::new(&b,&circles).unwrap();p.set_connections(&[[0,1],[2,4]],0.1).unwrap();
         let (sites,labels)=p.initialize(&b,80,4971).unwrap();let targets:Vec<_>=p.ratios().iter().map(|r|r*b.unsigned_area()).collect();
-        let w=LossWeights{wall_mode:WallLossMode::CosineSquared,w_wall:1.,w_jog:0.35,w_area:0.15/0.49,w_lloyd:0.01/5.3,w_topo:0.2/4.,..Default::default()};
+        let w=LossWeights{w_wall:1./13.,w_cosine:1.,w_area:0.15/0.49,w_lloyd:0.01/5.3,w_topo:0.2/4.,..Default::default()};
         let ctx=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p));
         let mut uncached=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p));
         uncached.shared_cells=None;
@@ -645,7 +642,7 @@ mod tests {
             let full=crate::loss::floor_plan_loss_with_program(&moved,&b,&targets,&labels,&w,None,Some(&p));
             let local=ctx.local_total(&moved,i);
             assert_eq!(local.to_bits(),uncached.local_total(&moved,i).to_bits(),"site{i} axis{axis} sign{sign}: cached ownership must preserve each finite-difference sample exactly");
-            assert!((local-full.total).abs()<1e-4,"site{i} axis{axis} sign{sign} must preserve the full wall/jog/door objective");
+            assert!((local-full.total).abs()<1e-4,"site{i} axis{axis} sign{sign} must preserve the full wall/door objective");
         }}}
         let mut moved=sites.clone();moved[11][0]+=1e-3;
         let full=crate::loss::floor_plan_loss_with_program(&moved,&b,&targets,&labels,&w,None,Some(&p));

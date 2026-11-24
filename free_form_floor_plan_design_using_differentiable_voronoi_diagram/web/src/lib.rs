@@ -44,7 +44,6 @@ struct Frame {
     wall: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     cosine: Option<f32>,
-    jog: f32,
     area: f32,
     lloyd: f32,
     topo: f32,
@@ -140,19 +139,9 @@ impl WasmOpt {
         self.configure_preset_areas().map_err(|message| JsValue::from_str(&message))
     }
 
-    /// Select the angular wall experiment for this optimizer.
-    pub fn use_cosine_wall_loss(&mut self) {
-        self.weights.wall_mode = loss::WallLossMode::CosineProduct;
-    }
-
-    /// Set the raw cosine contribution independently of the existing Wall term.
+    /// Set the raw Cos contribution independently of the L1 wall term.
     pub fn set_cosine_weight(&mut self, weight: f64) -> Result<(), JsValue> {
         self.configure_cosine_weight(weight).map_err(|message| JsValue::from_str(&message))
-    }
-
-    /// Set the step weight without changing the wall model.
-    pub fn set_wall_loss(&mut self, jog_weight:f64)->Result<(),JsValue>{
-        self.configure_wall_loss(jog_weight).map_err(|e|JsValue::from_str(&e))
     }
 
     /// The normalized boundary ring (`[[x,y],...]`) for drawing + canvas fit.
@@ -187,12 +176,6 @@ impl WasmOpt {
         // term joins split rooms during the run, as before area fitting.
         self.room_indices = RoomProgram::fit_automatic_labels(&self.sites, &self.boundary, &initial, &self.target_areas)
             .unwrap_or(initial);
-        Ok(())
-    }
-
-    fn configure_wall_loss(&mut self, jog_weight:f64)->Result<(),String>{
-        if !jog_weight.is_finite() || jog_weight<0. {return Err("Step weight must be finite and nonnegative.".into());}
-        self.weights.w_jog=jog_weight;
         Ok(())
     }
 
@@ -327,7 +310,6 @@ impl WasmOpt {
             loss: bd.total,
             wall: bd.wall,
             cosine: (self.weights.w_cosine > 0.).then_some(bd.cosine),
-            jog: bd.jog,
             area: bd.area,
             lloyd: bd.lloyd,
             topo: bd.topo,
