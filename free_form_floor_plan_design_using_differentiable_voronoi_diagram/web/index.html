@@ -58,7 +58,11 @@
 
     .controls { font-size: .96em; }
     .label { font-size: 13px; font-weight: 600; color: var(--ui-fg); margin: 14px 0 8px; }
-    .panel > .label:first-child { font-size: 15px; margin: 0 0 12px; }   /* the panel title */
+    .panel > .label:first-child, .panel-head > .label { font-size: 15px; margin: 0 0 12px; }   /* the panel title */
+    /* a title with icon cells on its right, on the same six-cell grid as the preset row */
+    .panel-head { display: grid; grid-template-columns: repeat(6, 1fr); gap: .35em; align-items: center; margin-bottom: 12px; }
+    .panel-head > .label { grid-column: 1 / 5; margin: 0; }
+    .panel .panel-head .seg { display: contents; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: 3.4em; flex: none; color: var(--ui-muted-fg); }
@@ -129,14 +133,18 @@
     /* hover names: each icon's or gizmo end's aria-label, shown beside it after a short pause
        (aria-label is the one source, so Run's name follows Pause and Resume) */
     .tool { position: relative; }
-    .tool::after, .axis::after, .boundary-row button::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%);
+    .tool::after, .axis::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%);
       padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light); font: 500 12px/1.2 var(--font);
       white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
     .tool::after { left: calc(100% + 10px); }
     .axis::after { right: calc(100% + 8px); }  /* the gizmo is at the right edge */
     .tool:hover::after, .tool:focus-visible::after,
-    .axis:hover::after, .axis:focus-visible::after,
-    .boundary-row button:hover::after, .boundary-row button:focus-visible::after { opacity: 1; transition-delay: .12s; }
+    .axis:hover::after, .axis:focus-visible::after { opacity: 1; transition-delay: .12s; }
+    /* icon cells inside a panel: the panel cuts off what overflows it, so their name is one
+       floating .tip over the page, centered under the icon (see showTip) */
+    .tip { position: fixed; z-index: 10; padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light);
+      font: 500 12px/1.2 var(--font); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
+    .tip.shown { opacity: 1; transition-delay: .12s; }
 
     /* top-right: the view gizmo, the plan's axes as the camera sees them, floating with no card;
        a drag in it rotates the view and a click on an end turns the view to that side */
@@ -199,13 +207,8 @@
   /* six equal cells: the five presets, then Draw boundary */
   .panel .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }   /* .panel: beats .panel .seg */
   #presets { display:contents; }
-  .boundary-row button { display:grid; place-items:center; }
-  .boundary-row button { position:relative; }
-  .boundary-row .ic { width:20px; height:20px; stroke-width:1.6; }   /* presets and Draw boundary alike */
-  /* names show below the row; the end cells align to the panel edge so the panel does not clip them */
-  .boundary-row button::after { top:calc(100% + 6px); left:50%; transform:translateX(-50%); }
-  #presets button:first-child::after { left:0; transform:none; }
-  #boundary-draw::after { left:auto; right:0; transform:none; }
+  .boundary-row button, .panel-head button { display:grid; place-items:center; }
+  .boundary-row .ic, .panel-head .ic { width:20px; height:20px; stroke-width:1.6; }   /* icon cells alike */
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -238,6 +241,8 @@
         <symbol id="b-shape_c" viewBox="0 0 24 24"><polygon points="3.00,18.82 7.83,18.82 7.83,15.37 12.42,15.37 12.42,18.82 18.67,18.82 18.67,12.31 21.00,12.31 21.00,5.18 3.00,5.18"/></symbol>
         <symbol id="b-shape_d" viewBox="0 0 24 24"><polygon points="6.94,4.12 3.00,14.81 5.81,19.88 14.25,19.88 14.25,14.81 21.00,14.81 21.00,5.81 9.75,5.81 9.75,4.12"/></symbol>
         <symbol id="b-shape_e" viewBox="0 0 24 24"><polygon points="20.69,11.69 16.97,3.00 3.31,3.00 3.31,13.55 7.03,21.00 13.24,21.00 13.24,14.79 20.69,14.79"/></symbol>
+        <symbol id="i-walls-raw" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3 10.5 7.5 13 12 11 16.5 12 21"/><path d="M3 12.5 7.5 11 13 12"/></symbol>
+        <symbol id="i-walls-aligned" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h9"/></symbol>
         <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
         <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
         <symbol id="i-vector-square" viewBox="0 0 24 24"><path d="M19.5 7a24 24 0 0 1 0 10"/><path d="M4.5 7a24 24 0 0 0 0 10"/><path d="M7 19.5a24 24 0 0 0 10 0"/><path d="M7 4.5a24 24 0 0 1 10 0"/><rect x="17" y="17" width="5" height="5" rx="1"/><rect x="17" y="2" width="5" height="5" rx="1"/><rect x="2" y="17" width="5" height="5" rx="1"/><rect x="2" y="2" width="5" height="5" rx="1"/></symbol>
@@ -287,12 +292,14 @@
       </section>
 
       <section class="panel" data-panel="display">
-        <div class="label">Display</div>
-        <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
-        <div class="seg" id="walls">
-          <button data-walls="raw" class="active">Raw</button>
-          <button data-walls="aligned">Aligned</button>
+        <div class="panel-head">
+          <div class="label">Display</div>
+          <div class="seg" id="walls">
+            <button data-walls="raw" class="active" aria-label="Raw walls"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
+            <button data-walls="aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
+          </div>
         </div>
+        <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
         <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="merge_tol_v">0.020</span></div>
         <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="align_tol_v">0.020</span></div>
         <div class="row"><label>aligned</label><span class="readout" id="align_v"></span></div>
@@ -376,6 +383,24 @@ $('walls').addEventListener('click', e => {
 // Each weighted loss contribution has its own y-scale.
 const LOSS_TERMS = ['total', 'wall', 'cosine', 'area', 'lloyd', 'topo'];
 // Each row's value tag (vt_<term>) shows while the mouse is on that row (sp_<term>).
+// The name of the icon cell under the pointer or keyboard focus, centered 6px below it.
+const tip = document.createElement('div');
+tip.className = 'tip';
+tip.setAttribute('aria-hidden', 'true');   // the button's own aria-label is its accessible name
+document.body.append(tip);
+const TIP_CELLS = '.boundary-row button, .panel-head button';
+function showTip(button) {
+  tip.textContent = button.getAttribute('aria-label');
+  const r = button.getBoundingClientRect(), w = tip.offsetWidth;
+  tip.style.left = Math.min(Math.max(r.left + r.width / 2 - w / 2, 4), innerWidth - w - 4) + 'px';
+  tip.style.top = r.bottom + 6 + 'px';
+  tip.classList.add('shown');
+}
+const hideTip = () => tip.classList.remove('shown');
+document.addEventListener('pointerover', e => { const b = e.target.closest?.(TIP_CELLS); if (b) showTip(b); else hideTip(); });
+document.addEventListener('focusin', e => { const b = e.target.closest?.(TIP_CELLS); if (b?.matches(':focus-visible')) showTip(b); });
+document.addEventListener('focusout', hideTip);
+
 document.querySelectorAll('.lossrow').forEach(row => {
   const tag = $('vt_' + row.querySelector('polyline').id.slice(3));
   row.addEventListener('pointerenter', () => tag.classList.add('shown'));

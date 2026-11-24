@@ -381,10 +381,6 @@ test("rooms: Draw boundary is an icon-only button after the last preset, sized l
             assert.ok(Math.abs(button.width - last.width) < 1, "Draw boundary is as wide as a preset");
             const panel = await page.locator(".panel[data-panel=rooms]").boundingBox();
             assert.ok(button.x + button.width <= panel.x + panel.width, "the row fits in the panel");
-            await draw.hover();
-            await page.waitForTimeout(300);
-            const tip = await draw.evaluate((b) => { const s = getComputedStyle(b, "::after"); return [s.content, +s.opacity]; });
-            assert.deepEqual(tip, ['"Draw boundary"', 1], "hovering shows the name");
         });
     } finally { proc.kill(); }
 });
@@ -521,18 +517,6 @@ test("polish: Display panel labels fit on one line", { timeout: 60_000 }, async 
     } finally { proc.kill(); }
 });
 
-test("polish: hovering a preset shows its name", { timeout: 60_000 }, async () => {
-    const { url, proc } = await serve();
-    try {
-        await atSize(url, [1145, 820], async (page) => {
-            await page.click("button[data-open=rooms]");
-            await page.hover("[data-mode=shape_c]");
-            await page.waitForTimeout(300);
-            assert.deepEqual(await page.$eval("[data-mode=shape_c]", (b) => { const s = getComputedStyle(b, "::after"); return [s.content, +s.opacity]; }), ['"Boundary C"', 1]);
-        });
-    } finally { proc.kill(); }
-});
-
 test("polish: panel titles are larger than their section labels", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
@@ -623,6 +607,57 @@ test("polish: disabled buttons get no hover fill, and rows fade their hover like
             await drawRoomAt(page, [600, 450]);
             const fade = (sel) => page.$eval(sel, (b) => getComputedStyle(b).transitionDuration.split(",")[0]);
             assert.equal(await fade(".room-row"), await fade(".seg button"));
+        });
+    } finally { proc.kill(); }
+});
+
+test("display: Raw and Aligned are small plan icons in the Display title row", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            const cell = await page.locator("[data-mode=shape_a]").boundingBox();
+            await page.click("button[data-open=display]");
+            const title = await page.locator(".panel[data-panel=display] .label").first().boundingBox();
+            for (const [mode, name] of [["raw", "Raw walls"], ["aligned", "Aligned walls"]]) {
+                const button = page.locator(`#walls [data-walls=${mode}]`);
+                assert.equal((await button.textContent()).trim(), "", `${name} shows an icon, not text`);
+                assert.equal(await button.getAttribute("aria-label"), name);
+                assert.equal(await button.locator("svg use").getAttribute("href"), `#i-walls-${mode}`);
+                const box = await button.boundingBox();
+                assert.ok(Math.abs(box.width - cell.width) < 1 && Math.abs(box.height - cell.height) < 1, `${name} is ${box.width}x${box.height}, a preset cell is ${cell.width}x${cell.height}`);
+                assert.ok(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2)) < 4 && box.x > title.x + title.width, `${name} sits right of the Display title`);
+            }
+            await page.click("[data-walls=aligned]");
+            assert.equal(await page.locator("[data-walls=aligned].active").count(), 1, "Aligned still switches the walls");
+        });
+    } finally { proc.kill(); }
+});
+
+test("tooltips: icon names in panels show centered under the icon and are never cut off", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const check = async (sel, name) => {
+                await page.hover(sel);
+                await page.waitForTimeout(300);
+                const b = await page.locator(sel).boundingBox(), tip = page.locator(".tip");
+                assert.equal(await tip.textContent(), name);
+                assert.equal(await tip.evaluate((t) => +getComputedStyle(t).opacity), 1, `${name} shows`);
+                assert.equal(await tip.evaluate((t) => !!t.closest(".panel")), false, `${name} is not inside the panel that would cut it off`);
+                const t = await tip.boundingBox();
+                assert.ok(Math.abs(t.x + t.width / 2 - (b.x + b.width / 2)) < 1, `${name} is centered under its icon`);
+                assert.ok(t.y >= b.y + b.height, `${name} is below its icon`);
+                assert.ok(t.x >= 0 && t.x + t.width <= 1145, `${name} is inside the window`);
+            };
+            await page.click("button[data-open=display]");
+            await check("[data-walls=aligned]", "Aligned walls");
+            await page.click("button[data-open=rooms]");
+            await check("#boundary-draw", "Draw boundary");
+            await check("[data-mode=shape_a]", "Boundary A");
+            await page.mouse.move(700, 700);
+            await page.waitForTimeout(200);
+            assert.equal(await page.locator(".tip").evaluate((t) => +getComputedStyle(t).opacity), 0, "the name hides when the pointer leaves");
         });
     } finally { proc.kill(); }
 });
