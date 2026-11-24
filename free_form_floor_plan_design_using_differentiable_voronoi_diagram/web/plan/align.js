@@ -140,8 +140,8 @@ function snapChains(g, boundary, tol) {
     }
 }
 
-/** Connected groups of edges (edges that share a corner). */
-function components(edges) {
+/** Connected groups of edges (edges that share a corner). Also groups a dragged wall run (wall-edit.js). */
+export function components(edges) {
     const parent = new Map();
     const find = (x) => {
         if (!parent.has(x)) parent.set(x, x);
