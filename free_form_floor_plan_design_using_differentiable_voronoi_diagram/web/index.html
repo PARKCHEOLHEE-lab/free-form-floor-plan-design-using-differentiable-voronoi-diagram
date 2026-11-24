@@ -6,33 +6,12 @@
   <link rel="icon" type="image/png" href="favicon.png" />
   <title>Floor Plan Generation with Voronoi Diagram</title>
   <style>
-    /* Self-hosted PT Sans (vendored, no CDN) — matches the reference site's
-       design system: PT Sans, flat surfaces (border + tint, no shadows or
-       gradients), em-based spacing. Room/plot colors stay semantic. */
-    @font-face {
-      font-family: "PT Sans";
-      src: local("PT Sans"), local("PTSans-Regular"), url("./fonts/PTSans-Regular.woff") format("woff");
-      font-weight: normal; font-style: normal; font-display: swap;
-    }
-    @font-face {
-      font-family: "PT Sans";
-      src: local("PT Sans Bold"), local("PTSans-Bold"), url("./fonts/PTSans-Bold.woff") format("woff");
-      font-weight: bold; font-style: normal; font-display: swap;
-    }
-
     :root {
-      --font: "PT Sans", -apple-system, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       --dark: #000;
       --light: #fff;
-      --text-dark: #000;   /* match the reference site: body text is pure black */
-      --link: #66a1ff;
       --featured: #0011e3;
-      --bg-subtle: #f7f7f8;
-      --divider: #e5e5e6;
-      --reduce-14: rgba(128, 128, 128, 0.14);
       --reduce-30: rgba(128, 128, 128, 0.30);
-      --reduce-90: rgba(128, 128, 128, 0.90);
     }
 
     * { box-sizing: border-box; }
@@ -40,50 +19,21 @@
     body {
       margin: 0;
       background: var(--light);
-      color: var(--dark);
+      color: var(--ui-fg);
       font-family: var(--font);
-      font-size: calc(0.76rem + 0.2vw);
+      font-size: 14px;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
-    /* the reference keeps backgrounds flat even in dark mode */
-    @media (prefers-color-scheme: dark) { body { background: var(--light); color: var(--dark); } }
 
-    .wrap { max-width: 940px; margin: 0 auto; padding: 2.8em clamp(1.2em, 4vw, 2.4em) 3.4em; }
-
-    /* one restrained, staggered load reveal */
-    @keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
-    header, .lede, .stage, footer { animation: rise .55s cubic-bezier(.2, .7, .2, 1) both; }
-    .lede { animation-delay: .08s; }   /* intro paragraph under the header */
-    .stage { animation-delay: .14s; }
-    footer { animation-delay: .26s; }
-    @media (prefers-reduced-motion: reduce) { header, .lede, .stage, footer { animation: none; } }
-
-    header { margin-bottom: 1.1em; }
-    h1 { font-size: 1.7em; font-weight: bold; letter-spacing: -0.015em; margin: 0 0 .15em; }
-    .sub { color: var(--text-dark); margin: 0; text-align: justify; }
-    .lede { color: var(--text-dark); margin: 0 0 1.6em; text-align: justify; }   /* intro paragraph under the header */
-    .lede p { margin: 0 0 .9em; }
-    .lede p:last-child { margin-bottom: 0; }
-    .lede strong { color: var(--dark); font-weight: bold; }
-
-    a { color: var(--link); text-decoration: inherit; }
-    a:hover { text-decoration: underline; }
-    code { font-family: var(--mono); background: var(--bg-subtle); padding: .05em .35em; border-radius: 3px; font-size: .92em; }
-
-    .stage { display: grid; grid-template-columns: minmax(0, 1fr) 268px; gap: 2em; align-items: start; }
-    @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
-
-    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--divider); border-radius: 8px; background: var(--light); touch-action: none; display: block; }
-    /* loss panel section subtitle (styled like LAYOUT / WALL / … via .label) */
-    .canvas-sub { margin-top: .9em; }
+    canvas#plan { width: 100%; height: 100%; background: var(--light); touch-action: none; display: block; }
     /* per-term loss graphs: one row each (label · own-scale sparkline); the
        current value rides the playhead as a per-row tag (see .vtag below) */
     .losspanel { margin-top: 0; position: relative; }   /* relative: the playhead spans the rows */
     .lossrow { display: flex; align-items: center; gap: .7em; margin: .34em 0; }
-    .lossrow .lk { width: 3.4em; flex: none; color: var(--text-dark); }
-    .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--divider); border-radius: 6px; background: var(--light); display: block; }
+    .lossrow .lk { width: 3.4em; flex: none; color: var(--ui-muted-fg); font-size: 12px; }
+    .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 20px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--light); display: block; }
     .lossrow .spark polyline { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
     #sp_total { stroke: #66a1ff; } #sp_wall { stroke: #e08a5a; } #sp_area { stroke: #5aa469; }
     #sp_lloyd { stroke: #8c7bd0; } #sp_topo { stroke: #c75d8f; }
@@ -107,30 +57,24 @@
     #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
 
     .controls { font-size: .96em; }
-    .group { margin-bottom: 1.5em; }
-    .label { font-weight: bold; font-size: .76em; text-transform: uppercase; letter-spacing: .07em; color: var(--reduce-90); margin-bottom: .6em; }
+    .label { font-size: 13px; font-weight: 600; color: var(--ui-fg); margin-bottom: 8px; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
-    .row > label { width: 3.4em; flex: none; color: var(--text-dark); }
-    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: .85em; color: var(--dark); font-variant-numeric: tabular-nums; }
+    .row > label { width: 3.4em; flex: none; color: var(--ui-muted-fg); }
+    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
+    .readout { font-size: 12px; color: var(--ui-fg); }
 
-    /* thin track + link-colored thumb (the reference's scrubber) */
+    /* thin track + outlined thumb */
     input[type=range] {
       -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0;
-      height: 4px; border-radius: 3px; background: var(--reduce-30); outline: none; cursor: pointer;
+      height: 4px; border-radius: 3px; background: var(--ui-border); outline: none; cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
-      background: var(--link); cursor: pointer; transition: transform .1s;
+      background: var(--light); border: 1.5px solid var(--ui-fg); cursor: pointer; transition: transform .1s;
     }
     input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.18); }
-    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 50%; background: var(--link); cursor: pointer; }
-
-    input[type=number] {
-      font-family: var(--mono); font-size: .85em; width: 4.6em; padding: .3em .4em;
-      border: 1px solid var(--reduce-30); border-radius: 4px; background: var(--light); color: var(--dark);
-    }
-    input[type=number]:focus { outline: none; border-color: var(--featured); }
+    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 1.5px solid var(--ui-fg); border-radius: 50%; background: var(--light); cursor: pointer; }
 
     /* room-ratio rows reuse the .row grid so their slider tracks line up exactly
        with sites/rooms/wall/loss; the colour swatch sits in the 3.4em label slot. */
@@ -141,26 +85,12 @@
 
     .seg { display: flex; flex-wrap: wrap; gap: .35em; }
     .seg button {
-      flex: 1 1 auto; padding: .42em .5em; border: 1px solid var(--reduce-30); background: transparent;
-      border-radius: 4px; font: inherit; font-size: .85em; color: var(--text-dark); cursor: pointer;
+      flex: 1 1 auto; padding: .42em .5em; border: 1px solid var(--ui-border); background: transparent;
+      border-radius: 8px; font: inherit; font-size: .85em; color: var(--ui-fg); cursor: pointer;
       transition: background .12s, border-color .12s, color .12s;
     }
-    .seg button:hover:not(.active) { background: var(--reduce-14); color: var(--dark); }
-    .seg button.active { background: var(--dark); border-color: var(--dark); color: var(--light); }
-
-
-    .actions { display: flex; gap: .4em; margin-bottom: 1.5em; }
-    .actions button {
-      flex: 1; padding: .62em; border: 1px solid var(--reduce-30); background: transparent; border-radius: 4px;
-      font: inherit; font-weight: bold; color: var(--dark); cursor: pointer;
-      transition: background .12s, border-color .12s, opacity .12s;
-    }
-    .actions button:hover:not(:disabled) { background: var(--reduce-14); }
-    .actions button.primary { background: var(--dark); border-color: var(--dark); color: var(--light); }
-    .actions button.primary:hover:not(:disabled) { background: var(--dark); }
-    .actions button:disabled { opacity: .4; cursor: default; }
-
-    footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
+    .seg button:hover:not(.active) { background: var(--ui-muted); }
+    .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
 
     /* Canvas UI: the plan canvas covers the window (view.resize reads its width and height)
        and every control floats over it: icon toolbars in the corners, one settings panel at
@@ -177,11 +107,8 @@
       --ui-card-shadow: 0 0 0 1px rgba(10, 10, 10, .1), 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -4px rgba(0, 0, 0, .1);
     }
     html, body { height: 100%; overflow: hidden; }
-    body { font-size: 14px; color: var(--ui-fg); }
-    .wrap { max-width: none; padding: 0; }
     .stage, .canvas-card, .controls { display: contents; }
     .planbox { position: fixed; inset: 0; }
-    .planbox canvas#plan { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; }
 
     .toolbar, .panel { position: fixed; background: var(--light); border-radius: 14px; box-shadow: var(--ui-card-shadow); }
     .toolbar { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; z-index: 2; }
@@ -197,13 +124,14 @@
     /* hover names: each icon's or gizmo end's aria-label, shown beside it after a short pause
        (aria-label is the one source, so Run's name follows Pause and Resume) */
     .tool { position: relative; }
-    .tool::after, .axis::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%);
+    .tool::after, .axis::after, #boundary-draw::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%);
       padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light); font: 500 12px/1.2 var(--font);
       white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
     .tool::after { left: calc(100% + 10px); }
     .axis::after { right: calc(100% + 8px); }  /* the gizmo is at the right edge */
     .tool:hover::after, .tool:focus-visible::after,
-    .axis:hover::after, .axis:focus-visible::after { opacity: 1; transition-delay: .12s; }
+    .axis:hover::after, .axis:focus-visible::after,
+    #boundary-draw:hover::after, #boundary-draw:focus-visible::after { opacity: 1; transition-delay: .12s; }
 
     /* top-right: the view gizmo, the plan's axes as the camera sees them, floating with no card;
        a drag in it rotates the view and a click on an end turns the view to that side */
@@ -223,19 +151,7 @@
     .panel.open { display: block; }
     /* panels are see-through, so the plan stays visible behind an open panel */
     .panel { background: rgba(255, 255, 255, .75); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
-    .panel .label { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ui-fg); margin-bottom: 8px; }
     .lossrow { margin: 2px 0; }
-    .lossrow .lk { color: var(--ui-muted-fg); font-size: 12px; }
-    .lossrow .spark { height: 20px; border-color: var(--ui-border); }
-
-    .row > label { color: var(--ui-muted-fg); }
-    .row .val, .readout { font-size: 12px; color: var(--ui-fg); }
-    input[type=range] { background: var(--ui-border); }
-    input[type=range]::-webkit-slider-thumb { background: var(--light); border: 1.5px solid var(--ui-fg); }
-    input[type=range]::-moz-range-thumb { background: var(--light); border: 1.5px solid var(--ui-fg); }
-    .seg button { border-color: var(--ui-border); border-radius: 8px; color: var(--ui-fg); }
-    .seg button:hover:not(.active) { background: var(--ui-muted); }
-    .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
     .panel .seg { margin-bottom: 4px; }
   #boundary-sketch { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; color:var(--featured); }
   #boundary-sketch [hidden], #boundary-sketch[hidden] { display:none; }
@@ -270,7 +186,6 @@
   #rooms_v { margin-left:auto; }
   .bubble-help.error { color:#a12b2b; }
   #program-status { font:11px/1.5 var(--font); margin-top:8px; }
-  .panel[data-panel=rooms] { overflow:auto; }
   .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 0; border:0; border-radius:4px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
   .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
   .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
@@ -281,9 +196,7 @@
   .preset-ic { width:20px; height:20px; stroke-width:1.6; }
   #boundary-draw { position:relative; }
   #boundary-draw .ic { width:16px; height:16px; }
-  #boundary-draw::after { content:attr(aria-label); position:absolute; top:calc(100% + 6px); right:0; z-index:3; padding:4px 8px; border-radius:6px;
-    background:var(--ui-fg); color:var(--light); font:500 12px/1.2 var(--font); white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .1s; }
-  #boundary-draw:hover::after, #boundary-draw:focus-visible::after { opacity:1; transition-delay:.12s; }
+  #boundary-draw::after { top:calc(100% + 6px); right:0; transform:none; }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -351,7 +264,7 @@
         </div>
         <button id="boundary-draw" type="button" aria-label="Draw boundary" aria-pressed="false" disabled><svg class="ic"><use href="#i-vector-square"/></svg></button>
         </div>
-<div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
+        <div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
