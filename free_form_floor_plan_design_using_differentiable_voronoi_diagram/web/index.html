@@ -585,7 +585,7 @@ function restoreWalls(state) {
 const wallEditor = createWallEditor($('plan'), view, {
   overlay: $('wall-sketch'),
   plan: () => adjusted ?? lastAligned,
-  canEdit: () => wallsMode === 'aligned',
+  canEdit: () => wallsMode === 'aligned' && !running,   // the plan changes under the pointer while it runs
   onChange(graph, commit) {
     adjusted = graph;
     $('plan').toggleAttribute('data-wall-edits', true);
@@ -1096,6 +1096,9 @@ function setButtons() {
   const sketching = boundaryEditor.active || !!pendingBoundary;
   $('run').disabled=sketching||editingBubbles||!!(currentProgram()&&!roomCount());
   $('boundary-draw').disabled = !boundaryRing || running || paused || !!pendingBoundary;
+  // walls move only on a plan that holds still
+  $('adjust-message').textContent = running ? 'The plan is still changing. Pause the run to move walls.'
+    : 'Drag a wall to move it. It snaps to corners and to the middle of walls.';
   $('undo').disabled = openPanel === 'adjust' ? !wallHistory.canUndo : boundaryEditor.active ? !boundaryEditor.canUndo : !!pendingBoundary || !history.canUndo;
   $('redo').disabled = openPanel === 'adjust' ? !wallHistory.canRedo : boundaryEditor.active ? !boundaryEditor.canRedo : !!pendingBoundary || !history.canRedo;
 }

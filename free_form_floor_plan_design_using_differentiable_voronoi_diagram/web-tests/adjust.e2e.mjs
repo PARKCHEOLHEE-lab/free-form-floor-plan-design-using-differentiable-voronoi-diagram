@@ -139,3 +139,28 @@ test("adjustment: with wall edits, a control that rebuilds the walls asks first;
         await page.click("#run");
     });
 });
+
+test("adjustment: walls cannot be dragged while the optimizer runs, and can after Pause", { timeout: 180_000 }, async () => {
+    await onPage(async (page) => {
+        const message = () => page.locator("#adjust-message").textContent();
+        await page.click("button[data-open=optimize]");
+        await page.locator("#iters").focus();
+        await page.keyboard.press("End"); // the longest run, so it is still going while the test looks
+        await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
+        await page.click("#run");
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Pause");
+
+        await page.click("button[data-open=adjust]");
+        assert.match(await message(), /Pause the run/, `the panel says to pause first: ${await message()}`);
+        assert.equal(await findWall(page), null, "no wall can be picked while the plan is changing");
+        assert.equal(await hasEdits(page), false);
+
+        await page.click("button[data-open=optimize]");
+        await page.click("#run"); // pause
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Resume");
+        await page.click("button[data-open=adjust]");
+        assert.doesNotMatch(await message(), /Pause the run/, "after Pause the panel explains dragging again");
+        await dragWall(page);
+        assert.equal(await hasEdits(page), true, "after Pause a wall drags");
+    });
+});
