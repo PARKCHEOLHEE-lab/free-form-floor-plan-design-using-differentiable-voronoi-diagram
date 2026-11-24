@@ -20,9 +20,9 @@ test('room circles draw move and resize on the plan while camera actions preserv
         if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
         await page.goto(url);
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('button[data-open=boundary]');await page.click('button[data-mode=shape_a]');
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-open=rooms]');
+        await page.click('.gizmo [data-axis="+z"]');
         await page.click('button[data-bubble-tool=draw]');
         await page.setViewportSize({width:1146,height:820});await page.waitForTimeout(200);
         await page.setViewportSize({width:1145,height:820});await page.waitForTimeout(200);
@@ -96,9 +96,9 @@ test('generated plans keep centers and show only requested doors in raw and alig
         const page=await browser.newPage({viewport:{width:1145,height:820}});
         if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
         await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('button[data-open=boundary]');await page.click('button[data-mode=shape_a]');
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-open=rooms]');await page.click('button[data-bubble-tool=draw]');
+        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-bubble-tool=draw]');
         await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
         await page.click('button[data-bubble-tool=link]');await page.mouse.click(550,530);await page.mouse.click(780,530);
         await page.click('button[data-open=optimize]');await page.locator('#iters').focus();await page.keyboard.press('Home');
@@ -150,9 +150,9 @@ test('linking and deleting circles updates visible door links and keeps the rema
         const page=await browser.newPage({viewport:{width:1145,height:820}});
         if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
         await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('button[data-open=boundary]');await page.click('button[data-mode=shape_a]');
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-open=rooms]');await page.click('button[data-bubble-tool=draw]');
+        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-bubble-tool=draw]');
         await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
         assert.equal((await labels(page)).length,2);
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));

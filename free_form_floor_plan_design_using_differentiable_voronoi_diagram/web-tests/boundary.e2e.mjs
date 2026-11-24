@@ -59,7 +59,7 @@ async function withPlan(callback, query = '', coverageName = 'sketch') {
 
 test('boundary sketch uses a temporary overlay, snaps with Shift, rejects crossings and cancels', { timeout: 30000 }, async () => {
     await withPlan(async page => {
-        await page.click('button[data-open=boundary]');
+        await page.click('button[data-open=rooms]');
         const draw = page.getByRole('button', { name: 'Draw boundary', exact: true });
         assert.equal(await draw.count(), 1, 'Boundary offers a drawing tool on the plan');
         await draw.click();
@@ -123,7 +123,7 @@ test('boundary sketch uses a temporary overlay, snaps with Shift, rejects crossi
 
 test('Shift tracks a draft endpoint height and a midpoint with a visible guide', { timeout: 30000 }, async () => {
     await withPlan(async page => {
-        await page.click('button[data-open=boundary]');
+        await page.click('button[data-open=rooms]');
         await page.click('.gizmo [data-axis="+z"]');
         await page.getByRole('button',{ name:'Draw boundary', exact:true }).click();
         for (const point of [[485,210],[485,555],[630,555],[630,730],[840,730]]) await page.mouse.click(...point);
@@ -171,9 +171,12 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
             await page.mouse.up();
         };
         const labels = () => page.locator('.bubble-label:not(.draft)').evaluateAll(all => all.map(node => ({...node.dataset})));
-        const selectPanel = name => page.click('button[data-open=' + name + ']');
+        // Open a panel unless it is already open (the boundary controls live in Rooms).
+        const selectPanel = async name => {
+            if (!(await page.locator('.panel[data-panel=' + name + ']').evaluate(p => p.classList.contains('open')))) await page.click('button[data-open=' + name + ']');
+        };
 
-        await selectPanel('boundary');
+        await selectPanel('rooms');
         await page.click('button[data-mode=shape_a]');
         await ready('shape_a');
         await page.click('.gizmo [data-axis="+z"]');
@@ -184,7 +187,7 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
         const presetRooms = await labels();
         assert.equal(presetRooms.length,1);
 
-        await selectPanel('boundary');
+        await selectPanel('rooms');
         const sketchRectangle = async () => {
             await page.getByRole('button',{ name:'Draw boundary', exact:true }).click();
             for (const p of [[420,285],[790,285],[790,555],[420,555],[420,285]]) await page.mouse.click(...p);
@@ -240,7 +243,7 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
         }));
         assert.equal(await page.locator('#plan').getAttribute('data-doors'),'1','the requested door is rendered');
 
-        await selectPanel('boundary');
+        await selectPanel('rooms');
         await page.click('button[data-mode=shape_a]');
         await ready('shape_a');
         assert.deepEqual(await labels(),presetRooms);

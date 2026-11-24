@@ -89,9 +89,9 @@ test('resizing a circle changes actual initial room areas before Run without mov
     try{
         const page=await browser.newPage({viewport:{width:1145,height:820}});
         await page.goto(url);await ready(page);
-        await page.click('button[data-open=boundary]');await page.click('button[data-mode=shape_a]');await ready(page);
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');await ready(page);
         await page.click('.gizmo [data-axis="+z"]');
-        await page.click('button[data-open=rooms]');await page.click('button[data-bubble-tool=draw]');
+        await page.click('button[data-bubble-tool=draw]');
         await drag(page,[550,530],[580,530]);await drag(page,[780,530],[840,530]);await ready(page);
         const pose=await camera(page),beforeTarget=await target(page);
         assert.ok(Math.abs(beforeTarget[0]-0.2)<1e-6);
