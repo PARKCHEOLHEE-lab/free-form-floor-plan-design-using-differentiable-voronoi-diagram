@@ -272,10 +272,10 @@ test("rooms: one icon opens the boundary choice above the room bubbles", { timeo
             const labels = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
             assert.deepEqual(labels, ["Run", "Reset", "Rooms", "Optimization", "Display"]);
             assert.equal(await page.locator(".panel[data-panel=boundary]").count(), 0, "no separate boundary panel");
-            for (const sel of ["#presets", "#custom-boundaries", "#boundary-draw", ".bubble-tools", "#roomareas", "#connections", "#sites"])
+            for (const sel of ["#presets", "#custom-boundaries", "#boundary-draw", "#bubble-message", "#roomareas", "#connections", "#sites"])
                 assert.equal(await page.$eval(sel, (e) => e.closest(".panel")?.dataset.panel ?? null), "rooms", `${sel} is in the Rooms panel`);
-            const order = await page.$eval(".panel[data-panel=rooms]", (p) => [...p.querySelectorAll("#boundary-draw, .bubble-tools")].map((e) => e.id || "bubble-tools"));
-            assert.deepEqual(order, ["boundary-draw", "bubble-tools"], "the boundary comes before the room bubbles");
+            const order = await page.$eval(".panel[data-panel=rooms]", (p) => [...p.querySelectorAll("#boundary-draw, #bubble-message")].map((e) => e.id));
+            assert.deepEqual(order, ["boundary-draw", "bubble-message"], "the boundary comes before the room bubbles");
             assert.equal(await page.$eval(".panel[data-panel=rooms] .label", (e) => e.textContent), "Rooms");
             await page.click("button[data-open=rooms]");
             await page.click("button[data-mode=shape_a]");
@@ -322,4 +322,40 @@ test("names: the bubble tools and their Display toggle read Bubble Diagram", { t
     } finally {
         proc.kill();
     }
+});
+
+test("rooms: no Delete selected button; the help text says to press Delete", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            assert.equal(await page.locator("#bubble-delete").count(), 0, "the Delete key replaces the button");
+            assert.match(await page.locator("#bubble-message").textContent(), /Press Delete to remove the selected room or door\./);
+        });
+    } finally { proc.kill(); }
+});
+
+test("rooms: Undo, Redo and Draw boundary are named icon buttons beside the Rooms title and the presets", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            const box = (sel) => page.locator(sel).first().boundingBox();
+            for (const [id, name] of [["undo", "Undo"], ["redo", "Redo"], ["boundary-draw", "Draw boundary"]]) {
+                const button = page.locator("#" + id);
+                assert.equal((await button.textContent()).trim(), "", `${name} shows an icon, not text`);
+                assert.equal(await button.locator("svg use").count(), 1, `${name} has one icon`);
+                assert.equal(await button.getAttribute("aria-label"), name);
+                assert.ok((await button.getAttribute("title")).startsWith(name), `${name} has a tooltip`);
+            }
+            const title = await box(".panel[data-panel=rooms] .label");
+            for (const id of ["#undo", "#redo"]) {
+                const b = await box(id);
+                assert.ok(Math.abs(b.y + b.height / 2 - (title.y + title.height / 2)) < 8, `${id} sits on the Rooms title row`);
+            }
+            const preset = await box("#presets button"), draw = await box("#boundary-draw");
+            assert.ok(Math.abs(draw.y + draw.height / 2 - (preset.y + preset.height / 2)) < 4, "Draw boundary sits on the preset row");
+            assert.ok(draw.x > preset.x, "Draw boundary comes after the presets");
+        });
+    } finally { proc.kill(); }
 });

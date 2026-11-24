@@ -77,6 +77,19 @@ export class BubbleProgram {
         return true;
     }
 
+    /** Plain data for undo: room IDs, ID pairs for links, and the next ID so removed IDs stay unused. */
+    state() {
+        return { boundary: this.boundary.map(p => [...p]), rooms: this.#rooms.map(r => ({ ...r, center: [...r.center] })), links: this.#links.map(pair => [...pair]), nextId: this.#nextId };
+    }
+
+    static fromState({ boundary, rooms, links, nextId }) {
+        const program = new BubbleProgram(boundary);
+        program.#rooms = rooms.map(r => ({ ...r, center: [...r.center] }));
+        program.#links = links.map(pair => [...pair]);
+        program.#nextId = nextId;
+        return program;
+    }
+
     snapshot() {
         const indices = new Map(this.#rooms.map((r,i) => [r.id,i]));
         const areas = this.#rooms.map(r => r.radius * r.radius);

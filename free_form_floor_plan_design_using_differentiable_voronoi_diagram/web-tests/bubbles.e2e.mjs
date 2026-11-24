@@ -12,6 +12,8 @@ const middle=async locator=>{const b=await locator.boundingBox();assert.ok(b);re
 async function drag(page,a,b,button='left'){
     await page.mouse.move(...a);await page.mouse.down({button});await page.mouse.move(...b,{steps:12});await page.mouse.up({button});
 }
+// Hover the room at `a` and drag its link dot onto the room at `b`.
+async function link(page,a,b){await page.mouse.move(...a);await drag(page,await middle(page.locator('.bubble-link-dot')),b);}
 
 test('room circles draw move and resize on the plan while camera actions preserve their world positions', {timeout:90000},async()=>{
     const {url,proc}=await serve();const browser=await chromium.launch();
@@ -23,7 +25,6 @@ test('room circles draw move and resize on the plan while camera actions preserv
         await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         await page.click('.gizmo [data-axis="+z"]');
-        await page.click('button[data-bubble-tool=draw]');
         await page.setViewportSize({width:1146,height:820});await page.waitForTimeout(200);
         await page.setViewportSize({width:1145,height:820});await page.waitForTimeout(200);
         const boundaryInk=await page.$eval('#plan',async c=>{
@@ -47,7 +48,6 @@ test('room circles draw move and resize on the plan while camera actions preserv
         assert.equal((await labels(page))[0].ratio,1);
         assert.equal(await page.locator('#rooms_v').textContent(),'1');
         assert.equal(await page.locator('input#rooms,input[id^=area_]').count(),0,'circle editing replaces the old count and area sliders');
-        await page.click('button[data-bubble-tool=select]');
         const original=(await labels(page))[0];
         await drag(page,p,[p[0]+20,p[1]-20]);
         p=await middle(first);
@@ -65,8 +65,10 @@ test('room circles draw move and resize on the plan while camera actions preserv
         await page.mouse.dblclick(1000,100);await page.mouse.move(620,420);await page.mouse.wheel(0,-250);
         await drag(page,[650,400],[710,420],'right');
         assert.deepEqual(await labels(page),world,'orbiting and zooming do not edit room data');
-        p=await middle(first);const start=[p[0]+15,p[1]];
-        await page.click('button[data-bubble-tool=draw]');
+        // Empty points two radii from the room, on either side along its link dot (plan +y).
+        p=await middle(first);await page.mouse.move(...p);
+        const dot=await middle(page.locator('.bubble-link-dot'));
+        const start=[3*p[0]-2*dot[0],3*p[1]-2*dot[1]],beyond=[2*dot[0]-p[0],2*dot[1]-p[1]];
         await drag(page,start,[start[0]+20,start[1]]);
         assert.equal((await labels(page)).length,2,'drawing still works after changing the camera');
         const second=await middle(page.locator('.bubble-label:not(.draft)').last());
@@ -74,12 +76,12 @@ test('room circles draw move and resize on the plan while camera actions preserv
         assert.ok((await labels(page)).every(checkCircle));
         assert.ok(Math.abs((await labels(page)).reduce((s,r)=>s+r.ratio,0)-1)<1e-12);
         const saved=await labels(page);p=await middle(first);
-        await page.mouse.move(p[0]-10,p[1]+10);await page.mouse.down();await page.mouse.move(p[0]-20,p[1]+10,{steps:5});
+        await page.mouse.move(...beyond);await page.mouse.down();await page.mouse.move(beyond[0]-20,beyond[1],{steps:5});
+        assert.equal(await page.locator('.bubble-label.draft').count(),1,'a new circle is being drawn');
         await page.keyboard.press('Escape');await page.mouse.up();
         assert.deepEqual(await labels(page),saved,'Escape cancels the unfinished circle');
         await drag(page,[1050,650],[1090,650]);
         assert.equal((await labels(page)).length,2,'starting outside the boundary creates no room');
-        await page.click('button[data-bubble-tool=select]');
         const screens=new URL('../../.agents/cache/screens/',import.meta.url);await mkdir(screens,{recursive:true});
         await page.screenshot({path:fileURLToPath(new URL('bubbles-edit.png',screens))});
         if(process.env.VORONOI_COVERAGE_DIR){
@@ -98,9 +100,9 @@ test('generated plans keep centers and show only requested doors in raw and alig
         await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-bubble-tool=draw]');
+        await page.click('.gizmo [data-axis="+z"]');
         await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
-        await page.click('button[data-bubble-tool=link]');await page.mouse.click(550,530);await page.mouse.click(780,530);
+        await link(page,[550,530],[780,530]);
         await page.click('button[data-open=optimize]');await page.locator('#iters').focus();await page.keyboard.press('Home');
         assert.equal(await page.locator('#iters').inputValue(),'50');
         await page.click('#run');
@@ -132,7 +134,7 @@ test('generated plans keep centers and show only requested doors in raw and alig
         await page.click('.gizmo [data-axis="+x"]');
         await page.screenshot({path:fileURLToPath(new URL('../../.agents/cache/screens/bubbles-result-3d.png',import.meta.url))});
         await page.check('#show-bubbles');await page.click('button[data-open=rooms]');
-        await page.locator('.connection-row').click();await page.click('#bubble-delete');
+        await page.locator('.connection-row').click();await page.keyboard.press('Delete');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),0,'unlinked adjacent rooms have no door');
         assert.notEqual(await page.locator('#program-status').getAttribute('data-state'),'complete','edited inputs do not inherit an old completion state');
@@ -152,7 +154,7 @@ test('linking and deleting circles updates visible door links and keeps the rema
         await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('.gizmo [data-axis="+z"]');await page.click('button[data-bubble-tool=draw]');
+        await page.click('.gizmo [data-axis="+z"]');
         await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
         assert.equal((await labels(page)).length,2);
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
@@ -166,30 +168,29 @@ test('linking and deleting circles updates visible door links and keeps the rema
             return count;
         });
         const before=await strip();
-        await page.click('button[data-bubble-tool=link]');
-        await page.mouse.click(550,530);await page.mouse.click(780,530);
-        assert.equal(await page.locator('.connection-row').count(),1,'clicking two circles creates their door connection');
+        await link(page,[550,530],[780,530]);
+        assert.equal(await page.locator('.connection-row').count(),1,'dragging one room\'s dot to another creates their door connection');
         assert.ok(await strip()>before+30,'the connection is drawn in the actual plan canvas');
         const edge=page.locator('.connection-row');
         assert.equal(+await edge.getAttribute('data-from'),rooms[0].id);
         assert.equal(+await edge.getAttribute('data-to'),rooms[1].id);
         await mkdir(new URL('../../.agents/cache/screens/',import.meta.url),{recursive:true});
         await page.screenshot({path:fileURLToPath(new URL('../../.agents/cache/screens/bubbles-linked.png',import.meta.url))});
-        await page.mouse.click(550,530);await page.mouse.click(780,530);
+        await link(page,[550,530],[780,530]);
         assert.equal(await edge.count(),1,'the same pair cannot acquire duplicate door links');
         await edge.click();
-        assert.equal(await page.locator('#bubble-delete').isEnabled(),true,'the sidebar selects a link too');
-        await page.click('button[data-bubble-tool=select]');await page.mouse.click(1050,650);
-        assert.equal(await page.locator('#bubble-delete').isDisabled(),true);
+        assert.equal(await page.locator('.connection-row.selected').count(),1,'the sidebar selects a link too');
+        await page.mouse.click(1050,650);
+        assert.equal(await page.locator('.connection-row.selected').count(),0);
         await page.mouse.click(665,530);
-        assert.equal(await page.locator('#bubble-delete').isEnabled(),true,'clicking the rendered line selects it');
-        await page.click('#bubble-delete');
+        assert.equal(await page.locator('.connection-row.selected').count(),1,'clicking the rendered line selects it');
+        await page.keyboard.press('Delete');
         assert.equal(await edge.count(),0,'the selected connection can be deleted without deleting its rooms');
         assert.equal((await labels(page)).length,2);
-        await page.click('button[data-bubble-tool=link]');await page.mouse.click(550,530);await page.mouse.click(780,530);
+        await link(page,[550,530],[780,530]);
         assert.equal(await edge.count(),1);
         const remainingColor=await page.locator(`.room-row[data-room-id="${rooms[1].id}"] .sw`).evaluate(e=>getComputedStyle(e).backgroundColor);
-        await page.locator(`.room-row[data-room-id="${rooms[0].id}"]`).click();await page.click('#bubble-delete');
+        await page.locator(`.room-row[data-room-id="${rooms[0].id}"]`).click();await page.keyboard.press('Delete');
         assert.equal(await edge.count(),0,'deleting a room removes all of its links');
         const remaining=await labels(page);
         assert.equal(remaining.length,1);assert.equal(remaining[0].id,rooms[1].id);
@@ -204,5 +205,141 @@ test('linking and deleting circles updates visible door links and keeps the rema
             await mkdir(process.env.VORONOI_COVERAGE_DIR,{recursive:true});
             await writeFile(join(process.env.VORONOI_COVERAGE_DIR,'bubbles-links.json'),JSON.stringify(data));
         }
+    }finally{await browser.close();proc.kill();}
+});
+
+test('bubble diagram: with Rooms open, empty space draws, a room moves and its handle resizes, with no tool buttons',{timeout:90000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        assert.equal(await page.locator('[data-bubble-tool]').count(),0,'there are no bubble tool buttons');
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
+        await page.waitForFunction(()=>{const s=document.querySelector('#status').textContent;return s.startsWith('shape_a')&&s.includes('ready');});
+        await page.click('.gizmo [data-axis="+z"]');
+        await page.click('button[data-open=rooms]');
+        await drag(page,[600,450],[650,450]);
+        assert.equal((await labels(page)).length,0,'with Rooms closed a drag draws nothing');
+        await page.click('button[data-open=rooms]');
+        await drag(page,[600,450],[650,450]);
+        assert.equal((await labels(page)).length,1,'with Rooms open a drag on empty space draws a room');
+        const first=page.locator('.bubble-label:not(.draft)').first();
+        let p=await middle(first);
+        const original=(await labels(page))[0];
+        await drag(page,p,[p[0]+20,p[1]-20]);
+        p=await middle(first);
+        assert.ok(Math.hypot(p[0]-620,p[1]-430)<3,'dragging a room moves it');
+        assert.equal((await labels(page)).length,1,'moving a room does not draw another one');
+        const handle=await middle(page.locator('.bubble-handle'));
+        await drag(page,handle,[handle[0]+30,handle[1]]);
+        assert.ok((await labels(page))[0].radius>original.radius,'dragging the round handle resizes the room');
+        assert.equal((await labels(page)).length,1);
+    }finally{await browser.close();proc.kill();}
+});
+
+test('bubble diagram: a hovered room shows a link dot, and dragging it onto another room adds a door',{timeout:90000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
+        await page.waitForFunction(()=>{const s=document.querySelector('#status').textContent;return s.startsWith('shape_a')&&s.includes('ready');});
+        await page.click('.gizmo [data-axis="+z"]');
+        await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
+        assert.equal((await labels(page)).length,2);
+        const dot=page.locator('.bubble-link-dot[data-id="1"]');
+        await page.mouse.move(550,530);
+        assert.equal(await dot.count(),1,'hovering room 1 shows its link dot');
+        const [x,y]=await middle(dot);
+        const room=(await labels(page)).find(r=>r.id===1);
+        assert.ok(y<530,'the dot sits above the room center');
+        await drag(page,[x,y],[700,690]);
+        assert.equal(await page.locator('.connection-row').count(),0,'dropping the dot on empty space adds no door');
+        assert.deepEqual((await labels(page)).find(r=>r.id===1),room,'dragging the dot does not move the room');
+        await page.mouse.move(550,530);
+        await drag(page,await middle(dot),[780,530]);
+        assert.equal(await page.locator('.connection-row').count(),1,'dropping the dot on room 2 adds a door');
+        assert.equal((await labels(page)).length,2,'linking draws no new room');
+    }finally{await browser.close();proc.kill();}
+});
+
+test('bubble diagram: an Editing Bubble Diagram badge and a crosshair show only while Rooms is open',{timeout:90000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        const badge=page.locator('#bubble-editing');
+        const cursor=()=>page.$eval('#plan',c=>getComputedStyle(c).cursor);
+        assert.equal(await badge.isVisible(),false,'no badge before Rooms opens');
+        await page.click('button[data-open=rooms]');
+        assert.equal(await badge.isVisible(),true,'the badge shows while Rooms is open');
+        assert.equal((await badge.textContent()).trim(),'Editing Bubble Diagram');
+        assert.equal(await cursor(),'crosshair','the plan cursor shows that drawing is on');
+        await page.click('button[data-open=optimize]');
+        assert.equal(await badge.isVisible(),false,'the badge hides when another panel opens');
+        assert.notEqual(await cursor(),'crosshair');
+        await page.click('button[data-open=rooms]');await page.click('button[data-open=rooms]');
+        assert.equal(await badge.isVisible(),false,'the badge hides when Rooms closes');
+    }finally{await browser.close();proc.kill();}
+});
+
+test('bubble diagram: the undo shortcut and the Undo button step back through add, move and link, and redo steps forward',{timeout:120000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
+        await page.waitForFunction(()=>{const s=document.querySelector('#status').textContent;return s.startsWith('shape_a')&&s.includes('ready');});
+        await page.click('.gizmo [data-axis="+z"]');
+        const presetRooms=await page.locator('#rooms_v').textContent();
+        const count=n=>page.waitForFunction(n=>document.querySelectorAll('.bubble-label:not(.draft)').length===n,n);
+        const doors=n=>page.waitForFunction(n=>document.querySelectorAll('.connection-row').length===n,n);
+        assert.equal(await page.locator('#undo').isDisabled(),true,'nothing to undo at first');
+        await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);
+        const second=(await labels(page)).find(r=>r.id===2);
+        await drag(page,[780,530],[800,500]);
+        const moved=(await labels(page)).find(r=>r.id===2);
+        assert.notDeepEqual(moved.center,second.center);
+        await page.mouse.move(550,530);
+        await drag(page,await middle(page.locator('.bubble-link-dot[data-id="1"]')),[800,500]);
+        await doors(1);
+        await page.keyboard.press('ControlOrMeta+z');
+        await doors(0);
+        await page.click('#undo');
+        await page.waitForFunction(c=>{const e=document.querySelector('.bubble-label[data-id="2"]');return e&&+e.dataset.x===c[0]&&+e.dataset.y===c[1];},second.center);
+        await page.keyboard.press('ControlOrMeta+z');await count(1);
+        await page.keyboard.press('ControlOrMeta+z');await count(0);
+        await page.waitForFunction(n=>document.querySelector('#rooms_v').textContent===n,presetRooms);
+        assert.equal(await page.locator('#undo').isDisabled(),true,'back at the preset rooms with nothing left to undo');
+        await page.keyboard.press('ControlOrMeta+Shift+z');await count(1);
+        await page.click('#redo');await count(2);
+        await page.keyboard.press('ControlOrMeta+Shift+z');
+        await page.waitForFunction(c=>{const e=document.querySelector('.bubble-label[data-id="2"]');return e&&+e.dataset.x===c[0]&&+e.dataset.y===c[1];},moved.center);
+        await page.keyboard.press('ControlOrMeta+z');
+        await page.mouse.move(550,530);
+        await drag(page,[600,450],[620,450]);await count(3);
+        assert.equal(await page.locator('#redo').isDisabled(),true,'a new edit drops the undone steps');
+    }finally{await browser.close();proc.kill();}
+});
+
+test('bubble diagram: the Delete key removes the selected room or door even after a panel button was clicked',{timeout:90000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
+        await page.waitForFunction(()=>{const s=document.querySelector('#status').textContent;return s.startsWith('shape_a')&&s.includes('ready');});
+        await page.click('.gizmo [data-axis="+z"]');
+        await drag(page,[550,530],[585,530]);await drag(page,[780,530],[810,530]);await drag(page,[600,450],[620,450]);
+        await link(page,[550,530],[780,530]);
+        await page.locator('.connection-row').click();
+        await page.click('#undo');await page.click('#redo');
+        await page.locator('.connection-row').click();await page.locator('.panel[data-panel=rooms] .label').first().click();
+        await page.keyboard.press('Delete');
+        assert.equal(await page.locator('.connection-row').count(),0,'Delete removes the selected door link');
+        await page.mouse.click(600,450);await page.click('#undo');await page.click('#redo');
+        await page.locator('.room-row[data-room-id="3"]').click();await page.locator('#sites').focus();await page.locator('.panel[data-panel=rooms] .label').first().click();
+        await page.keyboard.press('Backspace');
+        assert.deepEqual((await labels(page)).map(r=>r.id),[1,2],'Backspace (the Mac delete key) removes the selected room');
     }finally{await browser.close();proc.kill();}
 });

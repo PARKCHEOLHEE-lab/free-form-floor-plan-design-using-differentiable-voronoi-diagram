@@ -94,7 +94,7 @@ function drawGuide(line, start, end) {
 }
 
 /** A temporary sketch in the existing camera's plan coordinates. */
-export function createBoundaryEditor(canvas, view, { overlay, reference, isBuilding, onActive, onClose, onError }) {
+export function createBoundaryEditor(canvas, view, { overlay, reference, isBuilding, onActive, onClose, onError, onPoints = () => {} }) {
     const placed = overlay.querySelector('polyline');
     const guide = overlay.querySelector('[data-edge-guide]');
     const trackingGuide = overlay.querySelector('[data-tracking-guide]');
@@ -104,6 +104,7 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
     const snapLabels = { close: 'Close', vertex: 'Endpoint', midpoint: 'Midpoint', axis: 'X/Y', parallel: 'Parallel', perpendicular: 'Perpendicular' };
     let active = false;
     let vertices = [];
+    let undone = []; // points taken back by undo, newest last, until a new point is placed
     let pointer = null;
 
     function snapped() {
@@ -144,6 +145,7 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
         if (active === next) return;
         active = next;
         vertices = [];
+        undone = [];
         pointer = null;
         canvas.toggleAttribute('data-boundary-drawing', active);
         overlay.toggleAttribute('hidden', !active);
@@ -183,8 +185,26 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
         }
         if (vertices.length && samePoint(result.point, vertices.at(-1))) return;
         vertices.push(result.point);
+        undone = [];
         onError('');
         render();
+        onPoints();
+    }
+
+    function undoPoint() {
+        if (!active || !vertices.length) return;
+        undone.push(vertices.pop());
+        onError('');
+        render();
+        onPoints();
+    }
+
+    function redoPoint() {
+        if (!active || !undone.length) return;
+        vertices.push(undone.pop());
+        onError('');
+        render();
+        onPoints();
     }
 
     function key(e) {
@@ -198,15 +218,19 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
             render();
         }
         if (e.type !== 'keydown') return;
+        const key = e.key.toLowerCase();
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && (key === 'z' || key === 'y')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (key === 'y' || e.shiftKey) redoPoint();
+            else undoPoint();
+            return;
+        }
         if (e.key === 'Escape' || e.key === 'Backspace') {
             e.preventDefault();
             e.stopImmediatePropagation();
             if (e.key === 'Escape') setActive(false);
-            else {
-                vertices.pop();
-                onError('');
-                render();
-            }
+            else undoPoint();
         }
     }
 
@@ -222,6 +246,10 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
     window.addEventListener('keyup', key, true);
     return {
         get active() { return active; },
+        get canUndo() { return active && vertices.length > 0; },
+        get canRedo() { return active && undone.length > 0; },
+        undo: undoPoint,
+        redo: redoPoint,
         start() { setActive(true); },
         cancel() { setActive(false); },
         dispose() {

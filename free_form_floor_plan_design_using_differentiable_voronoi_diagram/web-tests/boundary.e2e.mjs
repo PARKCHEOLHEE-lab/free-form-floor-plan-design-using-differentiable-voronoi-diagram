@@ -181,7 +181,6 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
         await ready('shape_a');
         await page.click('.gizmo [data-axis="+z"]');
         await selectPanel('rooms');
-        await page.click('button[data-bubble-tool=draw]');
         await drawRoom(550,530,33);
         await ready('shape_a');
         const presetRooms = await labels();
@@ -210,16 +209,18 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
         const outline = await captureBoundary(drawn.gen);
 
         await selectPanel('rooms');
-        await page.click('button[data-bubble-tool=draw]');
         await drawRoom(500,420,32);
         await ready('custom');
         await drawRoom(710,420,36);
         await ready('custom');
         const customRooms = await labels();
         assert.equal(customRooms.length,2);
-        await page.click('button[data-bubble-tool=link]');
-        await page.mouse.click(500,420);
-        await page.mouse.click(710,420);
+        await page.mouse.move(500,420);
+        const dot = await page.locator('.bubble-link-dot').boundingBox();
+        await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(710,420,{ steps:8 });
+        await page.mouse.up();
         await page.waitForFunction(() => document.querySelectorAll('.connection-row').length === 1);
         await ready('custom');
 
@@ -301,4 +302,38 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
         assert.deepEqual(await labels(),[]);
 
     }, '', 'run');
+});
+
+test('draw boundary: the undo shortcut and buttons step through sketch points, and a finished boundary is one undo step', { timeout: 90000 }, async () => {
+    await withPlan(async page => {
+        const ready = name => page.waitForFunction(name => document.querySelector('#status').textContent.includes(name + ' · ready'), name);
+        const points = () => page.locator('#boundary-sketch polyline').evaluate(line => (line.getAttribute('points') || '').trim().split(/\s+/).filter(Boolean).length);
+        const custom = page.getByRole('button', { name: 'Custom', exact: true });
+        await page.click('button[data-open=rooms]');
+        await page.click('button[data-mode=shape_a]');
+        await ready('shape_a');
+        await page.click('.gizmo [data-axis="+z"]');
+        await page.getByRole('button', { name: 'Draw boundary', exact: true }).click();
+        for (const p of [[420, 285], [790, 285], [790, 555]]) await page.mouse.click(...p);
+        assert.equal(await points(), 3);
+        const sketched = await page.locator('#boundary-sketch polyline').getAttribute('points');
+        await page.keyboard.press('ControlOrMeta+z');
+        assert.equal(await points(), 2, 'the shortcut removes the last point');
+        await page.click('#undo');
+        assert.equal(await points(), 1, 'the Undo button removes a point while sketching');
+        await page.keyboard.press('ControlOrMeta+Shift+z');
+        assert.equal(await points(), 2, 'the redo shortcut puts the point back');
+        await page.click('#redo');
+        assert.equal(await page.locator('#boundary-sketch polyline').getAttribute('points'), sketched, 'redo restores the same points in order');
+        assert.equal(await page.locator('#redo').isDisabled(), true, 'every removed point is back');
+        for (const p of [[420, 555], [420, 285]]) await page.mouse.click(...p);
+        await ready('custom');
+        assert.equal(await custom.count(), 1);
+        await page.keyboard.press('ControlOrMeta+z');
+        await ready('shape_a');
+        assert.equal(await custom.count(), 0, 'undo removes the new boundary and returns to the preset');
+        await page.click('#redo');
+        await ready('custom');
+        assert.equal(await custom.count(), 1, 'redo brings the drawn boundary back');
+    });
 });

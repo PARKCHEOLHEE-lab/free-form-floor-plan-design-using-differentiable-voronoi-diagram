@@ -47,3 +47,16 @@ test('bubble program enforces whole circles and area shares with stable linked r
     assert.notEqual(l.add([0.8,0.8], 0.28), null, 'the nearby circle that clears the notch is valid');
     assert.equal(l.add([2,2], 0.1), null, 'the notch itself is outside');
 });
+
+test('bubble program state restores the same rooms, links and next room ID', () => {
+    const p = new BubbleProgram([[-2,-2],[2,-2],[2,2],[-2,2]]);
+    const a = p.add([-1, 0], 0.2), b = p.add([1, 0], 0.4);
+    p.connect(a, b);
+    p.remove(p.add([0, 1], 0.3));
+    const copy = BubbleProgram.fromState(JSON.parse(JSON.stringify(p.state())));
+    assert.deepEqual(copy.snapshot(), p.snapshot(), 'rooms and links come back unchanged');
+    assert.deepEqual(copy.boundary, p.boundary);
+    assert.equal(copy.add([0, -1], 0.2), p.add([0, -1], 0.2), 'a removed room ID is not reused after a restore');
+    copy.update(a, [-1, 0.5], 0.2);
+    assert.deepEqual(p.snapshot().rooms[0].center, [-1, 0], 'the restored program does not share rooms with the original');
+});

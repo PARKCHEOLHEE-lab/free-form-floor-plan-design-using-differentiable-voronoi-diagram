@@ -1,14 +1,27 @@
 import {inside,segmentDistance} from './geom.js';
 
-/** Left-button room editing. The view owns projection and the program owns validity. */
-export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,onStatus}) {
-    let model=null,tool='select',selected=null,selectedLink=null,pendingLink=null,press=null,draft=null,visible=true;
+/**
+ * Left-button room editing with no tool modes, active only while enabled (the Rooms panel is
+ * open). What is under the pointer decides the action: the round handle resizes, the link dot on
+ * a hovered room drags a door link to another room, a room moves, and empty plan draws a new room
+ * (`ensureProgram` supplies a program on the first one). The view owns projection and the program
+ * owns validity.
+ */
+export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,onStatus,ensureProgram}) {
+    let model=null,enabled=false,selected=null,selectedLink=null,press=null,draft=null,visible=true,hover=null;
     const empty={rooms:[],links:[],ratios:[]};
     const snapshot=()=>model?model.snapshot():empty;
     const emit=commit=>onChange({commit,snapshot:snapshot()});
     const selectionChanged=()=>onChange({selectionOnly:true,snapshot:snapshot()});
     const pairKey=(a,b)=>a<b?[a,b]:[b,a];
     const roomAt=(p,s)=>s.rooms.map(r=>({r,d:Math.hypot(p[0]-r.center[0],p[1]-r.center[1])})).filter(h=>h.d<=h.r.radius).sort((a,b)=>a.d-b.d)[0]?.r;
+    // The link dot sits on top of a room's circle (plan +y), on the hovered room only.
+    const dotPoint=r=>view.screenPoint([r.center[0],r.center[1]+r.radius]);
+    const onDot=(r,x,y)=>!!r&&Math.hypot(x-dotPoint(r)[0],y-dotPoint(r)[1])<=9;
+    const svgNS='http://www.w3.org/2000/svg';
+    const overlay=document.createElementNS(svgNS,'svg');
+    overlay.classList.add('bubble-link-preview');
+    labels.after(overlay);
 
     function layout() {
         for(const el of labels.children){
@@ -17,6 +30,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
         }
     }
     function refresh() {
+        canvas.toggleAttribute('data-bubble-editing',enabled&&visible);
         if(!visible){view.drawBubbles([],null,null);labels.replaceChildren();return;}
         const s=snapshot();
         const selectedEdge=s.links.findIndex(([a,b])=>selectedLink&&s.rooms[a].id===selectedLink[0]&&s.rooms[b].id===selectedLink[1]);
@@ -30,46 +44,54 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
             el.textContent=r.id==='draft'?'+':`R${r.id}`;
             labels.append(el);
         });
+        const dotRoom=s.rooms.find(r=>r.id===(press?.kind==='link'?press.from.id:hover));
+        if(dotRoom&&enabled){
+            const dot=document.createElement('span');dot.className='bubble-link-dot';
+            Object.assign(dot.dataset,{id:dotRoom.id,x:dotRoom.center[0],y:dotRoom.center[1]+dotRoom.radius});
+            dot.setAttribute('aria-label','Drag to another room to add a door');labels.append(dot);
+        }
+        drawLinkPreview(s);
         const r=s.rooms.find(r=>r.id===selected);
-        if(r&&tool==='select'){
+        if(r&&enabled){
             const handle=document.createElement('span');handle.className='bubble-handle';
             handle.dataset.x=r.center[0]+r.radius;handle.dataset.y=r.center[1];
             handle.setAttribute('aria-label','Resize selected room');labels.append(handle);
         }
         layout();
     }
+    // While a link drag runs: a line from the room to the pointer, solid once it reaches a room.
+    function drawLinkPreview(s) {
+        overlay.replaceChildren();
+        if(press?.kind!=='link'||!press.started)return;
+        const a=view.screenPoint(press.from.center);
+        const target=s.rooms.find(r=>r.id===press.target);
+        const b=target?view.screenPoint(target.center):press.pointer;
+        const line=document.createElementNS(svgNS,'line');
+        for(const [k,v] of Object.entries({x1:a[0],y1:a[1],x2:b[0],y2:b[1]}))line.setAttribute(k,v);
+        line.classList.toggle('reached',!!target);
+        overlay.append(line);
+    }
     function down(e) {
-        if(e.button!==0||!model||!visible)return;
+        if(e.button!==0||!enabled||!visible)return;
         const p=view.pointOnPlan(e.clientX,e.clientY);if(!p)return;
         const s=snapshot();
         canvas.focus({preventScroll:true});
-        if(tool==='link'){
-            const hit=roomAt(p,s);
-            if(!hit){onStatus('Click a room circle.');return;}
-            if(pendingLink===null){pendingLink=hit.id;selected=hit.id;selectedLink=null;onStatus('Click another room to add a door link.',false);}
-            else if(pendingLink===hit.id){onStatus('Choose a different room.');return;}
-            else{
-                const a=pendingLink;pendingLink=null;
-                const added=model.connect(a,hit.id);selected=null;selectedLink=pairKey(a,hit.id);
-                if(added){emit(true);onStatus('Click two rooms to request a door.',false);}else onStatus(model.error);
-            }
-            selectionChanged();refresh();return;
-        }
         selectedLink=null;
-        if(tool==='draw'){
-            if(!inside(p,model.boundary)){onStatus('Start the circle inside the boundary.');return;}
-            selected=null;press={kind:'draw',start:p,center:p};
-        }else{
-            const active=s.rooms.find(r=>r.id===selected);
-            const hp=active?view.screenPoint([active.center[0]+active.radius,active.center[1]]):null;
-            if(hp&&Math.hypot(e.clientX-hp[0],e.clientY-hp[1])<=9) press={kind:'resize',original:active,start:p};
+        const active=s.rooms.find(r=>r.id===selected);
+        const hp=active?view.screenPoint([active.center[0]+active.radius,active.center[1]]):null;
+        const hit=roomAt(p,s);
+        const hovered=s.rooms.find(r=>r.id===hover);
+        if(hp&&Math.hypot(e.clientX-hp[0],e.clientY-hp[1])<=9) press={kind:'resize',original:active,start:p};
+        else if(onDot(hovered,e.clientX,e.clientY)) press={kind:'link',from:hovered,target:null,pointer:[e.clientX,e.clientY]};
+        else if(hit){selected=hit.id;press={kind:'move',original:hit,start:p};}
+        else{
+            selected=null;
+            const edge=s.links.find(([a,b])=>segmentDistance([e.clientX,e.clientY],view.screenPoint(s.rooms[a].center),view.screenPoint(s.rooms[b].center))<=6);
+            if(edge)selectedLink=pairKey(s.rooms[edge[0]].id,s.rooms[edge[1]].id);
             else{
-                const hit=roomAt(p,s);
-                selected=hit?hit.id:null;press=hit?{kind:'move',original:hit,start:p}:null;
-                if(!hit){
-                    const edge=s.links.find(([a,b])=>segmentDistance([e.clientX,e.clientY],view.screenPoint(s.rooms[a].center),view.screenPoint(s.rooms[b].center))<=6);
-                    if(edge)selectedLink=pairKey(s.rooms[edge[0]].id,s.rooms[edge[1]].id);
-                }
+                model??=ensureProgram();
+                if(model&&inside(p,model.boundary))press={kind:'draw',start:p,center:p};
+                else if(model)onStatus('Start the circle inside the boundary.');
             }
         }
         if(press){
@@ -79,11 +101,24 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
         selectionChanged();refresh();
     }
     function move(e) {
-        if(!press||e.pointerId!==press.id)return;
+        if(!press){
+            if(!enabled||!visible||!model)return;
+            const s=snapshot(),p=view.pointOnPlan(e.clientX,e.clientY);
+            const keep=s.rooms.find(r=>r.id===hover);
+            const next=onDot(keep,e.clientX,e.clientY)?hover:(p?roomAt(p,s)?.id??null:null);
+            if(next!==hover){hover=next;refresh();}
+            return;
+        }
+        if(e.pointerId!==press.id)return;
         const p=view.pointOnPlan(e.clientX,e.clientY);if(!p)return;
         if(!press.started){
             if(Math.hypot(e.clientX-press.screen[0],e.clientY-press.screen[1])<3)return;
-            press.started=true;emit(false);
+            press.started=true;if(press.kind!=='link')emit(false);
+        }
+        if(press.kind==='link'){
+            const t=roomAt(p,snapshot());
+            press.target=t&&t.id!==press.from.id?t.id:null;press.pointer=[e.clientX,e.clientY];
+            drawLinkPreview(snapshot());return;
         }
         let valid;
         if(press.kind==='draw'){
@@ -103,7 +138,13 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
     function finish(cancel=false) {
         if(!press)return;
         const current=press;press=null;
-        if(current.started){
+        if(current.kind==='link'){
+            if(!cancel&&current.started&&current.target!==null){
+                const added=model.connect(current.from.id,current.target);
+                selected=null;selectedLink=pairKey(current.from.id,current.target);
+                if(added)emit(true);else onStatus(model.error);
+            }
+        }else if(current.started){
             if(cancel&&current.original)model.update(current.original.id,current.original.center,current.original.radius);
             if(!cancel&&current.kind==='draw'&&draft)selected=model.add(draft.center,draft.radius);
             draft=null;emit(true);
@@ -113,32 +154,33 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
     }
     const up=e=>{if(press?.id===e.pointerId)finish();};
     const cancel=e=>{if(press?.id===e.pointerId)finish(true);};
+    const leave=()=>{if(!press&&hover!==null){hover=null;refresh();}};
     function deleteSelection(){
         if(!model)return false;
         finish(true);
         const removed=selectedLink?model.disconnect(...selectedLink):selected!==null?model.remove(selected):false;
         if(!removed){onStatus('Select a room or door link first.');return false;}
-        selected=null;selectedLink=null;pendingLink=null;emit(true);onStatus('');refresh();return true;
+        selected=null;selectedLink=null;emit(true);onStatus('');refresh();return true;
     }
+    // Keys work from anywhere on the page while editing, except inside a form field.
     const key=e=>{
-        if(!visible)return;
-        if(e.key==='Escape'){finish(true);pendingLink=null;selectedLink=null;onStatus('');refresh();}
+        if(!visible||!enabled||e.target.closest?.('input, textarea, select, [contenteditable]'))return;
+        if(e.key==='Escape'){finish(true);selectedLink=null;onStatus('');refresh();}
         if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();deleteSelection();}
     };
-    canvas.addEventListener('pointerdown',down);canvas.addEventListener('pointermove',move);
-    canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);canvas.addEventListener('keydown',key);
+    canvas.addEventListener('pointerdown',down);canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerleave',leave);
+    canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);window.addEventListener('keydown',key);
     const unsubscribe=view.onChange(layout);
     refresh();
     return {
-        get tool(){return tool;},
         get selected(){return selected;},
         get selectedLink(){return selectedLink?[...selectedLink]:null;},
         setVisible(next){finish(true);visible=next;refresh();},
-        setProgram(next){if(model===next)return;press=null;draft=null;selected=null;selectedLink=null;pendingLink=null;model=next;refresh();},
-        setTool(next){finish(true);pendingLink=null;tool=next;canvas.style.cursor=next==='draw'||next==='link'?'crosshair':'default';onStatus(next==='link'?'Click two rooms to request a door.':'',false);refresh();},
-        selectRoom(id){selected=id;selectedLink=null;pendingLink=null;selectionChanged();canvas.focus({preventScroll:true});refresh();},
-        selectLink(a,b){selected=null;selectedLink=pairKey(a,b);pendingLink=null;selectionChanged();canvas.focus({preventScroll:true});refresh();},
+        setProgram(next){if(model===next)return;press=null;draft=null;selected=null;selectedLink=null;model=next;refresh();},
+        setEnabled(next){finish(true);enabled=next;hover=null;refresh();},
+        selectRoom(id){selected=id;selectedLink=null;selectionChanged();canvas.focus({preventScroll:true});refresh();},
+        selectLink(a,b){selected=null;selectedLink=pairKey(a,b);selectionChanged();canvas.focus({preventScroll:true});refresh();},
         deleteSelection,
-        dispose(){unsubscribe();canvas.removeEventListener('pointerdown',down);canvas.removeEventListener('pointermove',move);canvas.removeEventListener('pointerup',up);canvas.removeEventListener('pointercancel',cancel);canvas.removeEventListener('keydown',key);}
+        dispose(){unsubscribe();overlay.remove();canvas.removeEventListener('pointerleave',leave);canvas.removeEventListener('pointerdown',down);canvas.removeEventListener('pointermove',move);canvas.removeEventListener('pointerup',up);canvas.removeEventListener('pointercancel',cancel);window.removeEventListener('keydown',key);}
     };
 }

@@ -247,14 +247,21 @@
   #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
   #plan[data-boundary-drawing] { cursor:crosshair !important; }
   #boundary-sketch text { font:600 12px var(--font); fill:currentColor; stroke:var(--light); stroke-width:4px; paint-order:stroke; }
-  .boundary-actions, #custom-boundaries { margin-top:10px; }
+  #custom-boundaries { margin-top:10px; }
   #custom-boundaries[hidden] { display:none; }
   #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
+  #plan[data-bubble-editing] { cursor:crosshair !important; } /* OrbitControls sets an inline cursor */
+  .edit-badge { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; pointer-events:none;
+    padding:6px 12px; border-radius:999px; background:var(--dark); color:var(--light); font-size:.8em; }
+  .edit-badge[hidden] { display:none; }
   .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
   .bubble-label.selected { background:var(--ui-fg); color:white; }
   .bubble-label.draft { background:white; color:var(--ui-muted-fg); }
+  .bubble-link-dot { position:absolute; width:10px; height:10px; border:2px solid white; border-radius:50%; background:var(--ui-fg); transform:translate(-50%,-50%); }
+  .bubble-link-preview { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
+  .bubble-link-preview line { stroke:var(--ui-fg); stroke-width:2; stroke-dasharray:6 4; }
+  .bubble-link-preview line.reached { stroke-dasharray:none; }
   .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
-  .bubble-tools { margin-bottom:10px; }
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
   .roomareas .raswatch { justify-content:flex-start; gap:4px; }
@@ -265,8 +272,18 @@
   .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 0; border:0; border-radius:4px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
   .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
   .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
-  .bubble-actions { margin-bottom:10px; }
-  .bubble-tools button:disabled, .bubble-actions button:disabled { opacity:.45; cursor:default; }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6em; }
+  .panel-head .label { margin-bottom:0; }
+  .icon-actions { display:flex; gap:2px; }
+  .icon-btn { width:28px; height:28px; flex:none; display:grid; place-items:center; padding:0; border:0; border-radius:8px;
+    background:transparent; color:var(--ui-fg); cursor:pointer; transition:background .12s; }
+  .icon-btn:hover:not(:disabled) { background:var(--ui-muted); }
+  .icon-btn:focus-visible { outline:2px solid var(--ui-muted-fg); outline-offset:1px; }
+  .icon-btn:disabled { opacity:.35; cursor:default; }
+  .boundary-row { display:flex; gap:.35em; margin-bottom:12px; }
+  .boundary-row #presets { flex:1; margin:0; }
+  .boundary-row .icon-btn { width:34px; height:auto; border:1px solid var(--reduce-30); border-radius:4px; }
+  .boundary-row .icon-btn.active { background:var(--dark); border-color:var(--dark); color:var(--light); }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -281,6 +298,7 @@
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->
       <span id="status" hidden></span>
+      <div id="bubble-editing" class="edit-badge" role="status" hidden>Editing Bubble Diagram</div>
     </div>
 
     <!-- Icons: Lucide (lucide.dev), ISC License, Copyright (c) for portions of Lucide are held by
@@ -293,6 +311,9 @@
         <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
         <symbol id="i-rooms" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
         <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+        <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+        <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
+        <symbol id="i-pen" viewBox="0 0 24 24"><path d="M15.707 21.293a1 1 0 0 1-1.414 0l-1.586-1.586a1 1 0 0 1 0-1.414l5.586-5.586a1 1 0 0 1 1.414 0l1.586 1.586a1 1 0 0 1 0 1.414z"/><path d="m18 13-1.375-6.874a1 1 0 0 0-.746-.776L3.235 2.028a1 1 0 0 0-1.207 1.207L5.35 15.879a1 1 0 0 0 .776.746L13 18"/><path d="m2.3 2.3 7.286 7.286"/><circle cx="11" cy="11" r="2"/></symbol>
         <symbol id="i-display" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
       </defs>
     </svg>
@@ -313,8 +334,15 @@
 
     <div class="controls">
       <section class="panel" data-panel="rooms">
-        <div class="label">Rooms</div>
+        <div class="panel-head">
+          <div class="label">Rooms</div>
+          <div class="icon-actions">
+            <button type="button" id="undo" class="icon-btn" aria-label="Undo" title="Undo (Cmd+Z)" aria-keyshortcuts="Meta+Z Control+Z" disabled><svg class="ic"><use href="#i-undo"/></svg></button>
+            <button type="button" id="redo" class="icon-btn" aria-label="Redo" title="Redo (Shift+Cmd+Z)" aria-keyshortcuts="Meta+Shift+Z Control+Shift+Z Control+Y" disabled><svg class="ic"><use href="#i-redo"/></svg></button>
+          </div>
+        </div>
         <div class="label">Boundary</div>
+        <div class="boundary-row">
         <div class="seg" id="presets">
           <button data-mode="shape_a">A</button>
           <button data-mode="shape_b">B</button>
@@ -322,17 +350,12 @@
           <button data-mode="shape_d">D</button>
           <button data-mode="shape_e" class="active">E</button>
         </div>
+        <button id="boundary-draw" type="button" class="icon-btn" aria-label="Draw boundary" title="Draw boundary" aria-pressed="false" disabled><svg class="ic"><use href="#i-pen"/></svg></button>
+        </div>
         <div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
-        <div class="seg boundary-actions"><button id="boundary-draw" type="button" aria-pressed="false" disabled>Draw boundary</button></div>
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
         <div class="label">Bubble Diagram</div>
-        <div class="seg bubble-tools">
-          <button type="button" data-bubble-tool="select" aria-pressed="true">Select</button>
-          <button type="button" data-bubble-tool="draw" aria-pressed="false">Draw room</button>
-          <button type="button" data-bubble-tool="link" aria-pressed="false">Link rooms</button>
-        </div>
-        <div class="seg bubble-actions"><button type="button" id="bubble-delete">Delete selected</button></div>
-        <p id="bubble-message" class="bubble-help" aria-live="polite">Drag inside the boundary to draw a room. Select a circle to move it or resize its round handle.</p>
+        <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
         <div class="row"><label>rooms</label><span class="val" id="rooms_v">6</span></div>
         <div class="label">Target area</div>
         <div class="roomareas" id="roomareas"></div>
@@ -394,6 +417,7 @@ const R = 1.18; // normalized boundaries fit within radius 1
 // zooms (0.5x to 8x), the mouse rotates and pans, and a double-click returns to isometric
 import { createPlanView } from './plan/view3d.js';
 import { BubbleProgram } from './plan/bubbles.js';
+import { History } from './plan/history.js';
 import { createBubbleEditor } from './plan/bubble-editor.js';
 import { createBoundaryEditor } from './plan/boundary-editor.js';
 const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo') });
@@ -467,6 +491,14 @@ let gen = 0, curGen = 0;  // build generation; frames from a superseded build ar
 // thread; the UI stays responsive and only renders the frames it streams back.
 const worker = new Worker('./worker.js', { type: 'module' });
 const programs = new Map(); // retain each boundary's circles when switching presets
+// One undo history over the whole design: which boundary is active, the drawn boundary, and every
+// boundary's room circles. Room edits and new boundaries are steps; choosing a preset is not.
+const designState = () => ({
+  mode,
+  custom: customBoundary && structuredClone(customBoundary),
+  programs: [...programs].map(([m, p]) => [m, p.state()]),
+});
+const history = new History(designState());
 const DOOR_WIDTH = 0.1;
 let editingBubbles = false;
 const currentProgram = () => programs.get(mode) ?? null;
@@ -474,14 +506,14 @@ const roomCount = () => currentProgram()?.snapshot().rooms.length ?? roomRatios.
 const colorForRoomId = id => COLORS[(id-1)%COLORS.length];
 const bubbleHelp = $('bubble-message').textContent;
 const editor = createBubbleEditor($('plan'),view,{
-  labels:$('bubble-labels'),colorForRoomId,
+  labels:$('bubble-labels'),colorForRoomId,ensureProgram:()=>ensureProgram(),
   onChange({commit,selectionOnly}) {
     if(selectionOnly){refreshRoomReadout();return;}
     if(!editingBubbles){editingBubbles=true;stop();}
     refreshRoomReadout();
     $('program-status').textContent=commit?'Updating plan...':'Editing rooms...';
     $('program-status').dataset.state='editing';
-    if(commit){editingBubbles=false;rebuildPreviewSoon();}
+    if(commit){editingBubbles=false;history.commit(designState());rebuildPreviewSoon();}
     setButtons();
   },
   onStatus(message,error=!!message) {
@@ -508,29 +540,25 @@ const boundaryEditor = createBoundaryEditor($('plan'), view, {
   },
   onClose: addBoundary,
   onError: boundaryMessage,
+  onPoints: () => setButtons(),
 });
 $('boundary-draw').addEventListener('click', () => {
   if (boundaryEditor.active) boundaryEditor.cancel();
   else boundaryEditor.start();
 });
-function setBubbleTool(name) {
-  if (pendingBoundary) return;
+// The first room drawn on a preset replaces its automatic rooms with a drawn program.
+function ensureProgram() {
+  if (pendingBoundary || !boundaryRing) return null;
   boundaryEditor.cancel();
-  if(name==='draw'){
-    if(!boundaryRing)return;
-    if(!currentProgram()){
-      programs.set(mode,new BubbleProgram(boundaryRing));stop();
-      clearHist();hidePlayhead();redraw();
-      $('program-status').textContent='Draw at least one room.';
-    }
-    editor.setProgram(currentProgram());
+  if(!currentProgram()){
+    programs.set(mode,new BubbleProgram(boundaryRing));stop();
+    clearHist();hidePlayhead();redraw();
+    $('program-status').textContent='Draw at least one room.';
   }
-  editor.setTool(name);
-  document.querySelectorAll('[data-bubble-tool]').forEach(b=>{const active=b.dataset.bubbleTool===name;b.setAttribute('aria-pressed',String(active));b.classList.toggle('active',active);});
+  editor.setProgram(currentProgram());
   refreshRoomReadout();setButtons();
+  return currentProgram();
 }
-document.querySelectorAll('[data-bubble-tool]').forEach(b=>b.addEventListener('click',()=>setBubbleTool(b.dataset.bubbleTool)));
-$('bubble-delete').addEventListener('click',()=>editor.deleteSelection());
 $('roomareas').addEventListener('click',e=>{const b=e.target.closest('[data-room-id]');if(b)editor.selectRoom(+b.dataset.roomId);});
 $('connections').addEventListener('click',e=>{const b=e.target.closest('[data-from]');if(b)editor.selectLink(+b.dataset.from,+b.dataset.to);});
 window.addEventListener('pagehide',()=>{editor.dispose();boundaryEditor.dispose();});
@@ -599,8 +627,6 @@ function refreshRoomReadout() {
     const x=input.rooms[a].id,y=input.rooms[b].id;
     return `<button type="button" class="connection-row${selected&&selected[0]===x&&selected[1]===y?' selected':''}" data-from="${x}" data-to="${y}" aria-label="Select door link R${x} to R${y}">R${x} / R${y}</button>`;
   }).join('');
-  $('bubble-delete').disabled=!input||(editor.selected===null&&editor.selectedLink===null);
-  document.querySelector('[data-bubble-tool=link]').disabled=!input||input.rooms.length<2;
 }
 
 // Cos goes to the engine as set (its native dimensionless scale). L1/Area/Lloyd/topology
@@ -689,6 +715,8 @@ worker.onmessage = (e) => {
         $('custom-boundaries').hidden = false;
         $('boundary-message').hidden = true;
         activateBoundary(CUSTOM_MODE);
+        history.commit(designState());
+        setButtons();
       }
       lastFrame = m.frame;
       if (m.mode === 'preview') {
@@ -788,7 +816,7 @@ function activateBoundary(nextMode) {
   editingBubbles = false;
   if (mode === CUSTOM_MODE) roomRatios = customBoundary.ratios;
   else applyPreset(mode);
-  setBubbleTool('select');
+  if(!pendingBoundary){boundaryEditor.cancel();refreshRoomReadout();setButtons();}
 }
 
 function addBoundary(ring) {
@@ -800,16 +828,51 @@ function addBoundary(ring) {
   sendBuild('preview', pendingBoundary);
 }
 
-function selectBoundary(e) {
-  const button = e.target.closest('button[data-mode]');
-  if (!button || pendingBoundary) return;
-  activateBoundary(button.dataset.mode);
+function switchBoundary(nextMode) {
+  activateBoundary(nextMode);
   boundaryRing = currentProgram()?.boundary ?? null;
   $('boundary-message').hidden = true;
   stop();
   $('status').textContent = mode + ' · building…';
   sendBuild('preview');
 }
+
+function selectBoundary(e) {
+  const button = e.target.closest('button[data-mode]');
+  if (!button || pendingBoundary) return;
+  switchBoundary(button.dataset.mode);
+  history.replace(designState());
+}
+
+function restoreDesign(state) {
+  if (!state) return;
+  customBoundary = state.custom && structuredClone(state.custom);
+  $('custom-boundaries').hidden = !customBoundary;
+  programs.clear();
+  for (const [m, saved] of state.programs) programs.set(m, BubbleProgram.fromState(saved));
+  switchBoundary(state.mode);
+  editor.setProgram(currentProgram());
+}
+// While a boundary is being sketched, undo and redo step through its points instead.
+const undoDesign = () => {
+  if (boundaryEditor.active) boundaryEditor.undo();
+  else if (!pendingBoundary) restoreDesign(history.undo());
+};
+const redoDesign = () => {
+  if (boundaryEditor.active) boundaryEditor.redo();
+  else if (!pendingBoundary) restoreDesign(history.redo());
+};
+$('undo').addEventListener('click', undoDesign);
+$('redo').addEventListener('click', redoDesign);
+// Shortcuts follow the editing rule: they work while the Rooms panel is open, outside text fields.
+window.addEventListener('keydown', e => {
+  if (openPanel !== 'rooms' || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  const key = e.key.toLowerCase();
+  if (key !== 'z' && key !== 'y') return;
+  e.preventDefault();
+  if (key === 'y' || e.shiftKey) redoDesign(); else undoDesign();
+});
 $('presets').addEventListener('click', selectBoundary);
 $('custom-boundaries').addEventListener('click', selectBoundary);
 
@@ -944,6 +1007,8 @@ function setButtons() {
   $('run').disabled=sketching||editingBubbles||!!(currentProgram()&&!roomCount());
   $('boundary-draw').disabled = !boundaryRing || running || paused || !!pendingBoundary;
   $('reset').disabled = sketching;
+  $('undo').disabled = boundaryEditor.active ? !boundaryEditor.canUndo : !!pendingBoundary || !history.canUndo;
+  $('redo').disabled = boundaryEditor.active ? !boundaryEditor.canRedo : !!pendingBoundary || !history.canRedo;
 }
 
 // ---------- toolbars ----------
@@ -957,6 +1022,8 @@ function showPanel(name) {
   document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));
   // The playhead measures the graph, which has no size while its panel is closed.
   if (openPanel === 'optimize' && lastFrame) movePlayhead(lastFrame.iteration);
+  editor.setEnabled(openPanel === 'rooms');
+  $('bubble-editing').hidden = openPanel !== 'rooms';
 }
 document.querySelectorAll('button[data-open]').forEach(b => b.addEventListener('click', () => showPanel(b.dataset.open)));
 
