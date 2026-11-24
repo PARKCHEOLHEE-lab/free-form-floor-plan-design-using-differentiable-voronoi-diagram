@@ -218,3 +218,76 @@ test("adjustment: a corner is picked before a wall within 8 px, dragging it resh
         assert.ok(labels.has("X/Y"), `the X/Y snap label shows while Shift is held: ${[...labels]}`);
     });
 });
+
+const cameraPose = (page) => page.$eval("#plan", (c) => [c.dataset.azimuth, c.dataset.elevation, c.dataset.zoom]);
+const selectedCorner = (page) => page.$eval("#plan", (c) => c.dataset.selectedCorner ?? null);
+/** Move off and back onto `at`, so the hover is picked again there. */
+async function hoverAt(page, [x, y]) {
+    await page.mouse.move(1100, 700);
+    await page.mouse.move(x, y);
+    return hovered(page);
+}
+
+test("adjustment: a click selects a corner, Delete removes it, a double click on a wall adds a corner that drags at once, Undo restores each step, and a refused delete says why", { timeout: 240_000 }, async () => {
+    await onPage(async (page) => {
+        await page.click("button[data-open=adjust]");
+        const pose = await cameraPose(page);
+        const wall = await findWall(page);
+        assert.ok(wall, "a wall can be found under the pointer");
+        const before = await areasNow(page);
+
+        // a double click on a wall adds a corner there, selected, without turning the camera home
+        await page.mouse.dblclick(...wall);
+        assert.deepEqual(await cameraPose(page), pose, "the double click on a wall does not reset the view");
+        const added = await selectedCorner(page);
+        assert.ok(added, "the new corner is selected");
+        assert.equal((await hoverAt(page, wall)).corner, added, "the new corner sits under the pointer");
+        assert.deepEqual(await areasNow(page), before, "adding a corner changes no area");
+
+        // it drags at once (areas show one decimal, so a small bump may round away in one of the two rooms)
+        const flat = await pixels(page);
+        await page.mouse.down();
+        for (let k = 1; k <= 8; k++) await page.mouse.move(wall[0] + 4 * k, wall[1] + 3 * k);
+        await page.mouse.up();
+        const dragged = await areasNow(page);
+        assert.notEqual(await pixels(page), flat, "the walls bend at the new corner");
+        assert.ok(dragged.some((t, i) => t !== before[i]), `the rooms beside the wall change: ${before} -> ${dragged}`);
+
+        // Undo takes back the drag, then the new corner
+        await page.click("#undo");
+        assert.deepEqual(await areasNow(page), before, "Undo puts the corner back on the wall");
+        assert.equal((await hoverAt(page, wall)).corner, added);
+        await page.click("#undo");
+        assert.deepEqual(await hoverAt(page, wall), { corner: null, wall: true }, "a second Undo removes the added corner");
+
+        // Delete removes the selected corner; Undo brings it back
+        await page.mouse.dblclick(...wall);
+        const again = await selectedCorner(page);
+        assert.ok(again);
+        await page.keyboard.press("Delete");
+        assert.equal(await selectedCorner(page), null, "nothing is selected after the delete");
+        assert.deepEqual(await hoverAt(page, wall), { corner: null, wall: true }, "Delete removes the selected corner");
+        await page.keyboard.press("Meta+z");
+        assert.equal((await hoverAt(page, wall)).corner, again, "Undo brings the corner back");
+
+        // a click selects a corner; a corner where three walls meet cannot be deleted, and the help line says why
+        const tried = new Set([again]);
+        let refused = null;
+        for (let y = 250; y <= 620 && !refused; y += 10) {
+            for (let x = 430; x <= 860 && !refused; x += 10) {
+                await page.mouse.move(x, y);
+                const { corner } = await hovered(page);
+                if (corner === null || tried.has(corner)) continue;
+                tried.add(corner);
+                await page.mouse.down();
+                await page.mouse.up();
+                assert.equal(await selectedCorner(page), corner, "a click selects the corner under the pointer");
+                await page.keyboard.press("Backspace");
+                if (/cannot be deleted/.test(await page.locator("#adjust-message").textContent())) refused = corner;
+                else await page.keyboard.press("Meta+z");
+            }
+        }
+        assert.ok(refused, "some corner of the preset refuses a delete and the help line says why");
+        assert.equal(await selectedCorner(page), refused, "a refused delete keeps the corner selected");
+    });
+});
