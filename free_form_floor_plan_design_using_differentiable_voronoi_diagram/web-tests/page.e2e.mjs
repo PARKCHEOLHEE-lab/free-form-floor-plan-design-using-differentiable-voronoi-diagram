@@ -1,5 +1,5 @@
 // The demo page in a real browser: serve web/ (it must hold a wasm-pack build in web/pkg),
-// run preset E to the end, switch the walls to Aligned, and read the aligned-wall readout.
+// run preset E to the end, switch the walls to Aligned, and read the aligned-wall share the plan reports.
 // Run: cd web-tests && npm install && npm run e2e
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -23,12 +23,12 @@ test("preset E run to the end: Aligned walls show a higher aligned-wall share th
         // the wall switch lives in the Display panel, opened from the bottom-right toolbar
         await page.locator("button[data-open=display]").click();
         await page.locator("#walls button[data-walls=aligned]").click();
-        const text = await page.locator("#align_v").textContent();
+        const text = await page.$eval("#plan", (c) => c.dataset.alignedShare);
         if (SHOTS) await page.screenshot({ path: `${SHOTS}/aligned.png` });
 
         // "61% → 84%": aligned share of wall length before and after alignment
         const m = /(\d+)%\D+(\d+)%/.exec(text ?? "");
-        assert.ok(m, `readout shows two shares: "${text}"`);
+        assert.ok(m, `the plan reports two shares: "${text}"`);
         assert.ok(Number(m[2]) > Number(m[1]), `aligned share rose: "${text}"`);
     } finally {
         await browser.close();
@@ -70,7 +70,7 @@ test("point and wall sliders redraw independently without restarting the plan", 
         assert.equal(await merge.inputValue(), "0.02");
         assert.equal(await snap.inputValue(), "0.02");
 
-        const share = page.locator("#align_v");
+        const share = { textContent: () => page.$eval("#plan", (c) => c.dataset.alignedShare) };
         const originalShare = await share.textContent();
         const builds = await page.evaluate(() => window.buildCount);
         const pixels = () => page.locator("#plan").evaluate(canvas => canvas.toDataURL());
@@ -90,7 +90,7 @@ test("point and wall sliders redraw independently without restarting the plan", 
 
         await setTolerance(snap, "0.04");
         assert.equal(await merge.inputValue(), "0.02");
-        // The readout is the alignment of the same frame with merge 0.02 and snap 0.04,
+        // The reported share is the alignment of the same frame with merge 0.02 and snap 0.04,
         // the same steps the page takes (web/index.html alignFrame).
         const { frame, boundary } = await page.evaluate(() => ({ frame: window.lastFrame, boundary: window.lastBoundary }));
         const readout = (mergeTol, snapTol) => {

@@ -661,3 +661,17 @@ test("tooltips: icon names in panels show centered under the icon and are never 
         });
     } finally { proc.kill(); }
 });
+
+test("display: no aligned readout row; the plan keeps the aligned share for checks", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=display]");
+            const labels = await page.$$eval(".panel[data-panel=display] .row > label", (ls) => ls.map((l) => l.textContent));
+            assert.ok(!labels.includes("aligned"), `Display rows: ${labels.join(", ")}`);
+            assert.equal(await page.locator("#align_v").count(), 0);
+            await page.waitForFunction(() => document.getElementById("plan").dataset.alignedShare);
+            assert.match(await page.$eval("#plan", (c) => c.dataset.alignedShare), /^\d+% → \d+%$/);
+        });
+    } finally { proc.kill(); }
+});

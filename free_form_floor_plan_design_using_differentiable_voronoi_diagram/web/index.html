@@ -68,7 +68,6 @@
     .row > label { width: 3.4em; flex: none; color: var(--ui-muted-fg); }
     .panel[data-panel=display] .row > label { width: 7.6em; }   /* Point merge, Wall snap, Bubble Diagram */
     .row .val, .room-row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
-    .readout { font-size: 12px; color: var(--ui-fg); }
 
     /* thin track + outlined thumb */
     input[type=range] {
@@ -302,7 +301,6 @@
         <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
         <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="merge_tol_v">0.020</span></div>
         <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="align_tol_v">0.020</span></div>
-        <div class="row"><label>aligned</label><span class="readout" id="align_v"></span></div>
         <div class="row"><label for="show-doors">Doors</label><input type="checkbox" id="show-doors" checked></div>
         <div class="row"><label for="show-bubbles">Bubble Diagram</label><input type="checkbox" id="show-bubbles" checked></div>
       </section>
@@ -840,7 +838,8 @@ function drawFrame(f) {
       (running?'Optimizing. ':'Ready to run. ')+result.issues.map(i=>i.message).join(' ');
     if($('show-doors').checked)doors=result.doors;
   }else{$('program-status').textContent='';delete $('program-status').dataset.state;}
-  if (al) $('align_v').textContent = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
+  // Aligned wall share before and after alignment, kept on the canvas for checks (the panel no longer shows it).
+  if (al) $('plan').dataset.alignedShare = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
   if (wallsMode === 'aligned' && al) {
     view.draw({
       outline: boundaryRing,
