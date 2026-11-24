@@ -364,15 +364,16 @@ test("editing bar: Undo and Redo sit beside Editing Bubble Diagram, only while R
     } finally { proc.kill(); }
 });
 
-test("rooms: Draw boundary is a full-width pencil button under the presets", { timeout: 60_000 }, async () => {
+test("rooms: Draw boundary is a full-width button with the corner-point square icon under the presets", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
             const draw = page.locator("#boundary-draw");
             assert.equal((await draw.textContent()).trim(), "Draw boundary");
-            assert.equal(await draw.locator("svg use").getAttribute("href"), "#i-pencil");
-            assert.equal(await page.$eval("#i-pencil", (s) => s.children.length), 2, "the pencil is drawn with two strokes");
+            assert.equal(await draw.locator("svg use").getAttribute("href"), "#i-vector-square");
+            assert.deepEqual(await page.$eval("#i-vector-square", (s) => [...s.children].map((c) => c.tagName)), ["path", "path", "path", "path", "rect", "rect", "rect", "rect"], "four sides and four corner points");
+            assert.equal(await draw.locator("svg").evaluate((s) => s.getBoundingClientRect().width), 16, "the icon matches the 16px toolbar icons");
             const presets = await page.locator("#presets").boundingBox(), button = await draw.boundingBox();
             assert.ok(button.y >= presets.y + presets.height, "Draw boundary sits under the presets");
             assert.ok(Math.abs(button.width - presets.width) < 2, "Draw boundary is as wide as the preset row");
