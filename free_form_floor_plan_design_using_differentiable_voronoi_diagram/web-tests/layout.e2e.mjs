@@ -549,7 +549,7 @@ test("polish: every section label has the same space above it", { timeout: 60_00
             for (const name of ["rooms", "optimize"]) {
                 await page.click(`button[data-open=${name}]`);
                 const gaps = await page.$$eval(`.panel[data-panel=${name}] .label`, (ls) => ls.filter((l) => l.getClientRects().length).slice(1).map((l) => {   // a hidden heading (no door links yet) has no space to measure
-                    let prev = (l.closest(".section-head") ?? l).previousElementSibling;   // Display's label sits in its heading row
+                    let prev = (l.closest(".section-head") ?? l).previousElementSibling;   // View's label sits in its heading row
                     while (prev && !prev.getBoundingClientRect().height) prev = prev.previousElementSibling;
                     return [l.textContent, Math.round(l.getBoundingClientRect().top - prev.getBoundingClientRect().bottom)];
                 }));
@@ -714,7 +714,7 @@ test("optimization: Run is an icon cell on the right of the Optimization title",
     } finally { proc.kill(); }
 });
 
-test("rooms: Display is the last section of Rooms and holds the display controls", { timeout: 60_000 }, async () => {
+test("rooms: View is the last section of Rooms and holds the display controls", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 900], async (page) => {
@@ -722,13 +722,13 @@ test("rooms: Display is the last section of Rooms and holds the display controls
             await page.click("button[data-open=rooms]");
             const order = await page.$eval(".panel[data-panel=rooms]", (p) => {
                 const display = [...p.querySelectorAll(".label")].at(-1);
-                return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-doors", "show-bubbles"].map((id) => {
+                return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-cells", "show-doors", "show-bubbles"].map((id) => {
                     const el = document.getElementById(id);
                     return !!el && p.contains(el) && !!(display.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
                 }) };
             });
-            assert.equal(order.last, "Display", "Display is the last section of Rooms");
-            assert.deepEqual(order.after, [true, true, true, true, true], "the display controls sit under it");
+            assert.equal(order.last, "View", "View is the last section of Rooms");
+            assert.deepEqual(order.after, [true, true, true, true, true, true], "the display controls sit under it");
         });
     } finally { proc.kill(); }
 });
@@ -790,7 +790,7 @@ test("rooms: Sites is the first Run setting in Optimization, and an empty Door l
     } finally { proc.kill(); }
 });
 
-test("display: Raw, Aligned, Doors and Bubble Diagram are four icon cells on the right of the Display heading", { timeout: 60_000 }, async () => {
+test("view: Raw, Aligned, Voronoi cells, Doors and Bubble Diagram are five icon cells on the right of the View heading", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 1000], async (page) => {
@@ -798,21 +798,21 @@ test("display: Raw, Aligned, Doors and Bubble Diagram are four icon cells on the
             const cell = await page.locator("[data-mode=shape_a]").boundingBox();
             assert.equal(await page.locator(".panel[data-panel=rooms] .panel-head").count(), 0, "the Rooms title has no cells");
             const head = page.locator(".panel[data-panel=rooms] .section-head");
-            assert.equal(await head.locator(".label").textContent(), "Display");
+            assert.equal(await head.locator(".label").textContent(), "View");
             const title = await head.locator(".label").boundingBox(), row = await head.boundingBox();
-            const cells = ["[data-walls=raw]", "[data-walls=aligned]", ".toggle:has(#show-doors)", ".toggle:has(#show-bubbles)"];
+            const cells = ["[data-walls=raw]", "[data-walls=aligned]", ".toggle:has(#show-cells)", ".toggle:has(#show-doors)", ".toggle:has(#show-bubbles)"];
             const boxes = [];
             for (const sel of cells) {
                 const box = await head.locator(sel).boundingBox();
-                assert.ok(box, `${sel} sits in the Display heading row`);
+                assert.ok(box, `${sel} sits in the View heading row`);
                 assert.ok(Math.abs(box.width - cell.width) < 1 && Math.abs(box.height - cell.height) < 1, `${sel} is ${box.width}x${box.height}, a preset cell is ${cell.width}x${cell.height}`);
-                assert.ok(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2)) < 4, `${sel} is level with Display`);
+                assert.ok(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2)) < 4, `${sel} is level with View`);
                 boxes.push(box);
             }
             assert.ok(boxes.every((b, i) => i === 0 || b.x > boxes[i - 1].x), "the cells run left to right");
-            assert.ok(Math.abs(boxes[3].x + boxes[3].width - (row.x + row.width)) < 1, "Bubble Diagram is the last cell of the row");
+            assert.ok(Math.abs(boxes[4].x + boxes[4].width - (row.x + row.width)) < 1, "Bubble Diagram is the last cell of the row");
             assert.equal(await page.locator("input[type=checkbox]:visible").evaluateAll((cs) => cs.filter((c) => +getComputedStyle(c).opacity > 0).length), 0, "no checkbox box shows");
-            for (const [id, name] of [["show-doors", "Doors"], ["show-bubbles", "Bubble Diagram"]]) {
+            for (const [id, name] of [["show-cells", "Voronoi cells"], ["show-doors", "Doors"], ["show-bubbles", "Bubble Diagram"]]) {
                 const toggle = head.locator(`.toggle:has(#${id})`);
                 const on = await toggle.evaluate((t) => getComputedStyle(t).borderColor);
                 await toggle.click();
@@ -847,6 +847,26 @@ test("sketch color: Draw boundary, Adjustment and the door link preview draw in 
                 return stroke;
             });
             assert.equal(link, black, "the door link preview is black");
+        });
+    } finally { proc.kill(); }
+});
+
+test("view: the Voronoi cells toggle, on at first, shows the cell lines and sites with Raw and with Aligned walls", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            assert.equal(await page.locator("#show-cells").count(), 1, "there is a Voronoi cells toggle");
+            assert.equal(await page.$eval("#show-cells", (c) => c.checked), true, "the cells show at first");
+            const shot = async () => { await page.waitForTimeout(150); return page.$eval("#plan", (c) => c.toDataURL()); };
+            for (const mode of ["raw", "aligned"]) {
+                await page.click(`[data-walls=${mode}]`);
+                const on = await shot();
+                await page.click(".toggle:has(#show-cells)");
+                assert.notEqual(await shot(), on, `${mode}: turning the cells off changes the drawing`);
+                await page.click(".toggle:has(#show-cells)");
+                assert.equal(await shot(), on, `${mode}: turning them on again draws them as before`);
+            }
         });
     } finally { proc.kill(); }
 });

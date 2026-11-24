@@ -215,3 +215,11 @@ test("wall snap: a slider from 0 to 50 percent of the cell width, 13 percent at 
         assert.notDeepEqual(alignedCorners(data, merge, 0.30 * w), alignedCorners(data, merge, 0.13 * w), "and from the first 13 percent");
     });
 });
+
+test("export: the settings say whether the Voronoi cells show", { timeout: 60_000 }, async () => {
+    await onAligned(async (page, slide, exported) => {
+        assert.equal((await exported()).settings.voronoi, true, "on at first");
+        await page.click(".toggle:has(#show-cells)");
+        assert.equal((await exported()).settings.voronoi, false, "off after the toggle");
+    });
+});
