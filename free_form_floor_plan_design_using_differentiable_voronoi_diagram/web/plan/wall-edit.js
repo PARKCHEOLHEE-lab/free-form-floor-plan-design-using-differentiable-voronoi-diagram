@@ -371,18 +371,22 @@ export function snapOffset(g, run, offset, project) {
 
 /**
  * What a drag can move, for marking it before any hover: `corners` lists one corner per point
- * where moveCorner moves it (not a boundary bend), and `walls` lists every interior wall piece
- * [a, b] whose straight run (wallRun) is not locked.
+ * where moveCorner moves it (not a boundary bend) and the move changes a wall (a boundary corner
+ * with no interior wall at it only slides along a straight boundary), and `walls` lists every
+ * interior wall piece [a, b] whose straight run (wallRun) is not locked.
  */
 export function movableParts(g) {
     const all = wallEdges(g);
+    const walled = new Set(all.filter((e) => e.rooms.length === 2 && span(g, e) >= TOL).flatMap((e) => [e.a, e.b]));
     const seen = new Set();
     const corners = [];
     for (const id of g.corners.keys()) {
         if (seen.has(id)) continue;
         const twins = twinsOf(g, id, all);
         for (const x of twins) seen.add(x);
-        if (boundaryLine(g, twins, all) !== null) corners.push(id);
+        const line = boundaryLine(g, twins, all);
+        if (line === null || (line && ![...twins].some((x) => walled.has(x)))) continue;
+        corners.push(id);
     }
     const walls = all.filter((e) => e.rooms.length === 2 && span(g, e) >= TOL && !wallRun(g, e.a, e.b).locked).map((e) => [e.a, e.b]);
     return { corners, walls };
