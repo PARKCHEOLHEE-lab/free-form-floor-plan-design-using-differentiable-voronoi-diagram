@@ -167,6 +167,19 @@ export function moveRun(g, run, offset) {
 }
 
 /**
+ * For a corner group on the boundary, the unit direction of the boundary segment it lies on, or
+ * null where the boundary bends (it cannot move); undefined for a group off the boundary.
+ */
+function boundaryLine(g, twins, all) {
+    if (![...twins].some((x) => g.corners.get(x).fixed)) return undefined;
+    const p = point(g, [...twins][0]);
+    const ends = all.filter((e) => (twins.has(e.a) || twins.has(e.b)) && e.rooms.length === 1 && span(g, e) >= TOL)
+        .map((e) => point(g, twins.has(e.a) ? e.b : e.a));
+    const dirs = ends.map((q) => unit(sub(q, p)));
+    return !dirs.length || dirs.some((v) => Math.abs(cross(dirs[0], v)) > KINK) ? null : dirs[0];
+}
+
+/**
  * Drag one corner (with its twins) toward `target`. A boundary corner moves only along the boundary
  * segment it lies on; one where the boundary bends cannot move (null). The move is moveRun on a
  * one-corner run, so it stops at the same last valid position. Returns { graph, point }.
@@ -176,13 +189,11 @@ export function moveCorner(g, id, target) {
     const twins = twinsOf(g, id, all);
     const p = point(g, id);
     let d = sub(target, p);
-    if ([...twins].some((x) => g.corners.get(x).fixed)) {
-        const ends = all.filter((e) => (twins.has(e.a) || twins.has(e.b)) && e.rooms.length === 1 && span(g, e) >= TOL)
-            .map((e) => point(g, twins.has(e.a) ? e.b : e.a));
-        const dirs = ends.map((q) => unit(sub(q, p)));
-        if (!dirs.length || dirs.some((v) => Math.abs(cross(dirs[0], v)) > KINK)) return null; // the boundary bends here
-        const along = dot(d, dirs[0]);
-        d = [dirs[0][0] * along, dirs[0][1] * along];
+    const line = boundaryLine(g, twins, all);
+    if (line === null) return null;
+    if (line) {
+        const along = dot(d, line);
+        d = [line[0] * along, line[1] * along];
     }
     const run = { slides: new Map([...twins].map((x) => [x, d])), rooms: usersOf(g, twins), range: [0, 1], locked: false };
     const { graph } = moveRun(g, run, 1);
@@ -356,4 +367,23 @@ export function snapOffset(g, run, offset, project) {
         }
     });
     return snapped;
+}
+
+/**
+ * What a drag can move, for marking it before any hover: `corners` lists one corner per point
+ * where moveCorner moves it (not a boundary bend), and `walls` lists every interior wall piece
+ * [a, b] whose straight run (wallRun) is not locked.
+ */
+export function movableParts(g) {
+    const all = wallEdges(g);
+    const seen = new Set();
+    const corners = [];
+    for (const id of g.corners.keys()) {
+        if (seen.has(id)) continue;
+        const twins = twinsOf(g, id, all);
+        for (const x of twins) seen.add(x);
+        if (boundaryLine(g, twins, all) !== null) corners.push(id);
+    }
+    const walls = all.filter((e) => e.rooms.length === 2 && span(g, e) >= TOL && !wallRun(g, e.a, e.b).locked).map((e) => [e.a, e.b]);
+    return { corners, walls };
 }

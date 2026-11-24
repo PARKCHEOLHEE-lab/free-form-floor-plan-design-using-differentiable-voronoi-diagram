@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { addCorner, moveCorner, moveRun, removeCorner, roomShares, rotateRun, snapAngle, snapCorner, snapOffset, wallRun } from "../web/plan/wall-edit.js";
+import { addCorner, moveCorner, movableParts, moveRun, removeCorner, roomShares, rotateRun, snapAngle, snapCorner, snapOffset, wallRun } from "../web/plan/wall-edit.js";
 import { SNAP_LABELS } from "../web/plan/boundary-editor.js";
 import { alignPlan } from "../web/plan/align.js";
 import { fromCells, roomRings, wallEdges } from "../web/plan/graph.js";
@@ -333,4 +333,34 @@ test("rotating a wall turns its straight run about its middle while the walls it
     assert.deepEqual(snapAngle(long, 17 * deg, { boundary: square, shift: false }), { angle: 17 * deg, kind: "free" }, "17 degrees off: no snap");
     assert.ok(Math.abs(snapAngle(long, 17 * deg, { boundary: square, shift: true }).angle - 15 * deg) < 1e-12, "Shift: 17 degrees turns 15");
     assert.ok(Math.abs(snapAngle(long, 23 * deg, { boundary: square, shift: true }).angle - 30 * deg) < 1e-12, "Shift: 23 degrees turns 30");
+});
+
+test("movable parts: the corners that can move, one per point, and the wall pieces whose run is not locked", () => {
+    // three rooms in a square: the four square corners are boundary bends; the three T ends on the
+    // boundary slide along it, and the junction at the origin is free; all three walls can move
+    const g = threeRooms();
+    const { corners, walls } = movableParts(g);
+    const key = (ids) => ids.map((id) => at(g, id).join(",")).sort();
+    assert.deepEqual(key(corners), ["0,-1", "0,0", "0,1", "1,0"]);
+    assert.deepEqual(walls.map(([a, b]) => key([a, b]).join(" ")).sort(), ["0,-1 0,0", "0,0 0,1", "0,0 1,0"]);
+
+    // on the aligned presets: a corner is listed where moveCorner accepts it, once per point, and a
+    // wall piece where its run is not locked (preset B has locked runs)
+    let locked = 0;
+    for (const name of ["a", "b", "c", "d", "e"]) {
+        const fixture = JSON.parse(readFileSync(new URL(`./fixtures/shape_${name}.json`, import.meta.url)));
+        const p = fromCells(fixture.cells, fixture.boundary, { roomCount: fixture.ratios.length, simplifyTol: 0.004 });
+        alignPlan(p, fixture.boundary, { tol: 0.02 });
+        const parts = movableParts(p);
+        const spot = (id) => at(p, id).join(",");
+        const listed = parts.corners.map(spot);
+        assert.equal(new Set(listed).size, listed.length, `preset ${name}: one mark per point`);
+        const moves = new Set([...p.corners.keys()].filter((id) => moveCorner(p, id, at(p, id))).map(spot));
+        assert.deepEqual([...listed].sort(), [...moves].sort(), `preset ${name}: the listed corners are the ones that move`);
+        assert.ok(moves.size < p.corners.size, `preset ${name}: some corners are boundary bends`);
+        const free = wallEdges(p).filter((e) => e.rooms.length === 2 && Math.hypot(...at(p, e.a).map((v, i) => v - at(p, e.b)[i])) > 1e-9 && !wallRun(p, e.a, e.b).locked);
+        assert.deepEqual(parts.walls.map((w) => w.join(",")).sort(), free.map((e) => `${e.a},${e.b}`).sort(), `preset ${name}: the listed walls are the ones that move`);
+        locked += wallEdges(p).filter((e) => e.rooms.length === 2 && wallRun(p, e.a, e.b).locked).length;
+    }
+    assert.ok(locked > 0, "some preset has a locked wall, so leaving them out is checked");
 });
