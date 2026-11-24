@@ -161,7 +161,7 @@ test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s
                     const s = getComputedStyle(b, "::after");
                     return { text: s.content, opacity: +s.opacity, left: parseFloat(s.left), width: b.getBoundingClientRect().width };
                 });
-            const tools = await page.$$(".tool");
+            const tools = await page.$$(".toolbar .tool");
             assert.equal(tools.length, 5);
             for (const tool of tools) {
                 const name = await tool.getAttribute("aria-label");
@@ -335,27 +335,46 @@ test("rooms: no Delete selected button; the help text says to press Delete", { t
     } finally { proc.kill(); }
 });
 
-test("rooms: Undo, Redo and Draw boundary are named icon buttons beside the Rooms title and the presets", { timeout: 60_000 }, async () => {
+test("editing bar: Undo and Redo sit beside Editing Bubble Diagram, only while Rooms is open", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
-            const box = (sel) => page.locator(sel).first().boundingBox();
-            for (const [id, name] of [["undo", "Undo"], ["redo", "Redo"], ["boundary-draw", "Draw boundary"]]) {
+            for (const [id, name] of [["undo", "Undo"], ["redo", "Redo"]]) {
                 const button = page.locator("#" + id);
+                assert.equal(await button.evaluate((b) => !!b.closest("#bubble-editing")), true, `${name} is in the editing bar`);
+                assert.equal(await button.evaluate((b) => !!b.closest(".panel")), false, `${name} is not in the Rooms panel`);
                 assert.equal((await button.textContent()).trim(), "", `${name} shows an icon, not text`);
                 assert.equal(await button.locator("svg use").count(), 1, `${name} has one icon`);
                 assert.equal(await button.getAttribute("aria-label"), name);
-                assert.ok((await button.getAttribute("title")).startsWith(name), `${name} has a tooltip`);
+                assert.equal(await button.isVisible(), true);
+                await button.hover();
+                await page.waitForTimeout(300);
+                const tip = await button.evaluate((b) => { const s = getComputedStyle(b, "::after"); return { text: s.content, opacity: +s.opacity, top: parseFloat(s.top), height: b.getBoundingClientRect().height }; });
+                assert.deepEqual([tip.text, tip.opacity], [JSON.stringify(name), 1], `${name} shows its name on hover`);
+                assert.ok(tip.top >= tip.height, `${name}'s name shows below the bar`);
+                assert.equal(await button.getAttribute("title"), null, `${name} has no browser title tooltip`);
             }
-            const title = await box(".panel[data-panel=rooms] .label");
-            for (const id of ["#undo", "#redo"]) {
-                const b = await box(id);
-                assert.ok(Math.abs(b.y + b.height / 2 - (title.y + title.height / 2)) < 8, `${id} sits on the Rooms title row`);
-            }
-            const preset = await box("#presets button"), draw = await box("#boundary-draw");
-            assert.ok(Math.abs(draw.y + draw.height / 2 - (preset.y + preset.height / 2)) < 4, "Draw boundary sits on the preset row");
-            assert.ok(draw.x > preset.x, "Draw boundary comes after the presets");
+            const bar = await page.locator("#bubble-editing").boundingBox();
+            assert.ok(Math.abs(bar.x + bar.width / 2 - 1145 / 2) < 2 && bar.y < 40, "the bar sits at the top center");
+            await page.click("button[data-open=rooms]");
+            assert.equal(await page.locator("#undo").isVisible(), false, "the bar and its buttons hide with the Rooms panel");
+        });
+    } finally { proc.kill(); }
+});
+
+test("rooms: Draw boundary is a full-width pencil button under the presets", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            const draw = page.locator("#boundary-draw");
+            assert.equal((await draw.textContent()).trim(), "Draw boundary");
+            assert.equal(await draw.locator("svg use").getAttribute("href"), "#i-pencil");
+            assert.equal(await page.$eval("#i-pencil", (s) => s.children.length), 2, "the pencil is drawn with two strokes");
+            const presets = await page.locator("#presets").boundingBox(), button = await draw.boundingBox();
+            assert.ok(button.y >= presets.y + presets.height, "Draw boundary sits under the presets");
+            assert.ok(Math.abs(button.width - presets.width) < 2, "Draw boundary is as wide as the preset row");
         });
     } finally { proc.kill(); }
 });

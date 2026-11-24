@@ -251,9 +251,11 @@
   #custom-boundaries[hidden] { display:none; }
   #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
   #plan[data-bubble-editing] { cursor:crosshair !important; } /* OrbitControls sets an inline cursor */
-  .edit-badge { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; pointer-events:none;
-    padding:6px 12px; border-radius:999px; background:var(--dark); color:var(--light); font-size:.8em; }
-  .edit-badge[hidden] { display:none; }
+  .edit-bar { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:2px;
+    padding:4px 4px 4px 14px; border-radius:14px; background:var(--light); box-shadow:var(--ui-card-shadow); font-size:13px; color:var(--ui-fg); }
+  .edit-bar[hidden] { display:none; }
+  .edit-sep { width:1px; height:20px; margin:0 6px 0 10px; background:var(--ui-border); }
+  .edit-bar .tool::after { top:calc(100% + 8px); left:50%; transform:translateX(-50%); } /* below, so Undo's name does not cover Redo */
   .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
   .bubble-label.selected { background:var(--ui-fg); color:white; }
   .bubble-label.draft { background:white; color:var(--ui-muted-fg); }
@@ -272,18 +274,9 @@
   .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 0; border:0; border-radius:4px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
   .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
   .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
-  .panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6em; }
-  .panel-head .label { margin-bottom:0; }
-  .icon-actions { display:flex; gap:2px; }
-  .icon-btn { width:28px; height:28px; flex:none; display:grid; place-items:center; padding:0; border:0; border-radius:8px;
-    background:transparent; color:var(--ui-fg); cursor:pointer; transition:background .12s; }
-  .icon-btn:hover:not(:disabled) { background:var(--ui-muted); }
-  .icon-btn:focus-visible { outline:2px solid var(--ui-muted-fg); outline-offset:1px; }
-  .icon-btn:disabled { opacity:.35; cursor:default; }
-  .boundary-row { display:flex; gap:.35em; margin-bottom:12px; }
-  .boundary-row #presets { flex:1; margin:0; }
-  .boundary-row .icon-btn { width:34px; height:auto; border:1px solid var(--reduce-30); border-radius:4px; }
-  .boundary-row .icon-btn.active { background:var(--dark); border-color:var(--dark); color:var(--light); }
+  .boundary-actions { margin:8px 0 12px; }
+  .boundary-actions button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+  .boundary-actions .ic { width:14px; height:14px; }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -298,7 +291,7 @@
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->
       <span id="status" hidden></span>
-      <div id="bubble-editing" class="edit-badge" role="status" hidden>Editing Bubble Diagram</div>
+      <div id="bubble-editing" class="edit-bar" hidden><span role="status">Editing Bubble Diagram</span><span class="edit-sep"></span><button type="button" id="undo" class="tool" aria-label="Undo" aria-keyshortcuts="Meta+Z Control+Z" disabled><svg class="ic"><use href="#i-undo"/></svg></button><button type="button" id="redo" class="tool" aria-label="Redo" aria-keyshortcuts="Meta+Shift+Z Control+Shift+Z Control+Y" disabled><svg class="ic"><use href="#i-redo"/></svg></button></div>
     </div>
 
     <!-- Icons: Lucide (lucide.dev), ISC License, Copyright (c) for portions of Lucide are held by
@@ -313,7 +306,7 @@
         <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
         <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
         <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
-        <symbol id="i-pen" viewBox="0 0 24 24"><path d="M15.707 21.293a1 1 0 0 1-1.414 0l-1.586-1.586a1 1 0 0 1 0-1.414l5.586-5.586a1 1 0 0 1 1.414 0l1.586 1.586a1 1 0 0 1 0 1.414z"/><path d="m18 13-1.375-6.874a1 1 0 0 0-.746-.776L3.235 2.028a1 1 0 0 0-1.207 1.207L5.35 15.879a1 1 0 0 0 .776.746L13 18"/><path d="m2.3 2.3 7.286 7.286"/><circle cx="11" cy="11" r="2"/></symbol>
+        <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
         <symbol id="i-display" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
       </defs>
     </svg>
@@ -334,15 +327,8 @@
 
     <div class="controls">
       <section class="panel" data-panel="rooms">
-        <div class="panel-head">
-          <div class="label">Rooms</div>
-          <div class="icon-actions">
-            <button type="button" id="undo" class="icon-btn" aria-label="Undo" title="Undo (Cmd+Z)" aria-keyshortcuts="Meta+Z Control+Z" disabled><svg class="ic"><use href="#i-undo"/></svg></button>
-            <button type="button" id="redo" class="icon-btn" aria-label="Redo" title="Redo (Shift+Cmd+Z)" aria-keyshortcuts="Meta+Shift+Z Control+Shift+Z Control+Y" disabled><svg class="ic"><use href="#i-redo"/></svg></button>
-          </div>
-        </div>
+        <div class="label">Rooms</div>
         <div class="label">Boundary</div>
-        <div class="boundary-row">
         <div class="seg" id="presets">
           <button data-mode="shape_a">A</button>
           <button data-mode="shape_b">B</button>
@@ -350,9 +336,8 @@
           <button data-mode="shape_d">D</button>
           <button data-mode="shape_e" class="active">E</button>
         </div>
-        <button id="boundary-draw" type="button" class="icon-btn" aria-label="Draw boundary" title="Draw boundary" aria-pressed="false" disabled><svg class="ic"><use href="#i-pen"/></svg></button>
-        </div>
-        <div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
+<div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
+        <div class="seg boundary-actions"><button id="boundary-draw" type="button" aria-pressed="false" disabled><svg class="ic"><use href="#i-pencil"/></svg>Draw boundary</button></div>
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
