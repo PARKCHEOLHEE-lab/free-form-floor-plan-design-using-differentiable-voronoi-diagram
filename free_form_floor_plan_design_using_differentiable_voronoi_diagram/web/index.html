@@ -61,7 +61,7 @@
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: 3.4em; flex: none; color: var(--ui-muted-fg); }
-    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
+    .row .val, .room-row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
     .readout { font-size: 12px; color: var(--ui-fg); }
 
     /* thin track + outlined thumb */
@@ -73,6 +73,7 @@
       -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
       background: var(--light); border: 1.5px solid var(--ui-fg); cursor: pointer; transition: transform .1s;
     }
+    input[type=range]:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 4px; }
     input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.18); }
     input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 1.5px solid var(--ui-fg); border-radius: 50%; background: var(--light); cursor: pointer; }
 
@@ -91,6 +92,7 @@
     }
     .seg button:hover:not(.active) { background: var(--ui-muted); }
     .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
+    .seg button:disabled { opacity: .4; cursor: default; }   /* as .tool:disabled */
 
     /* Canvas UI: the plan canvas covers the window (view.resize reads its width and height)
        and every control floats over it: icon toolbars in the corners, one settings panel at
@@ -190,7 +192,7 @@
   .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
   .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
   /* six equal cells: the five presets, then Draw boundary */
-  .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }
+  .panel .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }   /* .panel: beats .panel .seg */
   #presets { display:contents; }
   .boundary-row button { display:grid; place-items:center; }
   .preset-ic { width:20px; height:20px; stroke-width:1.6; }
@@ -423,7 +425,7 @@ const editor = createBubbleEditor($('plan'),view,{
     if(selectionOnly){refreshRoomReadout();return;}
     if(!editingBubbles){editingBubbles=true;stop();}
     refreshRoomReadout();
-    $('program-status').textContent=commit?'Updating plan...':'Editing rooms...';
+    $('program-status').textContent=commit?'Updating plan…':'Editing rooms…';
     $('program-status').dataset.state='editing';
     if(commit){editingBubbles=false;history.commit(designState());rebuildPreviewSoon();}
     setButtons();
@@ -510,7 +512,7 @@ let rebuildTimer = 0;
 function rebuildPreviewSoon() {
   if (pendingBoundary) return;
   clearTimeout(rebuildTimer);
-  $('status').textContent=mode+' · building...';
+  $('status').textContent=mode+' · building…';
   rebuildTimer = setTimeout(() => {
     rebuildTimer = 0;
     stop();

@@ -415,3 +415,58 @@ test("rooms: preset buttons show an outline of their own boundary instead of a l
         });
     } finally { proc.kill(); }
 });
+
+test("details: a disabled segmented button looks disabled like a disabled toolbar icon", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            await page.evaluate(() => { document.getElementById("boundary-draw").disabled = true; document.querySelector("[data-mode=shape_a]").disabled = true; });
+            const look = (sel) => page.$eval(sel, (b) => [getComputedStyle(b).opacity, getComputedStyle(b).cursor]);
+            const tool = await look("#redo");
+            assert.deepEqual(tool, ["0.4", "default"], "a disabled toolbar icon is faded");
+            assert.deepEqual(await look("#boundary-draw"), tool, "disabled Draw boundary looks the same");
+            assert.deepEqual(await look("[data-mode=shape_a]"), tool, "a disabled preset looks the same");
+        });
+    } finally { proc.kill(); }
+});
+
+test("details: sliders show a focus ring when reached by keyboard", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            await page.locator("#boundary-draw").focus();
+            await page.keyboard.press("Tab");
+            assert.equal(await page.evaluate(() => document.activeElement.id), "sites");
+            const ring = await page.$eval("#sites", (s) => [getComputedStyle(s).outlineStyle, parseFloat(getComputedStyle(s).outlineWidth)]);
+            assert.notEqual(ring[0], "none", "the focused slider shows an outline");
+            assert.ok(ring[1] >= 2, `the ring is ${ring[1]}px wide`);
+        });
+    } finally { proc.kill(); }
+});
+
+test("details: target area percentages keep the value style after the first room is drawn", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            await page.click("button[data-mode=shape_a]");
+            await page.waitForFunction(() => { const s = document.getElementById("status").textContent; return s.startsWith("shape_a") && s.includes("ready"); });
+            await page.click('.gizmo [data-axis="+z"]');
+            await page.mouse.move(600, 450); await page.mouse.down(); await page.mouse.move(630, 450, { steps: 8 }); await page.mouse.up();
+            const style = (sel) => page.$eval(sel, (v) => { const s = getComputedStyle(v); return [s.fontFamily, s.fontSize, s.textAlign, s.fontVariantNumeric]; });
+            assert.deepEqual(await style(".room-row .val"), await style("#sites_v"), "a room's percent uses the same value style as the other values");
+        });
+    } finally { proc.kill(); }
+});
+
+test("details: the preset row keeps its 12px bottom margin", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            assert.equal(await page.$eval(".boundary-row", (r) => getComputedStyle(r).marginBottom), "12px");
+        });
+    } finally { proc.kill(); }
+});
