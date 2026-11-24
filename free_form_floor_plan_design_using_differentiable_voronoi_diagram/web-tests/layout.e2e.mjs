@@ -275,7 +275,7 @@ test("rooms: one icon opens the boundary choice above the room bubbles", { timeo
             const labels = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
             assert.deepEqual(labels, ["Rooms", "Optimization"]);
             assert.equal(await page.locator(".panel[data-panel=boundary]").count(), 0, "no separate boundary panel");
-            for (const sel of ["#presets", "#custom-boundaries", "#boundary-draw", "#bubble-message", "#roomareas", "#connections", "#sites"])
+            for (const sel of ["#presets", "#custom-boundaries", "#boundary-draw", "#bubble-message", "#roomareas", "#connections"])
                 assert.equal(await page.$eval(sel, (e) => e.closest(".panel")?.dataset.panel ?? null), "rooms", `${sel} is in the Rooms panel`);
             const order = await page.$eval(".panel[data-panel=rooms]", (p) => [...p.querySelectorAll("#boundary-draw, #bubble-message")].map((e) => e.id));
             assert.deepEqual(order, ["boundary-draw", "bubble-message"], "the boundary comes before the room bubbles");
@@ -433,8 +433,8 @@ test("details: sliders show a focus ring when reached by keyboard", { timeout: 6
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            await page.click("button[data-open=rooms]");
-            await page.locator("#boundary-draw").focus();
+            await page.click("button[data-open=optimize]");
+            await page.locator("#w_topo").focus();
             await page.keyboard.press("Tab");
             assert.equal(await page.evaluate(() => document.activeElement.id), "sites");
             const ring = await page.$eval("#sites", (s) => [getComputedStyle(s).outlineStyle, parseFloat(getComputedStyle(s).outlineWidth)]);
@@ -548,8 +548,8 @@ test("polish: every section label has the same space above it", { timeout: 60_00
         await atSize(url, [1145, 900], async (page) => {
             for (const name of ["rooms", "optimize"]) {
                 await page.click(`button[data-open=${name}]`);
-                const gaps = await page.$$eval(`.panel[data-panel=${name}] .label`, (ls) => ls.slice(1).map((l) => {
-                    let prev = l.previousElementSibling;
+                const gaps = await page.$$eval(`.panel[data-panel=${name}] .label`, (ls) => ls.filter((l) => l.getClientRects().length).slice(1).map((l) => {   // a hidden heading (no door links yet) has no space to measure
+                    let prev = (l.closest(".section-head") ?? l).previousElementSibling;   // Display's label sits in its heading row
                     while (prev && !prev.getBoundingClientRect().height) prev = prev.previousElementSibling;
                     return [l.textContent, Math.round(l.getBoundingClientRect().top - prev.getBoundingClientRect().bottom)];
                 }));
@@ -714,19 +714,12 @@ test("optimization: Run is an icon cell on the right of the Optimization title",
     } finally { proc.kill(); }
 });
 
-test("rooms: Display is part of Rooms, with Raw and Aligned in the Rooms title row", { timeout: 60_000 }, async () => {
+test("rooms: Display is the last section of Rooms and holds the display controls", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 900], async (page) => {
-            const cell = await presetCell(page);
             assert.equal(await page.locator(".panel[data-panel=display]").count(), 0, "no separate Display panel");
             await page.click("button[data-open=rooms]");
-            for (const mode of ["raw", "aligned"]) {
-                const b = page.locator(`[data-walls=${mode}]`);
-                assert.equal(await b.evaluate((x) => !!x.closest(".panel[data-panel=rooms] .panel-head")), true, `${mode} sits in the Rooms title row`);
-                const box = await b.boundingBox();
-                assert.ok(Math.abs(box.width - cell.width) < 1 && Math.abs(box.height - cell.height) < 1, `${mode} is a preset-sized cell`);
-            }
             const order = await page.$eval(".panel[data-panel=rooms]", (p) => {
                 const display = [...p.querySelectorAll(".label")].at(-1);
                 return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-doors", "show-bubbles"].map((id) => {
@@ -736,6 +729,103 @@ test("rooms: Display is part of Rooms, with Raw and Aligned in the Rooms title r
             });
             assert.equal(order.last, "Display", "Display is the last section of Rooms");
             assert.deepEqual(order.after, [true, true, true, true, true], "the display controls sit under it");
+        });
+    } finally { proc.kill(); }
+});
+
+test("consistency: every slider in both panels starts and ends at the same x, and the loss graph starts there too", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 1000], async (page) => {
+            const edges = [];
+            for (const name of ["rooms", "optimize"]) {
+                await page.click(`button[data-open=${name}]`);
+                edges.push(...await page.$$eval(`.panel[data-panel=${name}] input[type=range]`, (rs) => rs.map((r) => { const b = r.getBoundingClientRect(); return [r.id, Math.round(b.left), Math.round(b.right)]; })));
+                if (name === "optimize") {
+                    const graph = await page.$eval("#sp_total", (s) => Math.round(s.closest(".spark").getBoundingClientRect().left));
+                    assert.equal(graph, edges[0][1], `the loss graph starts at ${graph}, the sliders at ${edges[0][1]}`);
+                }
+                await page.click(`button[data-open=${name}]`);
+            }
+            for (const [id, left, right] of edges) {
+                assert.equal(left, edges[0][1], `${id} starts at ${left}, ${edges[0][0]} at ${edges[0][1]}`);
+                assert.equal(right, edges[0][2], `${id} ends at ${right}, ${edges[0][0]} at ${edges[0][2]}`);
+            }
+        });
+    } finally { proc.kill(); }
+});
+
+test("consistency: row labels use sentence case and one muted color", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 1000], async (page) => {
+            const labels = [];
+            for (const name of ["rooms", "optimize"]) {
+                await page.click(`button[data-open=${name}]`);
+                labels.push(...await page.$$eval(`.panel[data-panel=${name}] :is(.row > label, .lossrow .lk, .roomareas .raswatch)`, (ls) => ls.map((l) => [l.textContent.trim(), getComputedStyle(l).color])));
+                await page.click(`button[data-open=${name}]`);
+            }
+            const muted = await page.evaluate(() => getComputedStyle(document.querySelector(".row > label")).color);
+            for (const [text, color] of labels) {
+                assert.match(text, /^[A-Z0-9]/, `"${text}" starts with a capital`);
+                assert.equal(color, muted, `"${text}" is ${color}, row labels are ${muted}`);
+            }
+            const texts = labels.map(([t]) => t);
+            for (const name of ["Sites", "Wall", "Area", "Lloyd", "Topo", "Iterations", "LR", "Seed", "Total"]) assert.ok(texts.includes(name), `${name} is a row label: ${texts.join(", ")}`);
+        });
+    } finally { proc.kill(); }
+});
+
+test("rooms: Sites is the first Run setting in Optimization, and an empty Door links heading hides", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 1000], async (page) => {
+            assert.equal(await page.$eval("#sites", (e) => e.closest(".panel").dataset.panel), "optimize");
+            assert.deepEqual(await page.$$eval(".panel[data-panel=optimize] #sites, .panel[data-panel=optimize] #iters, .panel[data-panel=optimize] #lr, .panel[data-panel=optimize] #seed", (rs) => rs.map((r) => r.id)), ["sites", "iters", "lr", "seed"]);
+            await page.click("button[data-open=rooms]");
+            assert.equal(await page.locator("#connections button").count(), 0, "the preset has no door links");
+            const visible = await page.$$eval(".panel[data-panel=rooms] .label", (ls) => ls.filter((l) => l.getClientRects().length).map((l) => l.textContent));
+            assert.ok(!visible.includes("Door links"), `no empty Door links heading: ${visible.join(", ")}`);
+        });
+    } finally { proc.kill(); }
+});
+
+test("display: Raw, Aligned, Doors and Bubble Diagram are four icon cells on the right of the Display heading", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 1000], async (page) => {
+            await page.click("button[data-open=rooms]");
+            const cell = await page.locator("[data-mode=shape_a]").boundingBox();
+            assert.equal(await page.locator(".panel[data-panel=rooms] .panel-head").count(), 0, "the Rooms title has no cells");
+            const head = page.locator(".panel[data-panel=rooms] .section-head");
+            assert.equal(await head.locator(".label").textContent(), "Display");
+            const title = await head.locator(".label").boundingBox(), row = await head.boundingBox();
+            const cells = ["[data-walls=raw]", "[data-walls=aligned]", ".toggle:has(#show-doors)", ".toggle:has(#show-bubbles)"];
+            const boxes = [];
+            for (const sel of cells) {
+                const box = await head.locator(sel).boundingBox();
+                assert.ok(box, `${sel} sits in the Display heading row`);
+                assert.ok(Math.abs(box.width - cell.width) < 1 && Math.abs(box.height - cell.height) < 1, `${sel} is ${box.width}x${box.height}, a preset cell is ${cell.width}x${cell.height}`);
+                assert.ok(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2)) < 4, `${sel} is level with Display`);
+                boxes.push(box);
+            }
+            assert.ok(boxes.every((b, i) => i === 0 || b.x > boxes[i - 1].x), "the cells run left to right");
+            assert.ok(Math.abs(boxes[3].x + boxes[3].width - (row.x + row.width)) < 1, "Bubble Diagram is the last cell of the row");
+            assert.equal(await page.locator("input[type=checkbox]:visible").evaluateAll((cs) => cs.filter((c) => +getComputedStyle(c).opacity > 0).length), 0, "no checkbox box shows");
+            for (const [id, name] of [["show-doors", "Doors"], ["show-bubbles", "Bubble Diagram"]]) {
+                const toggle = head.locator(`.toggle:has(#${id})`);
+                const on = await toggle.evaluate((t) => getComputedStyle(t).borderColor);
+                await toggle.click();
+                assert.equal(await page.$eval(`#${id}`, (c) => c.checked), false, `clicking ${name} turns it off`);
+                await page.waitForTimeout(200);   // the border color eases over .12 s
+                assert.notEqual(await toggle.evaluate((t) => getComputedStyle(t).borderColor), on, `${name} looks different when off`);
+                await toggle.hover();
+                await page.waitForTimeout(300);
+                assert.equal(await page.locator(".tip").textContent(), name, `hovering shows ${name}`);
+                await toggle.click();
+                assert.equal(await page.$eval(`#${id}`, (c) => c.checked), true, `clicking ${name} again turns it on`);
+            }
+            assert.equal(await page.$eval(".toggle:has(#show-doors)", (t) => getComputedStyle(t).borderColor), await page.$eval("[data-walls=raw]", (b) => getComputedStyle(b).borderColor), "an on toggle looks like the selected wall view");
         });
     } finally { proc.kill(); }
 });

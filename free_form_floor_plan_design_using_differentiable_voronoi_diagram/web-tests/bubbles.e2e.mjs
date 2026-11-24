@@ -338,7 +338,7 @@ test('bubble diagram: the Delete key removes the selected room or door even afte
         await page.keyboard.press('Delete');
         assert.equal(await page.locator('.connection-row').count(),0,'Delete removes the selected door link');
         await page.mouse.click(600,450);await page.click('#undo');await page.click('#redo');
-        await page.locator('.room-row[data-room-id="3"]').click();await page.locator('#sites').focus();await page.locator('.panel[data-panel=rooms] .label').first().click();
+        await page.locator('.room-row[data-room-id="3"]').click();await page.locator('#wall').focus();await page.locator('.panel[data-panel=rooms] .label').first().click();
         await page.keyboard.press('Backspace');
         assert.deepEqual((await labels(page)).map(r=>r.id),[1,2],'Backspace (the Mac delete key) removes the selected room');
     }finally{await browser.close();proc.kill();}

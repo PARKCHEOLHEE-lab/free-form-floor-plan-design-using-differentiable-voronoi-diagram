@@ -58,7 +58,7 @@ test('the app weighs L1 and Cos walls separately and has no step loss', {timeout
         assert.equal(await page.getByRole('slider',{name:'step',exact:true}).count(),0,'the step loss has no slider');
         assert.equal(Number(await l1.inputValue()),1);
         assert.equal(Number(await cos.inputValue()),1);
-        assert.deepEqual(await page.locator('.lossrow .lk').allTextContents(),['total','L1','Cos','area','lloyd','topo']);
+        assert.deepEqual(await page.locator('.lossrow .lk').allTextContents(),['Total','L1','Cos','Area','Lloyd','Topo']);
         const build=await page.evaluate(()=>wallProof.builds.at(-1));
         assert.equal(build.w[0],1/13,'L1 keeps its reference scale');
         assert.equal(build.cosineWeight,1);

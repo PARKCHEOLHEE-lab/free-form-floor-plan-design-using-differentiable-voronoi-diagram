@@ -32,7 +32,7 @@
        current value rides the playhead as a per-row tag (see .vtag below) */
     .losspanel { margin-top: 0; position: relative; }   /* relative: the playhead spans the rows */
     .lossrow { display: flex; align-items: center; gap: .7em; margin: .34em 0; }
-    .lossrow .lk { width: 3.4em; flex: none; color: var(--ui-muted-fg); font-size: 12px; }
+    .lossrow .lk { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); font-size: 12px; }
     .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 20px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--light); display: block; }
     .lossrow .spark polyline { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
     #sp_total { stroke: #66a1ff; } #sp_wall { stroke: #e08a5a; } #sp_area { stroke: #5aa469; }
@@ -59,19 +59,24 @@
     .controls { font-size: .96em; }
     .label { font-size: 13px; font-weight: 600; color: var(--ui-fg); margin: 14px 0 8px; }
     .panel > .label:first-child, .panel-head > .label { font-size: 15px; margin: 0 0 12px; }   /* the panel title */
-    /* a title with icon cells on its right, on the same six-cell grid as the preset row */
-    .panel-head { display: grid; grid-template-columns: repeat(6, 1fr); gap: .35em; align-items: center; margin-bottom: 12px; }
+    /* a heading with icon cells on its right, on the same six-cell grid as the preset row */
+    .panel-head, .section-head { display: grid; grid-template-columns: repeat(6, 1fr); gap: .35em; align-items: center; }
+    .panel-head { margin-bottom: 12px; }
     .panel-head > .label { grid-column: 1 / 5; margin: 0; }
-    .panel .panel-head .seg { display: contents; }
+    /* the cells are 10px taller than the heading text, which centers 5px below the row top,
+       so 9px here keeps the text 14px below the section above, as every other heading */
+    .section-head { margin: 9px 0 8px; }
+    .section-head > .label { grid-column: 1 / 3; margin: 0; }
+    .panel :is(.panel-head, .section-head) .seg { display: contents; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
-    .row > label { width: 3.4em; flex: none; color: var(--ui-muted-fg); }
-    .display-rows .row > label { width: 7.6em; }   /* Point merge, Wall snap, Bubble Diagram */
+    .row > label { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); }
+    .label:has(+ #connections:empty) { display: none; }   /* no door links yet: no empty heading */
     .row .val, .room-row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
 
     /* thin track + outlined thumb */
     input[type=range] {
-      -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0;
+      -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0; margin: 0;   /* no default 2px, so the track lines up with the loss graph */
       height: 4px; border-radius: 3px; background: var(--ui-border); outline: none; cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
@@ -90,13 +95,17 @@
     .roomareas .sw { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--reduce-30); flex: none; }
 
     .seg { display: flex; flex-wrap: wrap; gap: .35em; }
-    .seg button {
+    .seg button, .toggle {
       flex: 1 1 auto; padding: .42em .5em; border: 1px solid var(--ui-border); background: transparent;
       border-radius: 8px; font: inherit; font-size: .85em; color: var(--ui-fg); cursor: pointer;
       transition: background .12s, border-color .12s, color .12s;
     }
-    .seg button:hover:not(.active):not(:disabled) { background: var(--ui-muted); }
-    .seg button.active { background: var(--ui-muted); border-color: var(--ui-fg); color: var(--ui-fg); font-weight: 600; }
+    .seg button:hover:not(.active):not(:disabled), .toggle:hover:not(:has(input:checked)) { background: var(--ui-muted); }
+    .seg button.active, .toggle:has(input:checked) { background: var(--ui-muted); border-color: var(--ui-fg); color: var(--ui-fg); font-weight: 600; }
+    /* an on/off icon cell: the checkbox covers the cell, unseen, so a click anywhere toggles it */
+    .toggle { position: relative; }
+    .toggle input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+    .toggle:has(input:focus-visible) { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
     .seg button:disabled { opacity: .4; cursor: default; }   /* as .tool:disabled */
 
     /* Canvas UI: the plan canvas covers the window (view.resize reads its width and height)
@@ -112,6 +121,7 @@
       --ui-fg: #0a0a0a; --ui-muted: #f5f5f5; --ui-muted-fg: #737373; --ui-border: #e5e5e5;
       --ui-edge: 32px;
       --ui-error: #a12b2b;
+      --ui-label-w: 76px;   /* one label column for every control row and the loss graph */
       --ui-card-shadow: 0 0 0 1px rgba(10, 10, 10, .1), 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -4px rgba(0, 0, 0, .1);
     }
     html, body { height: 100%; overflow: hidden; }
@@ -193,7 +203,7 @@
   .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
-  .roomareas .raswatch { justify-content:flex-start; gap:4px; }
+  .roomareas .raswatch { justify-content:flex-start; gap:4px; color:var(--ui-muted-fg); }   /* a room name is a row label */
   #rooms_v { margin-left:auto; }
   .bubble-help.error, #program-status[data-state=error] { color:var(--ui-error); }
   #program-status { font:11px/1.5 var(--font); margin-top:8px; }
@@ -204,8 +214,8 @@
   /* six equal cells: the five presets, then Draw boundary */
   .panel .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }   /* .panel: beats .panel .seg */
   #presets { display:contents; }
-  .boundary-row button, .panel-head button { display:grid; place-items:center; }
-  .boundary-row .ic, .panel-head .ic { width:20px; height:20px; stroke-width:1.6; }   /* icon cells alike */
+  .boundary-row button, .panel-head button, .section-head :is(button, .toggle) { display:grid; place-items:center; }
+  .boundary-row .ic, .panel-head .ic, .section-head .ic { width:20px; height:20px; stroke-width:1.6; }   /* icon cells alike */
   /* Run, Pause and Resume: the last cell of the Optimization title row, filled as the main action */
   .panel-head #run { grid-column:6; background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }
   .panel-head #run:hover:not(:disabled) { background:#262626; }
@@ -242,6 +252,8 @@
         <symbol id="b-shape_e" viewBox="0 0 24 24"><polygon points="20.69,11.69 16.97,3.00 3.31,3.00 3.31,13.55 7.03,21.00 13.24,21.00 13.24,14.79 20.69,14.79"/></symbol>
         <symbol id="i-walls-raw" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3 10.5 7.5 13 12 11 16.5 12 21"/><path d="M3 12.5 7.5 11 13 12"/></symbol>
         <symbol id="i-walls-aligned" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h9"/></symbol>
+        <symbol id="i-door" viewBox="0 0 24 24"><path d="M11 20H2"/><path d="M11 4.562v16.157a1 1 0 0 0 1.242.97L19 20V5.562a2 2 0 0 0-1.515-1.94l-4-1A2 2 0 0 0 11 4.561z"/><path d="M11 4H8a2 2 0 0 0-2 2v14"/><path d="M14 12h.01"/><path d="M22 20h-3"/></symbol>
+        <symbol id="i-bubbles" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49"/><path d="M15.41 6.51 8.59 10.49"/></symbol>
         <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
         <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
         <symbol id="i-vector-square" viewBox="0 0 24 24"><path d="M19.5 7a24 24 0 0 1 0 10"/><path d="M4.5 7a24 24 0 0 0 0 10"/><path d="M7 19.5a24 24 0 0 0 10 0"/><path d="M7 4.5a24 24 0 0 1 10 0"/><rect x="17" y="17" width="5" height="5" rx="1"/><rect x="17" y="2" width="5" height="5" rx="1"/><rect x="2" y="17" width="5" height="5" rx="1"/><rect x="2" y="2" width="5" height="5" rx="1"/></symbol>
@@ -259,13 +271,7 @@
 
     <div class="controls">
       <section class="panel" data-panel="rooms">
-        <div class="panel-head">
-          <div class="label">Rooms</div>
-          <div class="seg" id="walls">
-            <button data-walls="raw" class="active" aria-label="Raw walls"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
-            <button data-walls="aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
-          </div>
-        </div>
+        <div class="label">Rooms</div>
         <div class="label">Boundary</div>
         <div class="seg boundary-row">
         <div class="seg" id="presets">
@@ -281,20 +287,25 @@
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
-        <div class="row"><label>rooms</label><span class="val" id="rooms_v">6</span></div>
+        <div class="row"><label>Rooms</label><span class="val" id="rooms_v">6</span></div>
         <div class="label">Target area</div>
         <div class="roomareas" id="roomareas"></div>
         <div class="label">Door links</div>
         <div id="connections"></div>
-        <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
         <div id="program-status" role="status"></div>
-        <div class="label">Display</div>
+        <div class="section-head">
+          <div class="label">Display</div>
+          <div class="seg" id="walls">
+            <button data-walls="raw" class="active" aria-label="Raw walls"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
+            <button data-walls="aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
+          </div>
+          <label class="toggle"><input type="checkbox" id="show-doors" aria-label="Doors" checked><svg class="ic"><use href="#i-door"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-bubbles" aria-label="Bubble Diagram" checked><svg class="ic"><use href="#i-bubbles"/></svg></label>
+        </div>
         <div class="display-rows">
-          <div class="row"><label>wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+          <div class="row"><label>Wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
           <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="merge_tol_v">0.020</span></div>
           <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0.02" max="1" step="0.001" value="0.02"><span class="val" id="align_tol_v">0.020</span></div>
-          <div class="row"><label for="show-doors">Doors</label><input type="checkbox" id="show-doors" checked></div>
-          <div class="row"><label for="show-bubbles">Bubble Diagram</label><input type="checkbox" id="show-bubbles" checked></div>
         </div>
       </section>
 
@@ -306,21 +317,22 @@
         <div class="label">Loss weight (0–1)</div>
         <div class="row"><label for="w_wall">L1</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="1.00"><span class="val" id="w_wall_v">1.00</span></div>
         <div class="row"><label for="w_cosine">Cos</label><input id="w_cosine" type="range" min="0" max="1" step="0.01" value="1"><span class="val" id="w_cosine_v">1.00</span></div>
-        <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.50"><span class="val" id="w_area_v">0.50</span></div>
-        <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
-        <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
+        <div class="row"><label>Area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.50"><span class="val" id="w_area_v">0.50</span></div>
+        <div class="row"><label>Lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
+        <div class="row"><label>Topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
         <div class="label">Run settings</div>
-        <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
-        <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
-        <div class="row"><label>seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
+        <div class="row"><label>Sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
+        <div class="row"><label>Iterations</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
+        <div class="row"><label>LR</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
+        <div class="row"><label>Seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
         <div class="label">Loss</div>
         <div class="losspanel" id="losspanel">
-          <div class="lossrow"><span class="lk">total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
+          <div class="lossrow"><span class="lk">Total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
           <div class="lossrow"><span class="lk">L1</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
           <div class="lossrow"><span class="lk">Cos</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_cosine" /></svg></div>
-          <div class="lossrow"><span class="lk">area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
-          <div class="lossrow"><span class="lk">lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
-          <div class="lossrow"><span class="lk">topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
+          <div class="lossrow"><span class="lk">Area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
+          <div class="lossrow"><span class="lk">Lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
+          <div class="lossrow"><span class="lk">Topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
           <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_cosine"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
         </div>
       </section>
@@ -382,9 +394,10 @@ const tip = document.createElement('div');
 tip.className = 'tip';
 tip.setAttribute('aria-hidden', 'true');   // the button's own aria-label is its accessible name
 document.body.append(tip);
-const TIP_CELLS = '.boundary-row button, .panel-head button';
+const TIP_CELLS = '.boundary-row button, .panel-head button, .section-head :is(button, .toggle)';
 function showTip(button) {
-  tip.textContent = button.getAttribute('aria-label');
+  // a toggle cell is a label; its name is on the checkbox inside
+  tip.textContent = button.getAttribute('aria-label') ?? button.querySelector('[aria-label]').getAttribute('aria-label');
   const r = button.getBoundingClientRect(), w = tip.offsetWidth;
   tip.style.left = Math.min(Math.max(r.left + r.width / 2 - w / 2, 4), innerWidth - w - 4) + 'px';
   tip.style.top = r.bottom + 6 + 'px';
@@ -392,7 +405,7 @@ function showTip(button) {
 }
 const hideTip = () => tip.classList.remove('shown');
 document.addEventListener('pointerover', e => { const b = e.target.closest?.(TIP_CELLS); if (b) showTip(b); else hideTip(); });
-document.addEventListener('focusin', e => { const b = e.target.closest?.(TIP_CELLS); if (b?.matches(':focus-visible')) showTip(b); });
+document.addEventListener('focusin', e => { const b = e.target.closest?.(TIP_CELLS); if (b && e.target.matches(':focus-visible')) showTip(b); });
 document.addEventListener('focusout', hideTip);
 // A press moves focus, and focusout hides the name; after the click (which can rename Run to
 // Pause) the name shows again with the new label.
