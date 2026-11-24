@@ -4,10 +4,10 @@ import {inside,segmentDistance} from './geom.js';
  * Left-button room editing with no tool modes, active only while enabled (the Rooms panel is
  * open). What is under the pointer decides the action: the round handle resizes, the link dot on
  * a hovered room drags a door link to another room, a room moves, and empty plan draws a new room
- * (`ensureProgram` supplies a program on the first one). The view owns projection and the program
- * owns validity.
+ * (`ensureProgram` supplies a program on the first one). A press outside `boundary()` does nothing.
+ * The view owns projection and the program owns validity.
  */
-export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,onStatus,ensureProgram}) {
+export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,onStatus,ensureProgram,boundary}) {
     let model=null,enabled=false,selected=null,selectedLink=null,press=null,draft=null,visible=true,hover=null;
     const empty={rooms:[],links:[],ratios:[]};
     const snapshot=()=>model?model.snapshot():empty;
@@ -75,13 +75,16 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
         if(e.button!==0||!enabled||!visible)return;
         const p=view.pointOnPlan(e.clientX,e.clientY);if(!p)return;
         const s=snapshot();
-        canvas.focus({preventScroll:true});
-        selectedLink=null;
         const active=s.rooms.find(r=>r.id===selected);
         const hp=active?view.screenPoint([active.center[0]+active.radius,active.center[1]]):null;
+        const onHandle=hp&&Math.hypot(e.clientX-hp[0],e.clientY-hp[1])<=9;
         const hit=roomAt(p,s);
         const hovered=s.rooms.find(r=>r.id===hover);
-        if(hp&&Math.hypot(e.clientX-hp[0],e.clientY-hp[1])<=9) press={kind:'resize',original:active,start:p};
+        const ring=model?.boundary??boundary();
+        if(!onHandle&&!onDot(hovered,e.clientX,e.clientY)&&!hit&&!(ring&&inside(p,ring)))return;
+        canvas.focus({preventScroll:true});
+        selectedLink=null;
+        if(onHandle) press={kind:'resize',original:active,start:p};
         else if(onDot(hovered,e.clientX,e.clientY)) press={kind:'link',from:hovered,target:null,pointer:[e.clientX,e.clientY]};
         else if(hit){selected=hit.id;press={kind:'move',original:hit,start:p};}
         else{
@@ -90,8 +93,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
             if(edge)selectedLink=pairKey(s.rooms[edge[0]].id,s.rooms[edge[1]].id);
             else{
                 model??=ensureProgram();
-                if(model&&inside(p,model.boundary))press={kind:'draw',start:p,center:p};
-                else if(model)onStatus('Start the circle inside the boundary.');
+                if(model)press={kind:'draw',start:p,center:p};
             }
         }
         if(press){

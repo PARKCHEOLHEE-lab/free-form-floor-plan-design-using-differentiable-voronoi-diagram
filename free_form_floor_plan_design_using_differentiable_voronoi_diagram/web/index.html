@@ -491,7 +491,7 @@ const roomCount = () => currentProgram()?.snapshot().rooms.length ?? roomRatios.
 const colorForRoomId = id => COLORS[(id-1)%COLORS.length];
 const bubbleHelp = $('bubble-message').textContent;
 const editor = createBubbleEditor($('plan'),view,{
-  labels:$('bubble-labels'),colorForRoomId,ensureProgram:()=>ensureProgram(),
+  labels:$('bubble-labels'),colorForRoomId,ensureProgram:()=>ensureProgram(),boundary:()=>boundaryRing,
   onChange({commit,selectionOnly}) {
     if(selectionOnly){refreshRoomReadout();return;}
     if(!editingBubbles){editingBubbles=true;stop();}

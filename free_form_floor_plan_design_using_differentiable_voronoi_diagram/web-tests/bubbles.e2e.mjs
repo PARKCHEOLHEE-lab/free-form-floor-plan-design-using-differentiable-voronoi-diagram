@@ -180,8 +180,8 @@ test('linking and deleting circles updates visible door links and keeps the rema
         assert.equal(await edge.count(),1,'the same pair cannot acquire duplicate door links');
         await edge.click();
         assert.equal(await page.locator('.connection-row.selected').count(),1,'the sidebar selects a link too');
-        await page.mouse.click(1050,650);
-        assert.equal(await page.locator('.connection-row.selected').count(),0);
+        await page.mouse.click(665,450);
+        assert.equal(await page.locator('.connection-row.selected').count(),0,'a click on empty space inside the boundary clears the selection');
         await page.mouse.click(665,530);
         assert.equal(await page.locator('.connection-row.selected').count(),1,'clicking the rendered line selects it');
         await page.keyboard.press('Delete');
@@ -341,5 +341,29 @@ test('bubble diagram: the Delete key removes the selected room or door even afte
         await page.locator('.room-row[data-room-id="3"]').click();await page.locator('#sites').focus();await page.locator('.panel[data-panel=rooms] .label').first().click();
         await page.keyboard.press('Backspace');
         assert.deepEqual((await labels(page)).map(r=>r.id),[1,2],'Backspace (the Mac delete key) removes the selected room');
+    }finally{await browser.close();proc.kill();}
+});
+
+test('bubble diagram: a click or drag outside the boundary changes nothing, shows no error and keeps the selection',{timeout:90000},async()=>{
+    const {url,proc}=await serve();const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage({viewport:{width:1145,height:820}});
+        await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
+        await page.waitForFunction(()=>{const s=document.querySelector('#status').textContent;return s.startsWith('shape_a')&&s.includes('ready');});
+        await page.click('.gizmo [data-axis="+z"]');
+        const outside=[1100,800],message=page.locator('#bubble-message');
+        const help=await message.textContent(),presetRooms=await page.locator('#rooms_v').textContent();
+        await page.mouse.click(...outside);
+        assert.equal(await page.locator('#rooms_v').textContent(),presetRooms,'an outside click keeps the preset rooms');
+        assert.equal(await message.textContent(),help,'an outside click shows no message');
+        assert.equal(await message.evaluate(m=>m.classList.contains('error')),false);
+        await drag(page,[600,450],[620,450]);
+        assert.equal(await page.locator('.room-row.selected').count(),1,'the new room is selected');
+        await page.mouse.click(...outside);
+        assert.equal(await page.locator('.room-row.selected').count(),1,'an outside click keeps the selection');
+        await drag(page,outside,[outside[0]-40,outside[1]]);
+        assert.equal((await labels(page)).length,1,'an outside drag draws nothing');
+        assert.equal(await message.textContent(),help,'an outside drag shows no message');
     }finally{await browser.close();proc.kill();}
 });
