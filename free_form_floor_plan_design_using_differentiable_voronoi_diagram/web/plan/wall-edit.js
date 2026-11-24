@@ -16,6 +16,9 @@ const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
 const unit = (v) => { const l = Math.hypot(v[0], v[1]); return [v[0] / l, v[1] / l]; };
 const span = (g, e) => Math.hypot(...sub(point(g, e.a), point(g, e.b)));
 
+/** The rooms with a ring that uses one of the corners `ids`. */
+const usersOf = (g, ids) => g.rooms.map((rings, r) => (rings.some((ring) => ring.some((x) => ids.has(x))) ? r : -1)).filter((r) => r >= 0);
+
 /** A corner and the corners on the same point (joined by walls of no length). */
 function twinsOf(g, id, all) {
     const group = new Set([id]);
@@ -80,15 +83,53 @@ export function wallRun(g, a, b) {
             if ((k > 0) === (rate > 0)) hi = Math.min(hi, limit); else lo = Math.max(lo, limit);
         }
     }
-    const rooms = g.rooms.map((rings, r) => (rings.some((ring) => ring.some((id) => slides.has(id))) ? r : -1)).filter((r) => r >= 0);
-    return { edges, corners, rooms, origin, normal, slides, range: [lo, hi], locked };
+    return { edges, corners, rooms: usersOf(g, new Set(slides.keys())), origin, normal, slides, range: [lo, hi], locked };
+}
+
+/**
+ * A check that h, a changed copy of plan g, is still a plan: none of the `changed` walls (pairs of
+ * corner ids, as they are in h) crosses another wall or newly touches a corner or gets shorter than
+ * MIN_WALL (or than it already was), and each of the `rooms` keeps its rings and their orientation.
+ * (Rings are not required to be simple: alignment can leave a ring touching itself.)
+ */
+function stillAPlan(g, changed, rooms) {
+    const sides = rooms.map((r) => roomRings(g, r).map((ring) => Math.sign(signedArea2(ring))));
+    const side = (a, b, c) => cross(sub(b, a), sub(c, a));
+    const crosses = (h, e, f) => {
+        if (e.a === f.a || e.a === f.b || e.b === f.a || e.b === f.b) return false;
+        const [p1, p2, q1, q2] = [point(h, e.a), point(h, e.b), point(h, f.a), point(h, f.b)];
+        return side(p1, p2, q1) * side(p1, p2, q2) < 0 && side(q1, q2, p1) * side(q1, q2, p2) < 0;
+    };
+    // a corner lying on a changed wall it does not end (corners on one point as its ends are its twins)
+    const touches = (h) => {
+        const found = new Set();
+        for (const e of changed) {
+            const a = point(h, e.a), b = point(h, e.b);
+            for (const [id, c] of h.corners) {
+                const p = [c.x, c.y];
+                if (Math.hypot(...sub(p, a)) < TOL || Math.hypot(...sub(p, b)) < TOL) continue;
+                if (segmentDistance(p, a, b) < TOL) found.add(`${id}:${e.a},${e.b}`);
+            }
+        }
+        return found;
+    };
+    const touching = touches(g);
+    return (h) => {
+        const edges = wallEdges(h);
+        return changed.every((e) => span(h, e) >= Math.min(MIN_WALL, span(g, e)) - TOL) &&
+            changed.every((e) => edges.every((f) => !crosses(h, e, f))) &&
+            [...touches(h)].every((k) => touching.has(k)) &&
+            rooms.every((r, k) => {
+                const rings = roomRings(h, r);
+                return rings.length === sides[k].length && rings.every((ring, i) => Math.sign(signedArea2(ring)) === sides[k][i]);
+            });
+    };
 }
 
 /**
  * Move a run by `offset` along its normal, clamped to its range and then to the largest offset at
  * which no moved wall crosses or newly touches another wall or corner or gets shorter than
- * MIN_WALL (or than it already was), and every room beside it keeps its orientation.
- * (Rings are not required to be simple: alignment can leave a ring touching itself.)
+ * MIN_WALL (or than it already was), and every room beside it keeps its orientation (stillAPlan).
  * Returns { graph, offset }, or null for a locked run.
  */
 export function moveRun(g, run, offset) {
@@ -102,34 +143,7 @@ export function moveRun(g, run, offset) {
         }
         return { corners, rooms: g.rooms.map((rings) => rings.map((ring) => [...ring])) };
     };
-    const sides = run.rooms.map((r) => roomRings(g, r).map((ring) => Math.sign(signedArea2(ring))));
-    const edges = wallEdges(g);
-    const movedEdges = edges.filter((e) => run.slides.has(e.a) || run.slides.has(e.b));
-    const side = (a, b, c) => cross(sub(b, a), sub(c, a));
-    const crosses = (h, e, f) => {
-        if (e.a === f.a || e.a === f.b || e.b === f.a || e.b === f.b) return false;
-        const [p1, p2, q1, q2] = [point(h, e.a), point(h, e.b), point(h, f.a), point(h, f.b)];
-        return side(p1, p2, q1) * side(p1, p2, q2) < 0 && side(q1, q2, p1) * side(q1, q2, p2) < 0;
-    };
-    // a corner lying on a moved wall it does not end (corners on one point as its ends are its twins)
-    const touches = (h) => {
-        const found = new Set();
-        for (const e of movedEdges) {
-            const a = point(h, e.a), b = point(h, e.b);
-            for (const [id, c] of h.corners) {
-                const p = [c.x, c.y];
-                if (Math.hypot(...sub(p, a)) < TOL || Math.hypot(...sub(p, b)) < TOL) continue;
-                if (segmentDistance(p, a, b) < TOL) found.add(`${id}:${e.a},${e.b}`);
-            }
-        }
-        return found;
-    };
-    const touching = touches(g);
-    const span = (h, e) => Math.hypot(...sub(point(h, e.a), point(h, e.b)));
-    const valid = (h) => movedEdges.every((e) => span(h, e) >= Math.min(MIN_WALL, span(g, e)) - TOL) &&
-        movedEdges.every((e) => edges.every((f) => !crosses(h, e, f))) &&
-        [...touches(h)].every((k) => touching.has(k)) &&
-        run.rooms.every((r, k) => roomRings(h, r).every((ring, i) => Math.sign(signedArea2(ring)) === sides[k][i]));
+    const valid = stillAPlan(g, wallEdges(g).filter((e) => run.slides.has(e.a) || run.slides.has(e.b)), run.rooms);
     let t = Math.min(Math.max(offset, run.range[0]), run.range[1]);
     if (!valid(moved(t))) {
         let ok = 0;
@@ -160,8 +174,7 @@ export function moveCorner(g, id, target) {
         const along = dot(d, dirs[0]);
         d = [dirs[0][0] * along, dirs[0][1] * along];
     }
-    const rooms = g.rooms.map((rings, r) => (rings.some((ring) => ring.some((x) => twins.has(x))) ? r : -1)).filter((r) => r >= 0);
-    const run = { slides: new Map([...twins].map((x) => [x, d])), rooms, range: [0, 1], locked: false };
+    const run = { slides: new Map([...twins].map((x) => [x, d])), rooms: usersOf(g, twins), range: [0, 1], locked: false };
     const { graph } = moveRun(g, run, 1);
     return { graph, point: point(graph, id) };
 }
@@ -205,6 +218,48 @@ export function snapCorner(g, id, p, { project, shift, start, boundary }) {
         if (d < nearest) { nearest = d; snapped = { ...result, from }; }
     }
     return snapped ?? { point: p, kind: "free" };
+}
+
+/**
+ * Delete a corner where exactly two walls meet: it leaves every ring, so its two walls become one
+ * straight wall between its neighbours. Refused (null) where three or more walls meet, where the
+ * boundary bends, for a corner sharing its point with another, and when the new wall would not
+ * leave a plan (stillAPlan: crossing, touching, too short, a room turned over or gone).
+ */
+export function removeCorner(g, id) {
+    const all = wallEdges(g);
+    if (twinsOf(g, id, all).size > 1) return null;
+    const walls = all.filter((e) => e.a === id || e.b === id);
+    if (walls.length !== 2) return null;
+    const [a, b] = walls.map((e) => (e.a === id ? e.b : e.a));
+    const p = point(g, id);
+    if (g.corners.get(id).fixed && Math.abs(cross(unit(sub(point(g, a), p)), unit(sub(point(g, b), p)))) > TOL) return null; // the boundary bends here
+    const h = {
+        corners: new Map([...g.corners].filter(([x]) => x !== id).map(([x, c]) => [x, { ...c }])),
+        rooms: g.rooms.map((rings) => rings.map((ring) => ring.filter((x) => x !== id))),
+    };
+    return stillAPlan(g, [{ a, b }], usersOf(g, new Set([id])))(h) ? h : null;
+}
+
+/**
+ * Add a corner on the wall a-b at the point nearest to p (kept MIN_WALL from both ends), in every
+ * ring that runs along that wall, so the areas stay the same; on the boundary it is a boundary
+ * corner. Returns { graph, id }, or null when a-b is not a wall or too short to split.
+ */
+export function addCorner(g, a, b, p) {
+    const wall = wallEdges(g).find((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
+    if (!wall || span(g, wall) < 2 * MIN_WALL) return null;
+    const A = point(g, a);
+    const u = unit(sub(point(g, b), A));
+    const s = Math.min(Math.max(dot(sub(p, A), u), MIN_WALL), span(g, wall) - MIN_WALL);
+    const id = Math.max(...g.corners.keys()) + 1;
+    const corners = new Map([...g.corners].map(([x, c]) => [x, { ...c }]));
+    corners.set(id, { x: A[0] + u[0] * s, y: A[1] + u[1] * s, fixed: wall.rooms.length === 1 });
+    const rooms = g.rooms.map((rings) => rings.map((ring) => ring.flatMap((x, i) => {
+        const next = ring[(i + 1) % ring.length];
+        return (x === a && next === b) || (x === b && next === a) ? [x, id] : [x];
+    })));
+    return { graph: { corners, rooms }, id };
 }
 
 /** Each room's share of the plan area (holes subtract). */

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { moveCorner, moveRun, roomShares, snapCorner, snapOffset, wallRun } from "../web/plan/wall-edit.js";
+import { addCorner, moveCorner, moveRun, removeCorner, roomShares, snapCorner, snapOffset, wallRun } from "../web/plan/wall-edit.js";
 import { SNAP_LABELS } from "../web/plan/boundary-editor.js";
 import { alignPlan } from "../web/plan/align.js";
 import { fromCells, roomRings, wallEdges } from "../web/plan/graph.js";
@@ -236,4 +236,56 @@ test("a dragged corner snaps like Draw boundary to corners, wall midpoints, boun
     // the radius is in screen pixels: the same plan distance snaps when zoomed out
     assert.equal(snap([-0.8, -0.8]).kind, "free", "28 px from the corner at 100 px per unit");
     assert.equal(label(snap([-0.8, -0.8], 20)), "Endpoint", "6 px from the corner at 20 px per unit");
+});
+
+test("deleting a corner where two walls meet joins them, junctions and boundary bends and crossing results are refused, and adding a corner splits a wall with the areas unchanged", () => {
+    const round = (v) => +v.toFixed(12);
+    // a wall between R0 and R1 bends at (0.2, 0); deleting that corner makes it one straight wall
+    const bent = fromCells([
+        { room: 0, ring: [[-1, -1], [0, -1], [0.2, 0], [0, 1], [-1, 1]] },
+        { room: 1, ring: [[0, -1], [1, -1], [1, 1], [0, 1], [0.2, 0]] },
+    ], square, { roomCount: 2, simplifyTol: 0 });
+    const kink = idAt(bent, 0.2, 0);
+    const straight = removeCorner(bent, kink);
+    assert.ok(straight, "a corner with two walls can be deleted");
+    assert.ok(!straight.corners.has(kink) && straight.rooms.every((rings) => rings.every((ring) => !ring.includes(kink))), "the corner is gone from every room");
+    assert.deepEqual(areas(straight).map(round), [2, 2], "the wall now runs straight from (0, -1) to (0, 1)");
+    assert.ok(bent.corners.has(kink), "the original plan is left as it was");
+
+    const g = threeRooms();
+    assert.equal(removeCorner(g, idAt(g, 0, 0)), null, "a corner where three walls meet stays");
+    assert.equal(removeCorner(g, idAt(g, 1, 1)), null, "a corner where the boundary bends stays");
+
+    // deleting this corner would run the new wall through the small room R2
+    const island = {
+        corners: new Map([
+            [1, { x: -1, y: -1, fixed: true }], [2, { x: 0, y: -1, fixed: true }], [3, { x: 0.8, y: 0, fixed: false }],
+            [4, { x: 0, y: 1, fixed: true }], [5, { x: -1, y: 1, fixed: true }], [6, { x: 1, y: -1, fixed: true }], [7, { x: 1, y: 1, fixed: true }],
+            [8, { x: -0.1, y: -0.1, fixed: false }], [9, { x: 0.1, y: -0.1, fixed: false }], [10, { x: 0.1, y: 0.1, fixed: false }], [11, { x: -0.1, y: 0.1, fixed: false }],
+        ]),
+        rooms: [[[1, 2, 3, 4, 5], [8, 11, 10, 9]], [[2, 6, 7, 4, 3]], [[8, 9, 10, 11]]],
+    };
+    assert.equal(removeCorner(island, 3), null, "a delete whose new wall would cross another wall is refused");
+
+    // adding a corner on the stem splits it in both rooms beside it; no area changes
+    const added = addCorner(g, idAt(g, 0, 0), idAt(g, 1, 0), [0.4, 0.03]);
+    assert.ok(added && !g.corners.has(added.id), "the new corner has a new id");
+    assert.deepEqual(at(added.graph, added.id).map(round), [0.4, 0], "the corner lands on the wall");
+    assert.deepEqual(areas(added.graph).map(round), [2, 1, 1], "the areas stay exactly the same");
+    const users = added.graph.rooms.map((rings, r) => (rings.some((ring) => ring.includes(added.id)) ? r : -1)).filter((r) => r >= 0);
+    assert.deepEqual(users, [1, 2], "both rooms beside the wall get the corner");
+    for (const r of users) for (const ring of added.graph.rooms[r]) {
+        const i = ring.indexOf(added.id);
+        if (i < 0) continue;
+        const pair = [ring[(i + ring.length - 1) % ring.length], ring[(i + 1) % ring.length]].sort();
+        assert.deepEqual(pair, [idAt(g, 0, 0), idAt(g, 1, 0)].sort(), "it sits between the two ends of the wall");
+    }
+    assert.equal(g.corners.size, 8, "the original plan is left as it was");
+
+    // a corner added on the boundary is a boundary corner; deleting it gives the plan back
+    const edge = addCorner(g, idAt(g, 1, 0), idAt(g, 1, 1), [1.1, 0.5]);
+    assert.deepEqual(at(edge.graph, edge.id).map(round), [1, 0.5]);
+    assert.equal(edge.graph.corners.get(edge.id).fixed, true);
+    const back = removeCorner(edge.graph, edge.id);
+    assert.deepEqual([back.corners.size, areas(back).map(round)], [8, [2, 1, 1]]);
 });
