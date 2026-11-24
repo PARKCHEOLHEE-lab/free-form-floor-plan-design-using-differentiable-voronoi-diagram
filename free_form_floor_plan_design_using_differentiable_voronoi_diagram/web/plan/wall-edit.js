@@ -8,6 +8,8 @@ import { segmentDistance, signedArea2 } from "./geom.js";
 const TOL = 1e-9;
 const KINK = Math.sin(10 * Math.PI / 180); // walls within 10 degrees count as one straight line (alignment leaves small kinks)
 const MIN_WALL = 0.01;  // the shortest wall a move may leave (plan units)
+const SNAP_ANGLE = 5 * Math.PI / 180; // a turned wall within 5 degrees of a boundary direction lines up with it (as Draw boundary)
+const STEP = 15 * Math.PI / 180;      // Shift turns a wall in 15 degree steps
 
 const point = (g, id) => [g.corners.get(id).x, g.corners.get(id).y];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
@@ -54,14 +56,15 @@ export function wallRun(g, a, b) {
     const corners = [...new Set(edges.flat())];
 
     const slides = new Map(); // corner -> its movement per unit of offset
+    const guideOf = new Map(); // corner -> the direction it slides along (null: it moves with the wall)
     let lo = -Infinity, hi = Infinity, locked = false;
     for (const id of corners) {
         if (slides.has(id)) continue; // a twin already placed
         const twins = twinsOf(g, id, all);
         const p = point(g, id);
         const meeting = all.filter((e) => (twins.has(e.a) || twins.has(e.b)) && !inRun.has(`${e.a},${e.b}`) && length(e) >= TOL);
-        const place = (v) => { for (const x of twins) slides.set(x, v); };
-        if (!meeting.length) { place(normal); continue; } // a point inside the straight wall moves with it
+        const place = (v, w) => { for (const x of twins) { slides.set(x, v); guideOf.set(x, w); } };
+        if (!meeting.length) { place(normal, null); continue; } // a point inside the straight wall moves with it
         const fixed = [...twins].some((x) => g.corners.get(x).fixed);
         // a boundary corner slides along the boundary; an inner one along the wall most across the run
         const guides = fixed ? meeting.filter((e) => e.rooms.length === 1) : meeting;
@@ -75,7 +78,7 @@ export function wallRun(g, a, b) {
         const along = dot(w, normal);
         if (Math.abs(along) < KINK) { locked = true; break; }
         const rate = 1 / along;
-        place([w[0] * rate, w[1] * rate]);
+        place([w[0] * rate, w[1] * rate], w);
         // stop before any wall this corner slides along gets shorter than MIN_WALL
         for (const q of others) {
             const k = dot(sub(q, p), w);
@@ -83,7 +86,10 @@ export function wallRun(g, a, b) {
             if ((k > 0) === (rate > 0)) hi = Math.min(hi, limit); else lo = Math.max(lo, limit);
         }
     }
-    return { edges, corners, rooms: usersOf(g, new Set(slides.keys())), origin, normal, slides, range: [lo, hi], locked };
+    const along = corners.map((id) => dot(sub(point(g, id), origin), u));
+    const half = (Math.min(...along) + Math.max(...along)) / 2;
+    const mid = [origin[0] + u[0] * half, origin[1] + u[1] * half];
+    return { edges, corners, rooms: usersOf(g, new Set(slides.keys())), origin, normal, dir: u, mid, slides, guides: guideOf, range: [lo, hi], locked };
 }
 
 /**
@@ -126,6 +132,18 @@ function stillAPlan(g, changed, rooms) {
     };
 }
 
+/** The largest step toward t (from 0) whose plan at(step) is valid: t itself, or found by 40 halvings. */
+function settle(valid, at, t) {
+    const ok = (s) => { const h = at(s); return !!h && valid(h); };
+    if (ok(t)) return t;
+    let good = 0;
+    for (let i = 0; i < 40; i++) {
+        const mid = (good + t) / 2;
+        if (ok(mid)) good = mid; else t = mid;
+    }
+    return good;
+}
+
 /**
  * Move a run by `offset` along its normal, clamped to its range and then to the largest offset at
  * which no moved wall crosses or newly touches another wall or corner or gets shorter than
@@ -144,15 +162,7 @@ export function moveRun(g, run, offset) {
         return { corners, rooms: g.rooms.map((rings) => rings.map((ring) => [...ring])) };
     };
     const valid = stillAPlan(g, wallEdges(g).filter((e) => run.slides.has(e.a) || run.slides.has(e.b)), run.rooms);
-    let t = Math.min(Math.max(offset, run.range[0]), run.range[1]);
-    if (!valid(moved(t))) {
-        let ok = 0;
-        for (let i = 0; i < 40; i++) {
-            const mid = (ok + t) / 2;
-            if (valid(moved(mid))) ok = mid; else t = mid;
-        }
-        t = ok;
-    }
+    const t = settle(valid, moved, Math.min(Math.max(offset, run.range[0]), run.range[1]));
     return { graph: moved(t), offset: t };
 }
 
@@ -260,6 +270,59 @@ export function addCorner(g, a, b, p) {
         return (x === a && next === b) || (x === b && next === a) ? [x, id] : [x];
     })));
     return { graph: { corners, rooms }, id };
+}
+
+/**
+ * Turn a run by `angle` (radians, counter-clockwise) about its middle. Each corner that slides in a
+ * wall move slides along the same wall here, to where that wall meets the turned line, so the walls
+ * it meets keep their direction and a boundary corner stays on the boundary; a point inside the
+ * straight wall turns with it. The turn stops at the last valid angle (stillAPlan). Returns
+ * { graph, angle }, or null for a locked run.
+ */
+export function rotateRun(g, run, angle) {
+    if (!run || run.locked) return null;
+    const turned = (a) => {
+        const c = Math.cos(a), s = Math.sin(a);
+        const v = [run.dir[0] * c - run.dir[1] * s, run.dir[0] * s + run.dir[1] * c];
+        const corners = new Map([...g.corners].map(([id, k]) => [id, { ...k }]));
+        for (const [id, w] of run.guides) {
+            const r = sub(point(g, id), run.mid);
+            let q;
+            if (!w) q = [run.mid[0] + r[0] * c - r[1] * s, run.mid[1] + r[0] * s + r[1] * c];
+            else {
+                const across = cross(v, w);
+                if (Math.abs(across) < TOL) return null; // the turned wall runs along this guide
+                const k = -cross(v, r) / across;
+                q = [run.mid[0] + r[0] + w[0] * k, run.mid[1] + r[1] + w[1] * k];
+            }
+            Object.assign(corners.get(id), { x: q[0], y: q[1] });
+        }
+        return { corners, rooms: g.rooms.map((rings) => rings.map((ring) => [...ring])) };
+    };
+    const valid = stillAPlan(g, wallEdges(g).filter((e) => run.guides.has(e.a) || run.guides.has(e.b)), run.rooms);
+    const a = settle(valid, turned, angle);
+    return { graph: turned(a), angle: a };
+}
+
+/**
+ * Snap a turn of `angle` the way Draw boundary snaps a direction: within 5 degrees of parallel or
+ * perpendicular to a boundary edge the turned wall lines up with it ('parallel', 'perpendicular').
+ * With Shift the turn goes in 15 degree steps ('step'). Returns { angle, kind }.
+ */
+export function snapAngle(run, angle, { boundary, shift }) {
+    if (shift) return { angle: Math.round(angle / STEP) * STEP, kind: "step" };
+    const heading = Math.atan2(run.dir[1], run.dir[0]) + angle;
+    let best = null;
+    boundary.forEach((a, i) => {
+        const b = boundary[(i + 1) % boundary.length];
+        const edge = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        const off = heading - edge;
+        const quarter = Math.round(off / (Math.PI / 2));
+        const miss = off - quarter * (Math.PI / 2);
+        if (Math.abs(miss) <= SNAP_ANGLE && (!best || Math.abs(miss) < Math.abs(best.miss)))
+            best = { miss, kind: Math.abs(quarter) % 2 ? "perpendicular" : "parallel" };
+    });
+    return best ? { angle: angle - best.miss, kind: best.kind } : { angle, kind: "free" };
 }
 
 /** Each room's share of the plan area (holes subtract). */

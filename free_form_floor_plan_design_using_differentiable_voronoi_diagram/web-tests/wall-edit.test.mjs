@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { addCorner, moveCorner, moveRun, removeCorner, roomShares, snapCorner, snapOffset, wallRun } from "../web/plan/wall-edit.js";
+import { addCorner, moveCorner, moveRun, removeCorner, roomShares, rotateRun, snapAngle, snapCorner, snapOffset, wallRun } from "../web/plan/wall-edit.js";
 import { SNAP_LABELS } from "../web/plan/boundary-editor.js";
 import { alignPlan } from "../web/plan/align.js";
 import { fromCells, roomRings, wallEdges } from "../web/plan/graph.js";
@@ -288,4 +288,49 @@ test("deleting a corner where two walls meet joins them, junctions and boundary 
     assert.equal(edge.graph.corners.get(edge.id).fixed, true);
     const back = removeCorner(edge.graph, edge.id);
     assert.deepEqual([back.corners.size, areas(back).map(round)], [8, [2, 1, 1]]);
+});
+
+test("rotating a wall turns its straight run about its middle while the walls it meets keep their direction, stops before a wall vanishes, and snaps its angle", () => {
+    const g = threeRooms();
+    const round = (p) => p.map((v) => +v.toFixed(9));
+    const a = 0.1, tan = Math.tan(a);
+
+    // the long wall turns about the T junction at its middle; its ends slide along the boundary
+    const long = wallRun(g, idAt(g, 0, 0), idAt(g, 0, 1));
+    const turned = rotateRun(g, long, a);
+    assert.ok(Math.abs(turned.angle - a) < 1e-12);
+    assert.deepEqual(round(at(turned.graph, idAt(g, 0, -1))), round([tan, -1]), "the bottom end slides along the bottom boundary");
+    assert.deepEqual(round(at(turned.graph, idAt(g, 0, 1))), round([-tan, 1]), "the top end slides along the top boundary");
+    assert.deepEqual(round(at(turned.graph, idAt(g, 0, 0))), [0, 0], "the middle stays");
+    assert.deepEqual(areas(turned.graph).map((v) => +v.toFixed(9)), [2, 1 + tan / 2, 1 - tan / 2].map((v) => +v.toFixed(9)));
+    assert.deepEqual(areas(g), [2, 1, 1], "the original plan is left as it was");
+
+    // the stem turns about its middle; its T junction slides along the long wall, its end along the boundary
+    const stem = wallRun(g, idAt(g, 0, 0), idAt(g, 1, 0));
+    const tilted = rotateRun(g, stem, a);
+    assert.deepEqual(round(at(tilted.graph, idAt(g, 0, 0))), round([0, -tan / 2]));
+    assert.deepEqual(round(at(tilted.graph, idAt(g, 1, 0))), round([1, tan / 2]));
+
+    // turned too far, the bottom end would pass the boundary corner: it stops just before
+    const far = rotateRun(g, long, 1.2);
+    assert.ok(far.angle > 0.75 && far.angle < Math.atan(1), `stopped at ${far.angle}`);
+    assert.ok(areas(far.graph).every((v) => v > 0));
+
+    // a wall that ends at a bend of the boundary cannot turn
+    const L = [[-1, -1], [1, -1], [1, 0], [0, 0], [0, 1], [-1, 1]];
+    const bend = fromCells([
+        { room: 0, ring: [[-1, -1], [0, -1], [0, 0], [0, 1], [-1, 1]] },
+        { room: 1, ring: [[0, -1], [1, -1], [1, 0], [0, 0]] },
+    ], L, { roomCount: 2, simplifyTol: 0 });
+    assert.equal(rotateRun(bend, wallRun(bend, idAt(bend, 0, -1), idAt(bend, 0, 0)), 0.1), null);
+
+    // the angle snaps within 5 degrees of a boundary direction; Shift turns in 15 degree steps
+    const deg = Math.PI / 180;
+    const square0 = snapAngle(long, 3 * deg, { boundary: square, shift: false });
+    assert.ok(Math.abs(square0.angle) < 1e-12 && ["Parallel", "Perpendicular"].includes(SNAP_LABELS[square0.kind]), `3 degrees off: ${JSON.stringify(square0)}`);
+    const square90 = snapAngle(long, 94 * deg, { boundary: square, shift: false });
+    assert.ok(Math.abs(square90.angle - 90 * deg) < 1e-12 && ["Parallel", "Perpendicular"].includes(SNAP_LABELS[square90.kind]));
+    assert.deepEqual(snapAngle(long, 17 * deg, { boundary: square, shift: false }), { angle: 17 * deg, kind: "free" }, "17 degrees off: no snap");
+    assert.ok(Math.abs(snapAngle(long, 17 * deg, { boundary: square, shift: true }).angle - 15 * deg) < 1e-12, "Shift: 17 degrees turns 15");
+    assert.ok(Math.abs(snapAngle(long, 23 * deg, { boundary: square, shift: true }).angle - 30 * deg) < 1e-12, "Shift: 23 degrees turns 30");
 });
