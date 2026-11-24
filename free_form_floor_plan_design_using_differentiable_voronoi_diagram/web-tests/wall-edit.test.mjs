@@ -3,7 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { moveRun, roomShares, wallRun } from "../web/plan/wall-edit.js";
+import { moveRun, roomShares, snapOffset, wallRun } from "../web/plan/wall-edit.js";
+import { SNAP_LABELS } from "../web/plan/boundary-editor.js";
 import { alignPlan } from "../web/plan/align.js";
 import { fromCells, roomRings, wallEdges } from "../web/plan/graph.js";
 import { isSimpleBoundary, openRing, segmentDistance, signedArea2 } from "../web/plan/geom.js";
@@ -99,4 +100,29 @@ test("dragging a wall moves its straight run, changes only the rooms beside it, 
         result.graph.rooms.forEach((rings, k) => roomRings(result.graph, k).forEach((ring) => assert.ok(isSimpleBoundary(ring), `room ${k} stays a simple shape`)));
     }
     assert.ok(moved >= 5, `${moved} walls of preset E can move`);
+});
+
+test("a dragged wall snaps to a corner or a wall midpoint within 10 screen pixels", () => {
+    // a wall at y 0.5 on the left meets the long wall; the stem between R2 and R3 is dragged up
+    const g = fromCells([
+        { room: 0, ring: [[-1, 0.5], [0, 0.5], [0, 1], [-1, 1]] },
+        { room: 1, ring: [[-1, -1], [0, -1], [0, 0], [0, 0.5], [-1, 0.5]] },
+        { room: 2, ring: [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0.5]] },
+        { room: 3, ring: [[0, -1], [1, -1], [1, 0], [0, 0]] },
+    ], square, { roomCount: 4, simplifyTol: 0 });
+    const stem = wallRun(g, idAt(g, 0, 0), idAt(g, 1, 0));
+    const screen = (scale) => ([x, y]) => [400 + x * scale, 300 - y * scale];
+
+    const corner = snapOffset(g, stem, 0.47, screen(100));
+    assert.equal(corner.offset, 0.5, "3 px from the corner at y 0.5: the wall snaps onto it");
+    assert.equal(SNAP_LABELS[corner.kind], "Endpoint");
+    const middle = snapOffset(g, stem, 0.72, screen(100));
+    assert.equal(middle.offset, 0.75, "3 px from the middle of the wall above: it snaps there");
+    assert.equal(SNAP_LABELS[middle.kind], "Midpoint");
+    assert.equal(middle.target[1], 0.75, "the snap target is the middle of a wall at y 0.75");
+    const free = snapOffset(g, stem, 0.62, screen(100));
+    assert.deepEqual([free.offset, free.kind], [0.62, "free"], "12 px away from every target: no snap");
+    // the radius is in screen pixels: zoomed out, the same plan distance is close enough
+    assert.equal(snapOffset(g, stem, 0.3, screen(100)).kind, "free", "20 px away at 100 px per unit");
+    assert.equal(snapOffset(g, stem, 0.3, screen(20)).offset, 0.5, "4 px away at 20 px per unit");
 });

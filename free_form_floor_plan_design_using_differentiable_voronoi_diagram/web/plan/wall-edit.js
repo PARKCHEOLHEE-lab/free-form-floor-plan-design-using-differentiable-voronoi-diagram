@@ -1,6 +1,7 @@
 // Moving one interior wall of the aligned plan by hand (the Adjustment panel). The plan is the
 // corner graph of graph.js; a move returns a new graph and leaves the given one untouched.
 import { components } from "./align.js";
+import { SNAP_RADIUS, visitSnapTargets } from "./boundary-editor.js";
 import { roomRings, wallEdges } from "./graph.js";
 import { isSimpleBoundary, signedArea2 } from "./geom.js";
 
@@ -105,4 +106,30 @@ export function roomShares(g) {
     const areas = g.rooms.map((_, r) => roomRings(g, r).reduce((s, ring) => s + signedArea2(ring) / 2, 0));
     const total = areas.reduce((s, a) => s + a, 0);
     return areas.map((a) => a / total);
+}
+
+/**
+ * Snap a drag offset the way Draw boundary snaps a point: when the moved wall would pass within
+ * SNAP_RADIUS screen pixels of a corner that stays put ('vertex', shown as Endpoint) or the middle
+ * of a wall that does not move with it ('midpoint'), the offset jumps to pass exactly through it.
+ * `project` maps a plan point to screen pixels. Returns { offset, kind, target }; kind 'free' and
+ * the given offset when nothing is close enough.
+ */
+export function snapOffset(g, run, offset, project) {
+    const moving = new Set(run.corners);
+    const points = [...g.corners].filter(([id]) => !moving.has(id)).map(([, c]) => [c.x, c.y]);
+    const edges = wallEdges(g).filter((e) => !moving.has(e.a) && !moving.has(e.b)).map((e) => [point(g, e.a), point(g, e.b)]);
+    let nearest = SNAP_RADIUS;
+    let snapped = { offset, kind: "free" };
+    visitSnapTargets(points, edges, (q, kind) => {
+        const t = dot(sub(q, run.origin), run.normal);
+        const foot = [q[0] - (t - offset) * run.normal[0], q[1] - (t - offset) * run.normal[1]];
+        const [x0, y0] = project(q), [x1, y1] = project(foot);
+        const distance = Math.hypot(x0 - x1, y0 - y1);
+        if (distance < nearest) {
+            nearest = distance;
+            snapped = { offset: t, kind, target: q };
+        }
+    });
+    return snapped;
 }

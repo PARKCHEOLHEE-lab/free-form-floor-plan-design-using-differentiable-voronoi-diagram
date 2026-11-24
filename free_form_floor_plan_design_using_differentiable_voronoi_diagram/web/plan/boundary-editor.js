@@ -1,11 +1,13 @@
 import { isSimpleBoundary, openRing } from './geom.js';
 
-const SNAP_RADIUS = 10; // CSS pixels, independent of zoom.
+export const SNAP_RADIUS = 10; // CSS pixels, independent of zoom.
 const SNAP_ANGLE_SINE = Math.sin(5 * Math.PI / 180);
+// The words shown beside the cursor for each kind of snap (the wall editor shows the same ones).
+export const SNAP_LABELS = { close: 'Close', vertex: 'Endpoint', midpoint: 'Midpoint', axis: 'X/Y', parallel: 'Parallel', perpendicular: 'Perpendicular' };
 const samePoint = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9;
 const segments = points => points.slice(1).map((end, i) => [points[i], end]);
 
-function visitSnapTargets(points, edges, visit) {
+export function visitSnapTargets(points, edges, visit) {
     for (const p of points) visit(p, 'vertex');
     for (const [a, b] of edges) {
         visit([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], 'midpoint');
@@ -101,7 +103,6 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
     const start = overlay.querySelector('[data-first]');
     const marker = overlay.querySelector('[data-cursor]');
     const label = overlay.querySelector('text');
-    const snapLabels = { close: 'Close', vertex: 'Endpoint', midpoint: 'Midpoint', axis: 'X/Y', parallel: 'Parallel', perpendicular: 'Perpendicular' };
     let active = false;
     let vertices = [];
     let undone = []; // points taken back by undo, newest last, until a new point is placed
@@ -126,7 +127,7 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
         const result = snapped();
         overlay.dataset.snap = result?.kind ?? 'free';
         marker.toggleAttribute('hidden', !result);
-        label.toggleAttribute('hidden', !snapLabels[result?.kind]);
+        label.toggleAttribute('hidden', !SNAP_LABELS[result?.kind]);
         const end = result ? view.screenPoint(result.point) : null;
         const trackingStart = result?.trackingFrom && view.screenPoint(result.trackingFrom);
         drawGuide(guide, points.at(-1), end);
@@ -135,7 +136,7 @@ export function createBoundaryEditor(canvas, view, { overlay, reference, isBuild
             const [x, y] = end;
             marker.setAttribute('cx', x);
             marker.setAttribute('cy', y);
-            label.textContent = snapLabels[result.kind] ?? '';
+            label.textContent = SNAP_LABELS[result.kind] ?? '';
             label.setAttribute('x', x + 12);
             label.setAttribute('y', y - 8);
         }
