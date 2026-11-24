@@ -829,3 +829,24 @@ test("display: Raw, Aligned, Doors and Bubble Diagram are four icon cells on the
         });
     } finally { proc.kill(); }
 });
+
+test("sketch color: Draw boundary, Adjustment and the door link preview draw in black, not blue", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const black = "rgb(10, 10, 10)";   // --ui-fg, the black of the panels and icons
+            for (const id of ["boundary-sketch", "wall-sketch"])
+                assert.equal(await page.$eval(`#${id}`, (s) => getComputedStyle(s).color), black, `#${id} is black`);
+            const link = await page.evaluate(() => {
+                const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                svg.classList.add("bubble-link-preview");
+                const line = svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "line"));
+                document.body.append(svg);
+                const stroke = getComputedStyle(line).stroke;
+                svg.remove();
+                return stroke;
+            });
+            assert.equal(link, black, "the door link preview is black");
+        });
+    } finally { proc.kill(); }
+});
