@@ -181,8 +181,9 @@
   :is(#boundary-sketch, #wall-sketch) circle { fill:var(--light); stroke:currentColor; stroke-width:2; }
   #wall-sketch [data-selected] { fill:currentColor; }   /* the selected corner */
   #wall-sketch [data-handle] { fill:white; stroke:var(--ui-fg); stroke-width:1; }   /* the rotate handle, as .bubble-handle */
-  #wall-sketch [data-movable] line { stroke-width:1; stroke-dasharray:4 3; }   /* a wall that can move, marked before any hover */
-  #wall-sketch [data-movable] circle { stroke-width:1.5; }   /* a corner that can move */
+  /* walls and corners that can move, marked before any hover as the Raw view's Voronoi cell lines and sites (wall-editor.js sets the values) */
+  #wall-sketch [data-movable] line { stroke:var(--mark-line); stroke-opacity:var(--mark-line-opacity); stroke-width:var(--mark-line-width); stroke-dasharray:none; }
+  #wall-sketch [data-movable] circle { fill:var(--mark-site); fill-opacity:var(--mark-site-opacity); stroke:none; }
   #boundary-sketch [data-first] { fill:currentColor; }
   #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
   #plan[data-boundary-drawing] { cursor:crosshair !important; }

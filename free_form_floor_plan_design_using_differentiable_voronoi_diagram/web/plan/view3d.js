@@ -18,8 +18,8 @@ const TOP_POLAR = 1e-6;                         // straight down (OrbitControls 
 // at zoom 1, so one slider value looks equally thick on every boundary.
 const WALL_UNIT = 0.70 / (1.45 * FIT);          // wall unit in plan extents
 const WALL_LINE = 0.005;                        // each wall line's thickness, in wall units
-const CELL_LINE = { color: '#969696', opacity: 0.55 };
-const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
+export const CELL_LINE = { color: '#969696', opacity: 0.55 };
+export const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
 
 /**
  * Create the view on `canvas`. draw(plan) shows one plan:

@@ -462,3 +462,21 @@ test("adjustment: with the panel open, every corner and wall that can move is ma
         assert.ok(after && after.corners.length >= 10 && after.walls.length >= 10, "the marks come back when the run ends, with no pointer move");
     });
 });
+
+test("adjustment marks look like the Voronoi of the Raw view: wall marks as cell lines and corner marks as sites", { timeout: 120_000 }, async () => {
+    await onPage(async (page) => {
+        await page.click("button[data-open=adjust]");
+        const look = await page.evaluate(async () => {
+            const { CELL_LINE, SITE } = await import("./plan/view3d.js");
+            const g = document.querySelector("#wall-sketch [data-movable]");
+            const line = getComputedStyle(g.querySelector("line"));
+            const dot = g.querySelector("circle"), d = getComputedStyle(dot);
+            return { CELL_LINE, SITE, dpr: devicePixelRatio,
+                line: { stroke: line.stroke, opacity: +line.strokeOpacity, width: line.strokeWidth, dash: line.strokeDasharray },
+                dot: { fill: d.fill, opacity: +d.fillOpacity, stroke: d.stroke, r: +dot.getAttribute("r") } };
+        });
+        const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+        assert.deepEqual(look.line, { stroke: rgb(look.CELL_LINE.color), opacity: look.CELL_LINE.opacity, width: `${1 / look.dpr}px`, dash: "none" }, "a wall mark is drawn as a cell line");
+        assert.deepEqual(look.dot, { fill: rgb(look.SITE.color), opacity: look.SITE.opacity, stroke: "none", r: look.SITE.size / 2 }, "a corner mark is drawn as a site");
+    });
+});

@@ -6,6 +6,7 @@
 import { segmentDistance } from './geom.js';
 import { wallEdges } from './graph.js';
 import { SNAP_LABELS } from './boundary-editor.js';
+import { CELL_LINE, SITE } from './view3d.js';
 import { addCorner, movableParts, moveCorner, moveRun, removeCorner, rotateRun, snapAngle, snapCorner, snapOffset, wallRun } from './wall-edit.js';
 
 const PICK = 6;        // css px from a wall that still picks it (as the bubble editor picks a door link)
@@ -33,6 +34,11 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
     const marker = overlay.querySelector('[data-cursor]');
     const label = overlay.querySelector('text');
     const marks = overlay.querySelector('[data-movable]');
+    // the marks look like the Raw view's Voronoi: walls as its cell lines, corners as its sites
+    marks.style.setProperty('--mark-line', CELL_LINE.color);
+    marks.style.setProperty('--mark-line-opacity', CELL_LINE.opacity);
+    marks.style.setProperty('--mark-site', SITE.color);
+    marks.style.setProperty('--mark-site-opacity', SITE.opacity);
     let marked = null;  // { g, corners: [[id, circle]], walls: [[a, b, line]] } marked on plan g
     let enabled = false;
     let hover = null;   // { g, run } (a wall) or { g, id } (a corner) under the pointer
@@ -118,11 +124,12 @@ export function createWallEditor(canvas, view, { overlay, plan, boundary, canEdi
         const shown = enabled && !!g && canEdit();
         marks.toggleAttribute('hidden', !shown);
         if (!shown) return false;
+        marks.style.setProperty('--mark-line-width', `${1 / (window.devicePixelRatio || 1)}px`); // WebGL lines are one device pixel
         if (marked?.g !== g) {
             const make = (tag) => document.createElementNS(marks.namespaceURI, tag);
             const { corners, walls } = movableParts(g);
             marked = { g, corners: corners.map((id) => [id, make('circle')]), walls: walls.map(([a, b]) => [a, b, make('line')]) };
-            for (const [, c] of marked.corners) c.setAttribute('r', 3.5);
+            for (const [, c] of marked.corners) c.setAttribute('r', SITE.size / 2);
             marks.replaceChildren(...marked.walls.map((w) => w[2]), ...marked.corners.map((c) => c[1]));
         }
         for (const [id, c] of marked.corners) {
