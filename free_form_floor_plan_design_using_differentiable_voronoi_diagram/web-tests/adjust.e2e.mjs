@@ -164,3 +164,57 @@ test("adjustment: walls cannot be dragged while the optimizer runs, and can afte
         assert.equal(await hasEdits(page), true, "after Pause a wall drags");
     });
 });
+
+/** Sweep the plan until an inner corner (not on the boundary) is under the pointer; returns its screen point and id. */
+async function findCorner(page) {
+    for (let y = 250; y <= 620; y += 10) {
+        for (let x = 430; x <= 860; x += 10) {
+            await page.mouse.move(x, y);
+            const hit = await page.$eval("#plan", (c) => ("cornerHover" in c.dataset && !("cornerBoundary" in c.dataset) ? c.dataset.cornerHover : null));
+            if (hit !== null) return { at: [x, y], id: hit };
+        }
+    }
+    return null;
+}
+const hovered = (page) => page.$eval("#plan", (c) => ({ corner: c.dataset.cornerHover ?? null, wall: "wallHover" in c.dataset }));
+
+test("adjustment: a corner is picked before a wall within 8 px, dragging it reshapes the rooms with a snap label, and one drag is one undo step", { timeout: 180_000 }, async () => {
+    await onPage(async (page) => {
+        await page.click("button[data-open=adjust]");
+        const found = await findCorner(page);
+        assert.ok(found, "an inner corner can be found under the pointer");
+        const [x, y] = found.at;
+        assert.deepEqual(await hovered(page), { corner: found.id, wall: false }, "on a corner the corner is picked, not the walls through it");
+        await page.mouse.move(x + 6, y);
+        assert.equal((await hovered(page)).corner, found.id, "6 px away the same corner is still picked");
+        await page.mouse.move(x + 11, y);
+        assert.notEqual((await hovered(page)).corner, found.id, "11 px away it is not");
+
+        const before = await areasNow(page), shot = await pixels(page);
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        for (let k = 1; k <= 8; k++) await page.mouse.move(x + 3 * k, y + 2 * k);
+        await page.mouse.up();
+        await page.mouse.move(1100, 700);
+        const after = await areasNow(page);
+        assert.notEqual(await pixels(page), shot, "the drawn walls change");
+        assert.ok(after.filter((t, i) => t !== before[i]).length >= 2, `the rooms around the corner change: ${before} -> ${after}`);
+        await page.click("#undo");
+        assert.deepEqual(await areasNow(page), before, "one Undo puts the corner back");
+        assert.equal(await pixels(page), shot);
+
+        // with Shift the corner moves only sideways and the X/Y label shows
+        const labels = new Set();
+        await page.mouse.move(x, y);
+        await page.keyboard.down("Shift");
+        await page.mouse.down();
+        for (let k = 1; k <= 10; k++) {
+            await page.mouse.move(x + 3 * k, y + k);
+            const label = await page.$eval("#wall-sketch text", (t) => (t.hasAttribute("hidden") ? "" : t.textContent));
+            if (label) labels.add(label);
+        }
+        await page.mouse.up();
+        await page.keyboard.up("Shift");
+        assert.ok(labels.has("X/Y"), `the X/Y snap label shows while Shift is held: ${[...labels]}`);
+    });
+});
