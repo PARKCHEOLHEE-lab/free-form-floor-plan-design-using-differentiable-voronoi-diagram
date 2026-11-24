@@ -374,7 +374,7 @@ test("rooms: Draw boundary is an icon-only button after the last preset, sized l
             assert.equal(await draw.getAttribute("aria-label"), "Draw boundary");
             assert.equal(await draw.locator("svg use").getAttribute("href"), "#i-vector-square");
             assert.deepEqual(await page.$eval("#i-vector-square", (s) => [...s.children].map((c) => c.tagName)), ["path", "path", "path", "path", "rect", "rect", "rect", "rect"], "four sides and four corner points");
-            assert.equal(await draw.locator("svg").evaluate((s) => s.getBoundingClientRect().width), 16, "the icon matches the 16px toolbar icons");
+            assert.equal(await draw.locator("svg").evaluate((s) => s.getBoundingClientRect().width), 20, "the icon matches the 20px preset icons in its row");
             const last = await page.locator("#presets button").last().boundingBox(), button = await draw.boundingBox();
             assert.ok(Math.abs(button.y - last.y) < 1 && Math.abs(button.height - last.height) < 1, "Draw boundary sits on the preset row");
             assert.ok(button.x > last.x + last.width && button.x - (last.x + last.width) < 10, "Draw boundary comes right after E");
@@ -467,6 +467,162 @@ test("details: the preset row keeps its 12px bottom margin", { timeout: 60_000 }
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
             assert.equal(await page.$eval(".boundary-row", (r) => getComputedStyle(r).marginBottom), "12px");
+        });
+    } finally { proc.kill(); }
+});
+
+const openShapeA = async (page) => {
+    await page.click("button[data-open=rooms]");
+    await page.click("button[data-mode=shape_a]");
+    await page.waitForFunction(() => { const s = document.getElementById("status").textContent; return s.startsWith("shape_a") && s.includes("ready"); });
+    await page.click('.gizmo [data-axis="+z"]');
+};
+const drawRoomAt = async (page, [x, y]) => { await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 30, y, { steps: 8 }); await page.mouse.up(); };
+
+test("polish: at 900px the editing bar does not cover the open Rooms panel", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [900, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            const panel = await page.locator(".panel[data-panel=rooms]").boundingBox(), bar = await page.locator("#bubble-editing").boundingBox();
+            assert.ok(bar.x >= panel.x + panel.width, `the bar starts at ${bar.x}px, the panel ends at ${panel.x + panel.width}px`);
+            assert.ok(bar.x + bar.width <= 900, "the bar stays in the window");
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: the selected preset and room look different from hovered ones", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const look = (sel) => page.$eval(sel, (b) => { const s = getComputedStyle(b); return [s.backgroundColor, s.borderColor, s.boxShadow].join(" "); });
+            await openShapeA(page);
+            await page.hover("[data-mode=shape_b]");
+            await page.waitForTimeout(200);
+            assert.notEqual(await look("[data-mode=shape_a]"), await look("[data-mode=shape_b]"), "selected A and hovered B differ");
+            await drawRoomAt(page, [600, 450]);
+            await drawRoomAt(page, [550, 530]);
+            await page.locator(".room-row").first().click();
+            await page.locator(".room-row").last().hover();
+            await page.waitForTimeout(200);
+            assert.notEqual(await look(".room-row.selected"), await look(".room-row:not(.selected)"), "selected and hovered rooms differ");
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: Display panel labels fit on one line", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=display]");
+            const heights = await page.$$eval(".panel[data-panel=display] .row > label", (ls) => ls.map((l) => [l.textContent, l.getBoundingClientRect().height, parseFloat(getComputedStyle(l).lineHeight)]));
+            for (const [text, height, line] of heights) assert.ok(height < line * 1.5, `"${text}" is ${height}px tall, one line is ${line}px`);
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: hovering a preset shows its name", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            await page.hover("[data-mode=shape_c]");
+            await page.waitForTimeout(300);
+            assert.deepEqual(await page.$eval("[data-mode=shape_c]", (b) => { const s = getComputedStyle(b, "::after"); return [s.content, +s.opacity]; }), ['"Boundary C"', 1]);
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: panel titles are larger than their section labels", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            for (const name of ["rooms", "display", "optimize"]) {
+                const sizes = await page.$$eval(`.panel[data-panel=${name}] .label`, (ls) => ls.map((l) => parseFloat(getComputedStyle(l).fontSize)));
+                for (const size of sizes.slice(1)) assert.ok(sizes[0] > size, `${name}: title ${sizes[0]}px vs label ${size}px`);
+            }
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: Draw boundary's icon matches the preset icons", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            const icon = (sel) => page.$eval(sel, (s) => [s.getBoundingClientRect().width, getComputedStyle(s).strokeWidth]);
+            assert.deepEqual(await icon("#boundary-draw svg"), await icon("[data-mode=shape_a] svg"));
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: every section label has the same space above it", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 900], async (page) => {
+            for (const name of ["rooms", "display", "optimize"]) {
+                await page.click(`button[data-open=${name}]`);
+                const gaps = await page.$$eval(`.panel[data-panel=${name}] .label`, (ls) => ls.slice(1).map((l) => {
+                    let prev = l.previousElementSibling;
+                    while (prev && !prev.getClientRects().length) prev = prev.previousElementSibling;
+                    return [l.textContent, Math.round(l.getBoundingClientRect().top - prev.getBoundingClientRect().bottom)];
+                }));
+                for (const [text, gap] of gaps) assert.equal(gap, gaps[0][1], `${name}: ${text} has ${gap}px above it, ${gaps[0][0]} has ${gaps[0][1]}px`);
+                await page.click(`button[data-open=${name}]`);
+            }
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: errors in the bubble help and the program status share one error color", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            const colors = await page.evaluate(() => {
+                const help = document.getElementById("bubble-message"), status = document.getElementById("program-status");
+                help.classList.add("error"); status.dataset.state = "error"; status.textContent = "x";
+                return [getComputedStyle(help).color, getComputedStyle(status).color, getComputedStyle(document.documentElement).getPropertyValue("--ui-error").trim()];
+            });
+            assert.equal(colors[0], colors[1], "both errors use the same color");
+            assert.ok(colors[2], "the color is the --ui-error token");
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: the door-link drag line looks like the boundary sketch line", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const lines = await page.evaluate(() => {
+                const svg = document.querySelector(".bubble-link-preview"), line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                svg.append(line);
+                const sketch = document.querySelector("#boundary-sketch [data-edge-guide]");
+                const look = (l) => [getComputedStyle(l).stroke, getComputedStyle(l).strokeDasharray, getComputedStyle(l).strokeWidth];
+                const out = [look(line), look(sketch)];
+                line.remove();
+                return out;
+            });
+            assert.deepEqual(lines[0], lines[1]);
+        });
+    } finally { proc.kill(); }
+});
+
+test("polish: disabled buttons get no hover fill, and rows fade their hover like buttons", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await openShapeA(page);
+            await page.hover("#redo");
+            await page.waitForTimeout(200);
+            assert.equal(await page.$eval("#redo", (b) => b.disabled && getComputedStyle(b).backgroundColor), "rgba(0, 0, 0, 0)", "disabled Redo stays clear on hover");
+            await page.evaluate(() => { document.querySelector("[data-mode=shape_b]").disabled = true; });
+            await page.hover("[data-mode=shape_b]");
+            await page.waitForTimeout(200);
+            assert.equal(await page.$eval("[data-mode=shape_b]", (b) => getComputedStyle(b).backgroundColor), "rgba(0, 0, 0, 0)", "a disabled preset stays clear on hover");
+            await drawRoomAt(page, [600, 450]);
+            const fade = (sel) => page.$eval(sel, (b) => getComputedStyle(b).transitionDuration.split(",")[0]);
+            assert.equal(await fade(".room-row"), await fade(".seg button"));
         });
     } finally { proc.kill(); }
 });

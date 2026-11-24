@@ -57,10 +57,12 @@
     #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
 
     .controls { font-size: .96em; }
-    .label { font-size: 13px; font-weight: 600; color: var(--ui-fg); margin-bottom: 8px; }
+    .label { font-size: 13px; font-weight: 600; color: var(--ui-fg); margin: 14px 0 8px; }
+    .panel > .label:first-child { font-size: 15px; margin: 0 0 12px; }   /* the panel title */
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: 3.4em; flex: none; color: var(--ui-muted-fg); }
+    .panel[data-panel=display] .row > label { width: 7.6em; }   /* Point merge, Wall snap, Bubble Diagram */
     .row .val, .room-row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
     .readout { font-size: 12px; color: var(--ui-fg); }
 
@@ -90,8 +92,8 @@
       border-radius: 8px; font: inherit; font-size: .85em; color: var(--ui-fg); cursor: pointer;
       transition: background .12s, border-color .12s, color .12s;
     }
-    .seg button:hover:not(.active) { background: var(--ui-muted); }
-    .seg button.active { background: var(--ui-muted); border-color: var(--ui-border); color: var(--ui-fg); font-weight: 600; }
+    .seg button:hover:not(.active):not(:disabled) { background: var(--ui-muted); }
+    .seg button.active { background: var(--ui-muted); border-color: var(--ui-fg); color: var(--ui-fg); font-weight: 600; }
     .seg button:disabled { opacity: .4; cursor: default; }   /* as .tool:disabled */
 
     /* Canvas UI: the plan canvas covers the window (view.resize reads its width and height)
@@ -106,6 +108,7 @@
       --font: "Geist", -apple-system, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
       --ui-fg: #0a0a0a; --ui-muted: #f5f5f5; --ui-muted-fg: #737373; --ui-border: #e5e5e5;
       --ui-edge: 32px;
+      --ui-error: #a12b2b;
       --ui-card-shadow: 0 0 0 1px rgba(10, 10, 10, .1), 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -4px rgba(0, 0, 0, .1);
     }
     html, body { height: 100%; overflow: hidden; }
@@ -118,22 +121,22 @@
     .toolbar .sep { width: 20px; height: 1px; margin: 3px 0; background: var(--ui-border); }
     .tool { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px;
       background: transparent; color: var(--ui-fg); cursor: pointer; transition: background .12s; }
-    .tool:hover, .tool[aria-pressed=true] { background: var(--ui-muted); }
+    .tool:hover:not(:disabled), .tool[aria-pressed=true] { background: var(--ui-muted); }
     .tool:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
     .tool.primary { background: var(--ui-fg); color: var(--light); }
-    .tool.primary:hover { background: #262626; }
+    .tool.primary:hover:not(:disabled) { background: #262626; }
     .tool:disabled { opacity:.4; cursor:default; }
     /* hover names: each icon's or gizmo end's aria-label, shown beside it after a short pause
        (aria-label is the one source, so Run's name follows Pause and Resume) */
     .tool { position: relative; }
-    .tool::after, .axis::after, #boundary-draw::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%);
+    .tool::after, .axis::after, .boundary-row button::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%);
       padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light); font: 500 12px/1.2 var(--font);
       white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
     .tool::after { left: calc(100% + 10px); }
     .axis::after { right: calc(100% + 8px); }  /* the gizmo is at the right edge */
     .tool:hover::after, .tool:focus-visible::after,
     .axis:hover::after, .axis:focus-visible::after,
-    #boundary-draw:hover::after, #boundary-draw:focus-visible::after { opacity: 1; transition-delay: .12s; }
+    .boundary-row button:hover::after, .boundary-row button:focus-visible::after { opacity: 1; transition-delay: .12s; }
 
     /* top-right: the view gizmo, the plan's axes as the camera sees them, floating with no card;
        a drag in it rotates the view and a click on an end turns the view to that side */
@@ -172,6 +175,7 @@
   .edit-bar { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:2px;
     padding:4px 4px 4px 14px; border-radius:14px; background:var(--light); box-shadow:var(--ui-card-shadow); font-size:13px; color:var(--ui-fg); }
   .edit-bar[hidden] { display:none; }
+  @media (max-width: 1040px) { .edit-bar { left:calc(var(--ui-edge) + 48px + 300px + 12px); transform:none; } }
   .edit-sep { width:1px; height:20px; margin:0 6px 0 10px; background:var(--ui-border); }
   .edit-bar .tool::after { top:calc(100% + 8px); left:50%; transform:translateX(-50%); } /* below, so Undo's name does not cover Redo */
   .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
@@ -179,26 +183,29 @@
   .bubble-label.draft { background:white; color:var(--ui-muted-fg); }
   .bubble-link-dot { position:absolute; width:10px; height:10px; border:2px solid white; border-radius:50%; background:var(--ui-fg); transform:translate(-50%,-50%); }
   .bubble-link-preview { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
-  .bubble-link-preview line { stroke:var(--ui-fg); stroke-width:2; stroke-dasharray:6 4; }
+  .bubble-link-preview line { stroke:var(--featured); stroke-width:2; stroke-dasharray:5 4; }   /* as #boundary-sketch */
   .bubble-link-preview line.reached { stroke-dasharray:none; }
   .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
   .roomareas .raswatch { justify-content:flex-start; gap:4px; }
   #rooms_v { margin-left:auto; }
-  .bubble-help.error { color:#a12b2b; }
+  .bubble-help.error, #program-status[data-state=error] { color:var(--ui-error); }
   #program-status { font:11px/1.5 var(--font); margin-top:8px; }
-  .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 0; border:0; border-radius:4px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
+  .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 6px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background .12s, box-shadow .12s; }
   .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
+  .room-row.selected, .connection-row.selected { box-shadow:inset 0 0 0 1px var(--ui-fg); }
   .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
   /* six equal cells: the five presets, then Draw boundary */
   .panel .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }   /* .panel: beats .panel .seg */
   #presets { display:contents; }
   .boundary-row button { display:grid; place-items:center; }
-  .preset-ic { width:20px; height:20px; stroke-width:1.6; }
-  #boundary-draw { position:relative; }
-  #boundary-draw .ic { width:16px; height:16px; }
-  #boundary-draw::after { top:calc(100% + 6px); right:0; transform:none; }
+  .boundary-row button { position:relative; }
+  .boundary-row .ic { width:20px; height:20px; stroke-width:1.6; }   /* presets and Draw boundary alike */
+  /* names show below the row; the end cells align to the panel edge so the panel does not clip them */
+  .boundary-row button::after { top:calc(100% + 6px); left:50%; transform:translateX(-50%); }
+  #presets button:first-child::after { left:0; transform:none; }
+  #boundary-draw::after { left:auto; right:0; transform:none; }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
