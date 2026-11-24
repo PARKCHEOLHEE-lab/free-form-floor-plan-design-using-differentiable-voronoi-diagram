@@ -42,52 +42,28 @@ async function observeWorker(page, input = null) {
     }, input);
 }
 
-test('cosine experiment replaces L1 in the browser without changing Step', {timeout:60000}, async()=>{
-    const {url,proc}=await serve();
-    const browser=await chromium.launch();
-    try{
-        const control=await browser.newPage();
-        const experiment=await browser.newPage();
-        const preview=async(page,address)=>{
-            await observeWorker(page);
-            await page.goto(address);
-            await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-            return page.evaluate(()=>({
-                build:wallProof.builds.at(-1),
-                frame:wallProof.frames.at(-1).frame,
-            }));
-        };
-        const legacy=await preview(control,url);
-        const cosine=await preview(experiment,new URL('?wall=cosine',url).href);
-        assert.deepEqual(cosine.frame.cells,legacy.frame.cells,'compare exactly the same initial plan');
-        assert.deepEqual(cosine.build.w,legacy.build.w,'compare the same engine weights');
-        assert.ok(cosine.frame.wall>0 && cosine.frame.wall<legacy.frame.wall,
-            'the experimental URL must replace the L1 score with the requested angular score');
-        assert.equal(cosine.frame.jog,legacy.frame.jog,'Step is a separate contribution');
-        await experiment.click('#run');
-        await experiment.waitForFunction(()=>wallProof.frames.some(message=>message.mode==='step'));
-        const first=await experiment.evaluate(()=>wallProof.frames.find(message=>message.mode==='step').frame);
-        assert.ok(Math.abs(first.wall-cosine.frame.wall)<1e-5,'the optimizer uses the same experiment as preview');
-        assert.ok(Math.abs(first.jog-cosine.frame.jog)<1e-5);
-    }finally{await browser.close();proc.kill();}
-});
-
-test('mixed wall sliders zero L1 and Cos independently', {timeout:60000}, async()=>{
+test('the app weighs L1 and Cos walls separately and has no step loss', {timeout:60000}, async()=>{
     const {url,proc}=await serve();
     const browser=await chromium.launch();
     try{
         const page=await browser.newPage();
         await observeWorker(page);
-        await page.goto(new URL('?wall=mixed',url).href);
+        await page.goto(url);
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         await page.click('button[data-open=weights]');
         const l1=page.getByRole('slider',{name:'L1',exact:true});
         const cos=page.getByRole('slider',{name:'Cos',exact:true});
-        assert.equal(await l1.count(),1,'mixed experiment exposes a separate L1 slider');
-        assert.equal(await cos.count(),1,'mixed experiment exposes a separate Cos slider');
-        assert.equal(Number(await l1.inputValue()),0.5);
+        assert.equal(await l1.count(),1,'the app shows a separate L1 slider');
+        assert.equal(await cos.count(),1,'the app shows a separate Cos slider');
+        assert.equal(await page.getByRole('slider',{name:'step',exact:true}).count(),0,'the step loss has no slider');
+        assert.equal(Number(await l1.inputValue()),1);
         assert.equal(Number(await cos.inputValue()),1);
-        assert.equal(await page.locator('#sp_cosine').count(),1,'the loss graph includes Cos');
+        assert.deepEqual(await page.locator('.lossrow .lk').allTextContents(),['total','L1','Cos','area','lloyd','topo']);
+        const build=await page.evaluate(()=>wallProof.builds.at(-1));
+        assert.equal(build.w[0],1/13,'L1 keeps its reference scale');
+        assert.equal(build.cosineWeight,1);
+        assert.equal(build.jogWeight,undefined,'the page sends no step weight');
+        assert.equal(build.cosineWall,undefined,'the page sends no cos-only switch');
         const frame=()=>page.evaluate(()=>wallProof.frames.at(-1).frame);
         const preview=async()=>{
             const before=await page.evaluate(()=>wallProof.builds.at(-1).gen);
@@ -95,68 +71,76 @@ test('mixed wall sliders zero L1 and Cos independently', {timeout:60000}, async(
             await page.waitForFunction(gen=>wallProof.frames.at(-1)?.gen>gen&&document.querySelector('#status').textContent.includes('ready'),before);
             return frame();
         };
-        const mixed=await frame();
-        assert.ok(mixed.wall>0 && mixed.cosine>0 && mixed.jog>0);
+        const both=await frame();
+        assert.ok(both.wall>0 && both.cosine>0,'both wall terms reach the engine');
+        assert.equal(both.jog??0,0,'the engine adds no step contribution');
         await cos.press('Home');
         const onlyL1=await preview();
         assert.equal(onlyL1.cosine??0,0);
-        assert.equal(onlyL1.wall,mixed.wall);
+        assert.equal(onlyL1.wall,both.wall);
         await cos.press('End');
         await l1.press('Home');
         const onlyCos=await preview();
         assert.equal(onlyCos.wall,0);
-        assert.equal(onlyCos.cosine,mixed.cosine);
-        for(const pure of [onlyL1,onlyCos]){
-            assert.deepEqual(pure.cells,mixed.cells);
-            assert.equal(pure.jog,mixed.jog);
-        }
-        await l1.evaluate(input=>{input.value='0.5';input.dispatchEvent(new Event('input',{bubbles:true}));});
+        assert.equal(onlyCos.cosine,both.cosine);
+        for(const pure of [onlyL1,onlyCos])assert.deepEqual(pure.cells,both.cells);
+        await l1.evaluate(input=>{input.value='1';input.dispatchEvent(new Event('input',{bubbles:true}));});
         await page.click('#run');
         await page.waitForFunction(()=>wallProof.frames.some(message=>message.mode==='step'));
         const first=await page.evaluate(()=>wallProof.frames.find(message=>message.mode==='step').frame);
-        assert.ok(Math.abs(first.wall-mixed.wall)<1e-5);
-        assert.ok(Math.abs(first.cosine-mixed.cosine)<1e-5);
+        assert.ok(Math.abs(first.wall-both.wall)<1e-5);
+        assert.ok(Math.abs(first.cosine-both.cosine)<1e-5);
+        for(const old of ['?wall=cosine','?wall=mixed']){
+            const other=await browser.newPage();
+            await observeWorker(other);
+            await other.goto(new URL(old,url).href);
+            await other.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+            const {gen:_,...switched}=await other.evaluate(()=>wallProof.builds.at(-1));
+            const {gen:__,...plain}=build;
+            assert.deepEqual(switched,plain,`${old} no longer changes the loss`);
+            await other.close();
+        }
     }finally{await browser.close();proc.kill();}
 });
 
-test('wall and step controls reach real WASM without changing the camera',{timeout:180000},async()=>{
+test('L1 and Cos controls reach real WASM without changing the camera',{timeout:180000},async()=>{
     const {url,proc}=await serve();const browser=await chromium.launch();
     try{
         const page=await browser.newPage({viewport:{width:1440,height:900}});
         await observeWorker(page);
         if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
         await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        assert.equal(await page.locator('.lossrow').count(),6,'the independent step contribution has its own sixth loss row');
+        assert.equal(await page.locator('.lossrow').count(),6,'the Cos contribution has its own loss row');
         await page.click('button[data-open=weights]');
-        assert.equal(await page.locator('label[for=w_wall]').textContent(),'wall');
-        assert.equal(await page.locator('label[for=w_jog]').textContent(),'step');
-        assert.equal(await page.evaluate(()=>wallProof.builds.at(-1).w[0]),1/13,'restore the previous wall weight');
+        assert.equal(await page.locator('label[for=w_wall]').textContent(),'L1');
+        assert.equal(await page.locator('label[for=w_cosine]').textContent(),'Cos');
+        assert.equal(await page.evaluate(()=>wallProof.builds.at(-1).w[0]),1/13,'L1 keeps its reference scale');
         const preview=()=>page.evaluate(()=>wallProof.frames.at(-1).frame);
         const camera=()=>page.$eval('#plan',c=>({zoom:c.dataset.zoom,azimuth:c.dataset.azimuth,elevation:c.dataset.elevation}));
         const pose=await camera();const first=await preview();
-        assert.ok(first.wall>0 && first.jog>0,'both new weighted terms reach the engine preview');
+        assert.ok(first.wall>0 && first.cosine>0,'both wall terms reach the engine preview');
         const change=async(id,value)=>{
             const generation=await page.evaluate(()=>wallProof.builds.at(-1).gen);
             await page.locator('#'+id).evaluate((e,value)=>{e.value=String(value);e.dispatchEvent(new Event('input',{bubbles:true}));},value);
-            if(id==='w_jog'||id==='iters')await page.click('#reset');
+            if(id==='w_cosine'||id==='iters')await page.click('#reset');
             await page.waitForFunction(gen=>wallProof.frames.at(-1)?.gen>gen && document.querySelector('#status').textContent.includes('ready'),generation);
         };
-        const initialWeight = +(await page.locator('#w_jog').inputValue());
+        const initialWeight = +(await page.locator('#w_cosine').inputValue());
         assert.ok(initialWeight > 0);
-        await change('w_jog',0);const off=await preview();assert.equal(off.jog,0);assert.equal(off.wall,first.wall,'step weight does not change the previous wall loss');
-        await change('w_jog',0.5);const varied=await preview();
-        assert.ok(Math.abs(varied.jog-first.jog*0.5/initialWeight)<1e-5,'step importance changes the real engine contribution linearly');
-        await change('w_jog',initialWeight);await page.click('button[data-open=weights]');
+        await change('w_cosine',0);const off=await preview();assert.equal(off.cosine??0,0);assert.equal(off.wall,first.wall,'Cos weight does not change the L1 wall loss');
+        await change('w_cosine',0.5);const varied=await preview();
+        assert.ok(Math.abs(varied.cosine-first.cosine*0.5/initialWeight)<1e-5,'Cos importance changes the real engine contribution linearly');
+        await change('w_cosine',initialWeight);await page.click('button[data-open=weights]');
         await page.click('button[data-open=rooms]');await change('sites',24);await page.click('button[data-open=rooms]');
         await page.click('button[data-open=optimize]');await change('iters',200);await page.click('button[data-open=optimize]');
         const before=await preview();const dir=new URL('../../.agents/cache/wall-shape-browser/',import.meta.url);await mkdir(dir,{recursive:true});
         await page.screenshot({path:fileURLToPath(new URL('before-raw.png',dir))});
         const start=Date.now();await page.click('#run');await page.waitForFunction(()=>document.querySelector('#status').textContent==='done',null,{timeout:150000});
-        const after=await preview();assert.ok(after.jog<before.jog,`raw step contribution falls: ${before.jog} -> ${after.jog}`);
-        assert.ok(after.wall<before.wall,'the previous wall loss also falls');
+        const after=await preview();assert.ok(after.cosine<before.cosine,`raw Cos contribution falls: ${before.cosine} -> ${after.cosine}`);
+        assert.ok(after.wall<before.wall,'the L1 wall loss also falls');
         assert.notDeepEqual(after.cells,before.cells,'the engine changes raw geometry');
         assert.equal(await page.locator('[data-walls=raw].active').count(),1);
-        assert.ok((await page.locator('#sp_jog').getAttribute('points')).length>0);
+        assert.ok((await page.locator('#sp_cosine').getAttribute('points')).length>0);
         assert.deepEqual(await camera(),pose,'controls and new loss rows preserve the camera');
         await page.screenshot({path:fileURLToPath(new URL('after-raw.png',dir))});
         await page.click('button[data-open=display]');await page.click('[data-walls=aligned]');await page.click('button[data-open=display]');
@@ -229,7 +213,7 @@ test('the six-room Raw walls have smaller visible steps and keep the room progra
         // With step set to zero, the restored L1 model aligns 93.409% of
         // shared wall length within 10 degrees on this same drawn program.
         assert.ok(summary.alignment.alignedShare>=.9340908230878662-1e-9,
-            'the step term must not trade steps for more off-axis wall length: '+summary.alignment.alignedShare);
+            'the wall terms must not trade steps for more off-axis wall length: '+summary.alignment.alignedShare);
     } finally {await browser.close();proc.kill();}
 });
 
@@ -251,7 +235,7 @@ test('the default E preset has fewer visible Raw steps after Run',{timeout:18000
         };
         const previewError = Math.max(...areaErrors(preview));
         assert.ok(previewError<=.05,'the preset starts near its target room areas: '+previewError);
-        assert.ok(preview.frame.jog>0,'default preset applies the step weight to the engine');
+        assert.ok(preview.frame.cosine>0,'default preset applies the Cos weight to the engine');
         await page.click('#run');
         await page.waitForFunction(()=>wallProof.done,null,{timeout:150000});
         const {frame,boundary,build} = await page.evaluate(()=>({
@@ -266,7 +250,7 @@ test('the default E preset has fewer visible Raw steps after Run',{timeout:18000
         assert.deepEqual(graph.rooms.map(rings=>rings.length),[1,1,1,1,1,1],'each default room stays connected');
         assert.ok(areaErrors({frame,boundary,build}).every(error=>error<=.05),'each default room stays within 5 percentage points of its target area');
         const {all,pair,junction} = summarizeRawSteps(frame,boundary,6);
-        assert.ok(build.jogWeight>0,'default E uses both wall and step objectives');
+        assert.ok(build.w[0]>0 && build.cosineWeight>0,'default E uses both L1 and Cos wall objectives');
         // L1 alone reached .009 max/sum on the same initial sites and
         // label assignment. Both must stay within one display tolerance.
         assert.ok(all.max<=.02 && all.sum<=.02,

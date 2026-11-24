@@ -158,7 +158,7 @@ test('Shift tracks a draft endpoint height and a midpoint with a visible guide',
         assert.deepEqual(placed,midpoint,'clicking places the exact previewed tracking intersection');
         await page.keyboard.up('Shift');
         assert.equal(await guide.getAttribute('hidden'),'');
-    }, '?wall=mixed', 'tracking');
+    }, '', 'tracking');
 });
 
 test('a drawn boundary runs with rooms and retains one custom design across replacements', { timeout: 90000 }, async () => {
@@ -297,5 +297,5 @@ test('a drawn boundary runs with rooms and retains one custom design across repl
         assert.deepEqual(await captureBoundary(await page.evaluate(() => planProof.builds.at(-1).gen)),latest);
         assert.deepEqual(await labels(),[]);
 
-    }, '?wall=mixed', 'run');
+    }, '', 'run');
 });
