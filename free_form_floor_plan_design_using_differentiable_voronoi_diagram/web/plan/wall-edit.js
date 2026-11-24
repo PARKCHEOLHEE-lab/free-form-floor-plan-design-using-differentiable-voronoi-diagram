@@ -1,7 +1,7 @@
 // Moving one interior wall of the aligned plan by hand (the Adjustment panel). The plan is the
 // corner graph of graph.js; a move returns a new graph and leaves the given one untouched.
 import { components } from "./align.js";
-import { SNAP_RADIUS, visitSnapTargets } from "./boundary-editor.js";
+import { SNAP_RADIUS, snapBoundaryPoint, visitSnapTargets } from "./boundary-editor.js";
 import { roomRings, wallEdges } from "./graph.js";
 import { segmentDistance, signedArea2 } from "./geom.js";
 
@@ -164,6 +164,47 @@ export function moveCorner(g, id, target) {
     const run = { slides: new Map([...twins].map((x) => [x, d])), rooms, range: [0, 1], locked: false };
     const { graph } = moveRun(g, run, 1);
     return { graph, point: point(graph, id) };
+}
+
+/**
+ * Snap a dragged corner the way Draw boundary snaps a point. With Shift it stays on the horizontal
+ * or vertical line through `start` ('axis'). Otherwise, within SNAP_RADIUS screen pixels, it jumps
+ * onto a corner that stays put ('vertex') or the middle of a wall that does not move with it
+ * ('midpoint'); failing that, a wall to one of its neighbours turns parallel or perpendicular to a
+ * boundary edge (snapBoundaryPoint with that neighbour as the last point). Returns { point, kind,
+ * target?, from? }; kind 'free' and the given point when nothing is close enough.
+ */
+export function snapCorner(g, id, p, { project, shift, start, boundary }) {
+    if (shift) {
+        const keep = Math.abs(p[0] - start[0]) >= Math.abs(p[1] - start[1]) ? 1 : 0;
+        const locked = [...p];
+        locked[keep] = start[keep];
+        return { point: locked, kind: "axis" };
+    }
+    const all = wallEdges(g);
+    const twins = twinsOf(g, id, all);
+    const touching = all.filter((e) => twins.has(e.a) || twins.has(e.b));
+    const neighbours = new Set(touching.map((e) => (twins.has(e.a) ? e.b : e.a)).filter((x) => !twins.has(x)));
+    const points = [...g.corners].filter(([x]) => !twins.has(x) && !neighbours.has(x)).map(([, c]) => [c.x, c.y]);
+    const edges = all.filter((e) => !twins.has(e.a) && !twins.has(e.b)).map((e) => [point(g, e.a), point(g, e.b)]);
+    const screen = project(p);
+    const distance = (q) => Math.hypot(...sub(project(q), screen));
+    let nearest = SNAP_RADIUS;
+    let snapped = null;
+    visitSnapTargets(points, edges, (q, kind) => {
+        const d = distance(q);
+        if (d < nearest) { nearest = d; snapped = { point: q, kind, target: q }; }
+    });
+    if (snapped) return snapped;
+    nearest = SNAP_RADIUS;
+    for (const x of neighbours) {
+        const from = point(g, x);
+        const result = snapBoundaryPoint({ point: p, screen, project, vertices: [from], reference: boundary, shift: false });
+        if (result.kind === "free") continue;
+        const d = distance(result.point);
+        if (d < nearest) { nearest = d; snapped = { ...result, from }; }
+    }
+    return snapped ?? { point: p, kind: "free" };
 }
 
 /** Each room's share of the plan area (holes subtract). */

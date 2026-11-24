@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { moveCorner, moveRun, roomShares, snapOffset, wallRun } from "../web/plan/wall-edit.js";
+import { moveCorner, moveRun, roomShares, snapCorner, snapOffset, wallRun } from "../web/plan/wall-edit.js";
 import { SNAP_LABELS } from "../web/plan/boundary-editor.js";
 import { alignPlan } from "../web/plan/align.js";
 import { fromCells, roomRings, wallEdges } from "../web/plan/graph.js";
@@ -205,4 +205,35 @@ test("dragging a corner moves it and its twins, changes only the rooms that use 
         together++;
     }
     assert.ok(together > 0, "at least one twin pair moves");
+});
+
+test("a dragged corner snaps like Draw boundary to corners, wall midpoints, boundary directions and with Shift to X or Y", () => {
+    // R0 top left, R1 bottom left, R2 top right, R3 bottom right; the corner at the origin is dragged
+    const g = fromCells([
+        { room: 0, ring: [[-1, 0.5], [0, 0.5], [0, 1], [-1, 1]] },
+        { room: 1, ring: [[-1, -1], [0, -1], [0, 0], [0, 0.5], [-1, 0.5]] },
+        { room: 2, ring: [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0.5]] },
+        { room: 3, ring: [[0, -1], [1, -1], [1, 0], [0, 0]] },
+    ], square, { roomCount: 4, simplifyTol: 0 });
+    const id = idAt(g, 0, 0);
+    const screen = (scale) => ([x, y]) => [400 + x * scale, 300 - y * scale];
+    const snap = (p, scale = 100, shift = false) => snapCorner(g, id, p, { project: screen(scale), shift, start: [0, 0], boundary: square });
+    const label = (s) => SNAP_LABELS[s.kind];
+    const near = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9;
+
+    const corner = snap([-0.97, -0.98]);
+    assert.ok(near(corner.point, [-1, -1]) && label(corner) === "Endpoint", `3 px from a corner: ${JSON.stringify(corner)}`);
+    const middle = snap([0.02, 0.76]);
+    assert.ok(near(middle.point, [0, 0.75]) && label(middle) === "Midpoint", `2 px from a wall middle: ${JSON.stringify(middle)}`);
+    const parallel = snap([0.3, 0.02]);
+    assert.ok(near(parallel.point, [0.3, 0]) && label(parallel) === "Parallel", `the wall to (1, 0) runs along the bottom boundary: ${JSON.stringify(parallel)}`);
+    const perpendicular = snap([0.02, -0.5]);
+    assert.ok(near(perpendicular.point, [0, -0.5]) && label(perpendicular) === "Perpendicular", `the wall to (0, -1) stands on the bottom boundary: ${JSON.stringify(perpendicular)}`);
+    const axis = snap([0.4, 0.05], 100, true);
+    assert.ok(near(axis.point, [0.4, 0]) && label(axis) === "X/Y", `Shift keeps the start y: ${JSON.stringify(axis)}`);
+    const free = snap([0.3, 0.3]);
+    assert.deepEqual([free.point, free.kind], [[0.3, 0.3], "free"], "far from every target and direction: no snap");
+    // the radius is in screen pixels: the same plan distance snaps when zoomed out
+    assert.equal(snap([-0.8, -0.8]).kind, "free", "28 px from the corner at 100 px per unit");
+    assert.equal(label(snap([-0.8, -0.8], 20)), "Endpoint", "6 px from the corner at 20 px per unit");
 });
