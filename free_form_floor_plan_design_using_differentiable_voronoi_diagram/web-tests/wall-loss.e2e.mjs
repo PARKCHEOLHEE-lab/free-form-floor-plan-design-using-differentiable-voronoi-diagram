@@ -50,7 +50,7 @@ test('the app weighs L1 and Cos walls separately and has no step loss', {timeout
         await observeWorker(page);
         await page.goto(url);
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
-        await page.click('button[data-open=weights]');
+        await page.click('button[data-open=optimize]');
         const l1=page.getByRole('slider',{name:'L1',exact:true});
         const cos=page.getByRole('slider',{name:'Cos',exact:true});
         assert.equal(await l1.count(),1,'the app shows a separate L1 slider');
@@ -111,7 +111,7 @@ test('L1 and Cos controls reach real WASM without changing the camera',{timeout:
         if(process.env.VORONOI_COVERAGE_DIR)await page.coverage.startJSCoverage({resetOnNavigation:false});
         await page.goto(url);await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         assert.equal(await page.locator('.lossrow').count(),6,'the Cos contribution has its own loss row');
-        await page.click('button[data-open=weights]');
+        await page.click('button[data-open=optimize]');
         assert.equal(await page.locator('label[for=w_wall]').textContent(),'L1');
         assert.equal(await page.locator('label[for=w_cosine]').textContent(),'Cos');
         assert.equal(await page.evaluate(()=>wallProof.builds.at(-1).w[0]),1/13,'L1 keeps its reference scale');
@@ -130,7 +130,7 @@ test('L1 and Cos controls reach real WASM without changing the camera',{timeout:
         await change('w_cosine',0);const off=await preview();assert.equal(off.cosine??0,0);assert.equal(off.wall,first.wall,'Cos weight does not change the L1 wall loss');
         await change('w_cosine',0.5);const varied=await preview();
         assert.ok(Math.abs(varied.cosine-first.cosine*0.5/initialWeight)<1e-5,'Cos importance changes the real engine contribution linearly');
-        await change('w_cosine',initialWeight);await page.click('button[data-open=weights]');
+        await change('w_cosine',initialWeight);await page.click('button[data-open=optimize]');
         await page.click('button[data-open=rooms]');await change('sites',24);await page.click('button[data-open=rooms]');
         await page.click('button[data-open=optimize]');await change('iters',200);await page.click('button[data-open=optimize]');
         const before=await preview();const dir=new URL('../../.agents/cache/wall-shape-browser/',import.meta.url);await mkdir(dir,{recursive:true});

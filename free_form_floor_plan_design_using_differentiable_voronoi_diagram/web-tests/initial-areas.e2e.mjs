@@ -62,7 +62,6 @@ test('five drawn rooms keep one region each in raw and aligned initial views',{t
         assert.equal(capture.frame.iteration,0);
         const pose=await camera(page);
         await page.click('button[data-open=display]');await page.uncheck('#show-bubbles');await page.click('button[data-open=display]');
-        await page.click('button[data-toggle=losses]');
         const dir=new URL('../../.agents/cache/screens/',import.meta.url);await mkdir(dir,{recursive:true});
         await page.screenshot({path:fileURLToPath(new URL('five-room-connectivity-raw.png',dir))});
         const graph=fromCells(capture.frame.cells,capture.boundary,{roomCount:5,simplifyTol:0});

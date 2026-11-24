@@ -16,23 +16,17 @@ test('floating controls keep 32px edge spacing and fit desktop and narrow window
     try{
         for(const size of [[1440,900],[600,900],[390,720]])await atSize(url,size,async page=>{
             const rect=selector=>page.$eval(selector,e=>e.getBoundingClientRect().toJSON());
-            const toolbar=await rect('.toolbar'),gizmo=await rect('.gizmo'),loss=await rect('.losscard');
+            const toolbar=await rect('.toolbar'),gizmo=await rect('.gizmo');
             const near=(a,b)=>Math.abs(a-b)<1;
             assert.ok(near(toolbar.left,32)&&near(toolbar.top,32),'toolbar has 32px outer spacing');
             assert.ok(near(gizmo.top,32)&&near(size[0]-gizmo.right,32),'gizmo has matching top/right spacing');
-            assert.ok(near(loss.left,32)&&near(size[1]-loss.bottom,32),'loss card has matching left/bottom spacing');
-            assert.ok(loss.right<=size[0]-31,'loss card fits the narrow window');
-            for(const name of ['boundary','rooms','weights','optimize','display']){
+            for(const name of ['boundary','rooms','optimize','display']){
                 await page.click(`button[data-open=${name}]`);
                 const panel=await rect(`.panel[data-panel=${name}]`);
                 assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
                 assert.ok(panel.right<=size[0]-31&&panel.bottom<=size[1]-31,`${name} stays inside the outer spacing`);
                 await page.click(`button[data-open=${name}]`);
             }
-            const before=await page.$eval('#plan',c=>c.toDataURL());
-            await page.click('button[data-toggle=losses]');
-            assert.equal(await page.$eval('#plan',c=>c.toDataURL()),before,'loss visibility preserves plan pixels');
-            await page.click('button[data-toggle=losses]');
             await page.click('button[data-open=rooms]');
             const dir=new URL('../../.agents/cache/screens/',import.meta.url);await mkdir(dir,{recursive:true});
             await page.screenshot({path:fileURLToPath(new URL(`ui-spacing-${size[0]}.png`,dir))});
@@ -90,9 +84,9 @@ test("toolbar: an icon opens only its panel, another icon swaps it, the same ico
             assert.deepEqual(await openPanels(page), [], "no panel is open at the start");
             await page.click("button[data-open=rooms]");
             assert.deepEqual(await openPanels(page), ["rooms"]);
-            await page.click("button[data-open=weights]");
-            assert.deepEqual(await openPanels(page), ["weights"]);
-            await page.click("button[data-open=weights]");
+            await page.click("button[data-open=optimize]");
+            assert.deepEqual(await openPanels(page), ["optimize"]);
+            await page.click("button[data-open=optimize]");
             assert.deepEqual(await openPanels(page), []);
             await page.click("button[data-open=display]");
             assert.deepEqual(await openPanels(page), ["display"]);
@@ -109,7 +103,7 @@ test("one toolbar: every icon sits in the top-left toolbar, and the Display pane
             const bars = await page.$$eval(".toolbar", (ts) => ts.map((t) => t.getBoundingClientRect()));
             assert.equal(bars.length, 1, "one toolbar");
             assert.ok(bars[0].left < 40 && bars[0].top < 40, `toolbar at ${bars[0].left},${bars[0].top}`);
-            for (const sel of ["button[data-open=display]", "button[data-toggle=losses]", "#run", "#reset"])
+            for (const sel of ["button[data-open=display]", "button[data-open=optimize]", "#run", "#reset"])
                 assert.equal(await page.$eval(sel, (b) => !!b.closest(".toolbar")), true, `${sel} is in the toolbar`);
             await page.click("button[data-open=display]");
             const panel = await page.$eval(".panel[data-panel=display]", (p) => p.getBoundingClientRect().toJSON());
@@ -122,16 +116,16 @@ test("one toolbar: every icon sits in the top-left toolbar, and the Display pane
     }
 });
 
-test("loss card toggle: the plan drawing stays the same, pixel for pixel", { timeout: 120_000 }, async () => {
+test("optimization panel: the plan drawing stays the same, pixel for pixel", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             const pixels = () => page.$eval("#plan", (c) => c.toDataURL());
             const shown = await pixels();
-            await page.click("button[data-toggle=losses]");
-            assert.ok((await pixels()) === shown, "the plan changed when the loss card was hidden");
-            await page.click("button[data-toggle=losses]");
-            assert.ok((await pixels()) === shown, "the plan changed when the loss card came back");
+            await page.click("button[data-open=optimize]");
+            assert.ok((await pixels()) === shown, "the plan changed when the Optimization panel opened");
+            await page.click("button[data-open=optimize]");
+            assert.ok((await pixels()) === shown, "the plan changed when the Optimization panel closed");
         });
     } finally {
         proc.kill();
@@ -142,7 +136,7 @@ test("panels: an open panel is see-through, so the plan shows behind it", { time
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            for (const name of ["boundary", "rooms", "weights", "optimize", "display"]) {
+            for (const name of ["boundary", "rooms", "optimize", "display"]) {
                 await page.click(`button[data-open=${name}]`);
                 const alpha = await page.$eval(`.panel[data-panel=${name}]`, (p) => {
                     const m = getComputedStyle(p).backgroundColor.match(/rgba?\(([^)]+)\)/);
@@ -152,28 +146,6 @@ test("panels: an open panel is see-through, so the plan shows behind it", { time
                 assert.ok(alpha >= 0.5 && alpha <= 0.85, `${name} panel background alpha is ${alpha}`);
                 await page.click(`button[data-open=${name}]`);
             }
-        });
-    } finally {
-        proc.kill();
-    }
-});
-
-test("loss card: its 6 rows are in view at the start, and the Losses icon hides and shows it", { timeout: 120_000 }, async () => {
-    const { url, proc } = await serve();
-    try {
-        await atSize(url, [1145, 820], async (page) => {
-            const rows = () =>
-                page.$$eval(".lossrow", (rs) =>
-                    rs.map((r) => {
-                        const b = r.getBoundingClientRect();
-                        return b.width > 0 && b.top >= 0 && b.bottom <= innerHeight;
-                    }),
-                );
-            assert.deepEqual(await rows(), [true, true, true, true, true, true], "all 6 rows in view at the start");
-            await page.click("button[data-toggle=losses]");
-            assert.deepEqual(await rows(), [false, false, false, false, false, false], "hidden after one click");
-            await page.click("button[data-toggle=losses]");
-            assert.deepEqual(await rows(), [true, true, true, true, true, true], "shown again after a second click");
         });
     } finally {
         proc.kill();
@@ -190,7 +162,7 @@ test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s
                     return { text: s.content, opacity: +s.opacity, left: parseFloat(s.left), width: b.getBoundingClientRect().width };
                 });
             const tools = await page.$$(".tool");
-            assert.equal(tools.length, 8);
+            assert.equal(tools.length, 6);
             for (const tool of tools) {
                 const name = await tool.getAttribute("aria-label");
                 assert.equal((await tip(tool)).opacity, 0, `${name}: the tooltip shows before hover`);
@@ -211,7 +183,7 @@ test("tooltips: hovering a toolbar icon shows its name to its right within 0.3 s
     }
 });
 
-test("narrow: at 600px the toolbars, the loss card and each open panel stay inside the window", { timeout: 120_000 }, async () => {
+test("narrow: at 600px the toolbar and each open panel stay inside the window", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [600, 900], async (page) => {
@@ -223,12 +195,40 @@ test("narrow: at 600px the toolbars, the loss card and each open panel stay insi
                         .filter(([, b]) => b.left < 0 || b.top < 0 || b.right > innerWidth || b.bottom > innerHeight)
                         .map(([name, b]) => `${name} ${Math.round(b.left)},${Math.round(b.top)}-${Math.round(b.right)},${Math.round(b.bottom)}`),
                 );
-            assert.deepEqual(await outside(".toolbar, .losscard"), []);
-            for (const name of ["boundary", "rooms", "weights", "optimize", "display"]) {
+            assert.deepEqual(await outside(".toolbar"), []);
+            for (const name of ["boundary", "rooms", "optimize", "display"]) {
                 await page.click(`button[data-open=${name}]`);
                 assert.deepEqual(await outside(".panel"), [], `${name} panel`);
                 await page.click(`button[data-open=${name}]`);
             }
+        });
+    } finally {
+        proc.kill();
+    }
+});
+
+test("optimization: one icon opens the loss weights, the run settings and the six-row loss graph", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const labels = await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label")));
+            assert.deepEqual(labels, ["Run", "Reset", "Boundary", "Rooms", "Optimization", "Display"]);
+            assert.equal(await page.locator(".losscard").count(), 0, "no separate loss card");
+            assert.equal(await page.locator(".panel[data-panel=weights]").count(), 0, "no separate weights panel");
+            for (const id of ["w_wall", "w_cosine", "w_area", "w_lloyd", "w_topo", "iters", "lr", "seed", "losspanel"])
+                assert.equal(await page.$eval(`#${id}`, (e) => e.closest(".panel")?.dataset.panel ?? null), "optimize", `#${id} is in the Optimization panel`);
+            const order = await page.$eval(".panel[data-panel=optimize]", (p) => [...p.querySelectorAll("#w_topo, #iters, #losspanel")].map((e) => e.id));
+            assert.deepEqual(order, ["w_topo", "iters", "losspanel"], "weights, then run settings, then the graph");
+            const rows = () =>
+                page.$$eval(".lossrow", (rs) =>
+                    rs.map((r) => {
+                        const b = r.getBoundingClientRect();
+                        return b.width > 0 && b.top >= 0 && b.bottom <= innerHeight;
+                    }),
+                );
+            assert.deepEqual(await rows(), [false, false, false, false, false, false], "the graph is hidden while the panel is closed");
+            await page.click("button[data-open=optimize]");
+            assert.deepEqual(await rows(), [true, true, true, true, true, true], "all 6 rows are in view in the open panel");
         });
     } finally {
         proc.kill();

@@ -181,7 +181,7 @@
     .planbox { position: fixed; inset: 0; }
     .planbox canvas#plan { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; }
 
-    .toolbar, .panel, .losscard { position: fixed; background: var(--light); border-radius: 14px; box-shadow: var(--ui-card-shadow); }
+    .toolbar, .panel { position: fixed; background: var(--light); border-radius: 14px; box-shadow: var(--ui-card-shadow); }
     .toolbar { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; z-index: 2; }
     .toolbar.tl { top: var(--ui-edge); left: var(--ui-edge); }
     .toolbar .sep { width: 20px; height: 1px; margin: 3px 0; background: var(--ui-border); }
@@ -221,9 +221,7 @@
     .panel.open { display: block; }
     /* panels are see-through, so the plan stays visible behind an open panel */
     .panel { background: rgba(255, 255, 255, .75); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
-    .panel .label, .losscard .label { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ui-fg); margin-bottom: 8px; }
-    .losscard { left: var(--ui-edge); bottom: var(--ui-edge); width: min(420px, calc(100vw - 2 * var(--ui-edge))); padding: 12px 14px 10px; }
-    .losscard .canvas-sub { margin-top: 0; }
+    .panel .label { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ui-fg); margin-bottom: 8px; }
     .lossrow { margin: 2px 0; }
     .lossrow .lk { color: var(--ui-muted-fg); font-size: 12px; }
     .lossrow .spark { height: 20px; border-color: var(--ui-border); }
@@ -281,18 +279,6 @@
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->
       <span id="status" hidden></span>
-      <div class="losscard" id="losscard">
-      <div class="label canvas-sub">Loss</div>
-      <div class="losspanel" id="losspanel">
-        <div class="lossrow"><span class="lk">total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
-        <div class="lossrow"><span class="lk">L1</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
-        <div class="lossrow"><span class="lk">Cos</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_cosine" /></svg></div>
-        <div class="lossrow"><span class="lk">area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
-        <div class="lossrow"><span class="lk">lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
-        <div class="lossrow"><span class="lk">topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
-        <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_cosine"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
-      </div>
-      </div>
     </div>
 
     <!-- Icons: Lucide (lucide.dev), ISC License, Copyright (c) for portions of Lucide are held by
@@ -305,9 +291,7 @@
         <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
         <symbol id="i-boundary" viewBox="0 0 24 24"><path d="M3.5 8.7c-.7.5-1 1.4-.7 2.2l2.8 8.7c.3.8 1 1.4 1.9 1.4h9.1c.9 0 1.6-.6 1.9-1.4l2.8-8.7c.3-.8 0-1.7-.7-2.2l-7.4-5.3a2.1 2.1 0 0 0-2.4 0Z"/></symbol>
         <symbol id="i-rooms" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
-        <symbol id="i-weights" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
         <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
-        <symbol id="i-losses" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
         <symbol id="i-display" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
       </defs>
     </svg>
@@ -319,11 +303,9 @@
       <span class="sep"></span>
       <button class="tool" data-open="boundary" aria-label="Boundary"><svg class="ic"><use href="#i-boundary"/></svg></button>
       <button class="tool" data-open="rooms" aria-label="Rooms"><svg class="ic"><use href="#i-rooms"/></svg></button>
-      <button class="tool" data-open="weights" aria-label="Loss weights"><svg class="ic"><use href="#i-weights"/></svg></button>
       <button class="tool" data-open="optimize" aria-label="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
       <span class="sep"></span>
       <button class="tool" data-open="display" aria-label="Display"><svg class="ic"><use href="#i-display"/></svg></button>
-      <button class="tool" data-toggle="losses" aria-label="Losses" aria-pressed="true"><svg class="ic"><use href="#i-losses"/></svg></button>
     </nav>
 
     <!-- top-right: the view gizmo (web/plan/gizmo.js fills it) -->
@@ -376,20 +358,28 @@
         <div class="row"><label for="show-bubbles">Room bubbles</label><input type="checkbox" id="show-bubbles" checked></div>
       </section>
 
-      <section class="panel" data-panel="weights">
+      <section class="panel" data-panel="optimize">
+        <div class="label">Optimization</div>
         <div class="label">Loss weight (0–1)</div>
         <div class="row"><label for="w_wall">L1</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="1.00"><span class="val" id="w_wall_v">1.00</span></div>
         <div class="row"><label for="w_cosine">Cos</label><input id="w_cosine" type="range" min="0" max="1" step="0.01" value="1"><span class="val" id="w_cosine_v">1.00</span></div>
         <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
         <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
         <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
-      </section>
-
-      <section class="panel" data-panel="optimize">
-        <div class="label">Optimization</div>
+        <div class="label">Run settings</div>
         <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
         <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
         <div class="row"><label>seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
+        <div class="label">Loss</div>
+        <div class="losspanel" id="losspanel">
+          <div class="lossrow"><span class="lk">total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
+          <div class="lossrow"><span class="lk">L1</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
+          <div class="lossrow"><span class="lk">Cos</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_cosine" /></svg></div>
+          <div class="lossrow"><span class="lk">area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
+          <div class="lossrow"><span class="lk">lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
+          <div class="lossrow"><span class="lk">topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
+          <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_cosine"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
+        </div>
       </section>
     </div>
   </div>
@@ -963,14 +953,6 @@ function showPanel(name) {
   document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));
 }
 document.querySelectorAll('button[data-open]').forEach(b => b.addEventListener('click', () => showPanel(b.dataset.open)));
-// The loss card shows by default; its icon hides and shows it. The redraw only re-places the
-// playhead tags (they measure the card), the plan itself does not move.
-document.querySelector('button[data-toggle=losses]').addEventListener('click', e => {
-  const card = $('losscard');
-  card.hidden = !card.hidden;
-  e.currentTarget.setAttribute('aria-pressed', String(!card.hidden));
-  if (lastFrame) drawFrame(lastFrame);
-});
 
 $('run').onclick = () => {
   if (running) {                         // running → pause
