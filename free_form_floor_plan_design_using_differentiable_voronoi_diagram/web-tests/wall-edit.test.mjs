@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { moveRun, roomShares, snapOffset, wallRun } from "../web/plan/wall-edit.js";
+import { moveCorner, moveRun, roomShares, snapOffset, wallRun } from "../web/plan/wall-edit.js";
 import { SNAP_LABELS } from "../web/plan/boundary-editor.js";
 import { alignPlan } from "../web/plan/align.js";
 import { fromCells, roomRings, wallEdges } from "../web/plan/graph.js";
@@ -154,4 +154,55 @@ test("walls of the preset E preview move although alignment left two corners on 
         assert.ok(range > 0, "a movable wall has room to move");
     }
     assert.ok(moved >= walls.length / 2, `${moved} of ${walls.length} walls of the preview move`);
+});
+
+test("dragging a corner moves it and its twins, changes only the rooms that use it, slides a boundary corner along the boundary, and stops at the last valid point", () => {
+    const g = threeRooms();
+    const round = (p) => p.map((v) => +v.toFixed(9));
+    const total = (h) => areas(h).reduce((s, a) => s + a, 0);
+
+    // an inner corner goes where it is dragged; the total area stays
+    const t = idAt(g, 0, 0);
+    const inner = moveCorner(g, t, [0.3, 0.2]);
+    assert.deepEqual(round(at(inner.graph, t)), [0.3, 0.2], "the T junction goes to the pointer");
+    assert.deepEqual(round(inner.point), [0.3, 0.2]);
+    assert.ok(Math.abs(total(inner.graph) - 4) < 1e-12, "the rooms still fill the plan");
+    assert.deepEqual(areas(g), [2, 1, 1], "the original plan is left as it was");
+
+    // a boundary corner slides along its boundary segment; R0 does not use it and keeps its area
+    const end = idAt(g, 1, 0);
+    const slid = moveCorner(g, end, [1.5, 0.3]);
+    assert.deepEqual(round(at(slid.graph, end)), [1, 0.3], "the corner stays on the boundary x = 1");
+    assert.deepEqual(areas(slid.graph).map((a) => +a.toFixed(9)), [2, 0.85, 1.15]);
+
+    // dragged past the next boundary corner, it stops before the boundary wall vanishes
+    const far = moveCorner(g, end, [1, 3]);
+    const [fx, fy] = at(far.graph, end);
+    assert.ok(fx === 1 && fy > 0.98 && fy < 1, `stopped at ${fx}, ${fy}`);
+    assert.ok(areas(far.graph).every((a) => a > 0), "every room keeps an area");
+
+    // an inner corner dragged out of the plan stops before its walls cross the boundary
+    const out = moveCorner(g, t, [-1.5, 0]);
+    const [ox] = at(out.graph, t);
+    assert.ok(ox > -1 && ox < -0.95, `stopped at x ${ox}`);
+    assert.ok(Math.abs(total(out.graph) - 4) < 1e-12 && areas(out.graph).every((a) => a > 0));
+
+    // a corner where the boundary bends cannot move
+    assert.equal(moveCorner(g, idAt(g, 1, 1), [0.5, 0.5]), null);
+
+    // on the preset E preview, a corner with a twin on the same point moves with its twin
+    const preview = JSON.parse(readFileSync(new URL("./fixtures/preview_e.json", import.meta.url)));
+    const plan = fromCells(preview.cells, preview.boundary, { roomCount: preview.roomCount, simplifyTol: 0.004 });
+    alignPlan(plan, preview.boundary, { mergeTol: 0.02, snapTol: 0.02 });
+    const twins = wallEdges(plan).filter((w) => at(plan, w.a)[0] === at(plan, w.b)[0] && at(plan, w.a)[1] === at(plan, w.b)[1]);
+    assert.ok(twins.length > 0, "the preview has two corners on one point");
+    let together = 0;
+    for (const { a, b } of twins) {
+        const [x, y] = at(plan, a);
+        const moved = moveCorner(plan, a, [x + 0.004, y + 0.004]);
+        if (!moved || (at(moved.graph, a)[0] === x && at(moved.graph, a)[1] === y)) continue;
+        assert.deepEqual(at(moved.graph, b), at(moved.graph, a), "the twin moves with the corner");
+        together++;
+    }
+    assert.ok(together > 0, "at least one twin pair moves");
 });

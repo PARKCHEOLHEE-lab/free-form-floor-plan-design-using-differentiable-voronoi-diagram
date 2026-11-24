@@ -14,6 +14,14 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
 const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
 const unit = (v) => { const l = Math.hypot(v[0], v[1]); return [v[0] / l, v[1] / l]; };
+const span = (g, e) => Math.hypot(...sub(point(g, e.a), point(g, e.b)));
+
+/** A corner and the corners on the same point (joined by walls of no length). */
+function twinsOf(g, id, all) {
+    const group = new Set([id]);
+    for (const x of group) for (const e of all) if ((e.a === x || e.b === x) && span(g, e) < TOL) group.add(e.a === x ? e.b : e.a);
+    return group;
+}
 
 /**
  * The straight wall through the interior edge a-b: every interior edge within 10 degrees of its
@@ -30,7 +38,7 @@ export function wallRun(g, a, b) {
     const all = wallEdges(g);
     const interior = all.filter((e) => e.rooms.length === 2);
     const pick = interior.find((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
-    const length = (e) => Math.hypot(...sub(point(g, e.a), point(g, e.b)));
+    const length = (e) => span(g, e);
     if (!pick || length(pick) < TOL) return null;
     const origin = point(g, pick.a);
     const u = unit(sub(point(g, pick.b), origin));
@@ -42,17 +50,11 @@ export function wallRun(g, a, b) {
     const inRun = new Set(edges.map(([x, y]) => `${x},${y}`));
     const corners = [...new Set(edges.flat())];
 
-    // a corner and the corners on the same point (joined by walls of no length)
-    const twinsOf = (id) => {
-        const group = new Set([id]);
-        for (const x of group) for (const e of all) if ((e.a === x || e.b === x) && length(e) < TOL) group.add(e.a === x ? e.b : e.a);
-        return group;
-    };
     const slides = new Map(); // corner -> its movement per unit of offset
     let lo = -Infinity, hi = Infinity, locked = false;
     for (const id of corners) {
         if (slides.has(id)) continue; // a twin already placed
-        const twins = twinsOf(id);
+        const twins = twinsOf(g, id, all);
         const p = point(g, id);
         const meeting = all.filter((e) => (twins.has(e.a) || twins.has(e.b)) && !inRun.has(`${e.a},${e.b}`) && length(e) >= TOL);
         const place = (v) => { for (const x of twins) slides.set(x, v); };
@@ -138,6 +140,30 @@ export function moveRun(g, run, offset) {
         t = ok;
     }
     return { graph: moved(t), offset: t };
+}
+
+/**
+ * Drag one corner (with its twins) toward `target`. A boundary corner moves only along the boundary
+ * segment it lies on; one where the boundary bends cannot move (null). The move is moveRun on a
+ * one-corner run, so it stops at the same last valid position. Returns { graph, point }.
+ */
+export function moveCorner(g, id, target) {
+    const all = wallEdges(g);
+    const twins = twinsOf(g, id, all);
+    const p = point(g, id);
+    let d = sub(target, p);
+    if ([...twins].some((x) => g.corners.get(x).fixed)) {
+        const ends = all.filter((e) => (twins.has(e.a) || twins.has(e.b)) && e.rooms.length === 1 && span(g, e) >= TOL)
+            .map((e) => point(g, twins.has(e.a) ? e.b : e.a));
+        const dirs = ends.map((q) => unit(sub(q, p)));
+        if (!dirs.length || dirs.some((v) => Math.abs(cross(dirs[0], v)) > KINK)) return null; // the boundary bends here
+        const along = dot(d, dirs[0]);
+        d = [dirs[0][0] * along, dirs[0][1] * along];
+    }
+    const rooms = g.rooms.map((rings, r) => (rings.some((ring) => ring.some((x) => twins.has(x))) ? r : -1)).filter((r) => r >= 0);
+    const run = { slides: new Map([...twins].map((x) => [x, d])), rooms, range: [0, 1], locked: false };
+    const { graph } = moveRun(g, run, 1);
+    return { graph, point: point(graph, id) };
 }
 
 /** Each room's share of the plan area (holes subtract). */
