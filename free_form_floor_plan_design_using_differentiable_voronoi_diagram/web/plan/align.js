@@ -1,5 +1,5 @@
 // Wall alignment, ported from an earlier Python version (after GSDiff's test-time post-process).
-import { openRing, segmentDistance } from "./geom.js";
+import { openRing, ringArea, segmentDistance } from "./geom.js";
 import { wallEdges } from "./graph.js";
 
 /** Orientation (mod 90 degrees) of the boundary segment nearest to `mid`, as the wall loss picks it. */
@@ -152,4 +152,9 @@ export function components(edges) {
     const out = new Map();
     for (const e of edges) out.set(find(e[0]), [...(out.get(find(e[0])) ?? []), e]);
     return [...out.values()];
+}
+
+/** The typical width of a Voronoi cell: the square root of the boundary area over the site count. */
+export function cellWidth(boundary, sites) {
+    return Math.sqrt(ringArea(boundary) / sites);
 }

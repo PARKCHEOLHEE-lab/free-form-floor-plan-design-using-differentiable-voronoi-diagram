@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { alignPlan, alignedShare } from "../web/plan/align.js";
+import { alignPlan, alignedShare, cellWidth } from "../web/plan/align.js";
 import { fromCells, roomRings } from "../web/plan/graph.js";
 import { openRing, ringArea, signedArea2 } from "../web/plan/geom.js";
 
@@ -82,4 +82,14 @@ test("point merging and wall snapping use independent tolerances", () => {
     assert.equal(snap.corners.size, 5, "the lower point tolerance keeps both corners");
     assert.equal(snap.corners.get(1).y, snap.corners.get(0).y,
         "the bottom wall straightens at the higher snap tolerance");
+});
+
+test("cell width: the typical Voronoi cell width is the square root of the boundary area over the site count", () => {
+    // a unit square split among 4 sites gives cells 0.5 wide; a closing point repeated at the end changes nothing
+    assert.equal(cellWidth([[0, 0], [1, 0], [1, 1], [0, 1]], 4), 0.5);
+    assert.equal(cellWidth([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], 4), 0.5);
+    // preset E (area 1.328, measured with the shoelace formula in Python) with 80 sites
+    const e = load("shape_e.json").boundary;
+    assert.ok(Math.abs(cellWidth(e, 80) - 0.1288) < 5e-4, `preset E, 80 sites: ${cellWidth(e, 80)}`);
+    assert.ok(Math.abs(cellWidth(e, 8) - cellWidth(e, 80) * Math.sqrt(10)) < 1e-12, "ten times fewer sites make cells sqrt(10) times wider");
 });
