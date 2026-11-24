@@ -20,7 +20,9 @@ export async function serve() {
     const url = `http://localhost:${port}/`;
     for (let i = 0; i < 50; i++) {
         try {
-            if ((await fetch(url)).ok) return { url, proc };
+            const res = await fetch(url);
+            await res.arrayBuffer(); // read the page: an unread body makes undici assert when serve.py closes the socket
+            if (res.ok) return { url, proc };
         } catch {}
         await new Promise((r) => setTimeout(r, 100));
     }
