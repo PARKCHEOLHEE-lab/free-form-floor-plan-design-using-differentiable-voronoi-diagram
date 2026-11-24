@@ -103,6 +103,25 @@ test('the app weighs L1 and Cos walls separately and has no step loss', {timeout
     }finally{await browser.close();proc.kill();}
 });
 
+test('the default area weight is 0.5 on every preset', {timeout:60000}, async()=>{
+    const {url,proc}=await serve();
+    const browser=await chromium.launch();
+    try{
+        const page=await browser.newPage();
+        await observeWorker(page);
+        await page.goto(url);
+        await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        for(const preset of ['shape_e','shape_a','shape_b','shape_c','shape_d']){
+            if(preset!=='shape_e'){
+                await page.click('button[data-open=rooms]');await page.click(`button[data-mode=${preset}]`);await page.click('button[data-open=rooms]');
+                await page.waitForFunction(m=>wallProof.builds.at(-1)?.mode===m&&document.querySelector('#status').textContent.includes('ready'),preset);
+            }
+            assert.equal(await page.locator('#w_area').inputValue(),'0.5',`${preset}: the area slider starts at 0.5`);
+            assert.equal(await page.evaluate(()=>wallProof.builds.at(-1).w[1]),0.5/0.49,`${preset}: the engine gets the area weight at its reference scale`);
+        }
+    }finally{await browser.close();proc.kill();}
+});
+
 test('L1 and Cos controls reach real WASM without changing the camera',{timeout:180000},async()=>{
     const {url,proc}=await serve();const browser=await chromium.launch();
     try{

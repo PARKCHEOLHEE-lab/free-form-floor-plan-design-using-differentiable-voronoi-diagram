@@ -359,7 +359,7 @@
         <div class="label">Loss weight (0–1)</div>
         <div class="row"><label for="w_wall">L1</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="1.00"><span class="val" id="w_wall_v">1.00</span></div>
         <div class="row"><label for="w_cosine">Cos</label><input id="w_cosine" type="range" min="0" max="1" step="0.01" value="1"><span class="val" id="w_cosine_v">1.00</span></div>
-        <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
+        <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.50"><span class="val" id="w_area_v">0.50</span></div>
         <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
         <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
         <div class="label">Run settings</div>
@@ -712,7 +712,7 @@ const PRESETS = {
     sites: 80, rooms: 5,
     roomRatios: [0.13, 0.30, 0.23, 0.13, 0.21],  // normalized shares 13/30/23/13/21%
     wall: 0.02,
-    w_wall: 1.00, w_cosine: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
   // B — orthogonal boundary, 7 rooms (user preset, 2026-06).
@@ -720,7 +720,7 @@ const PRESETS = {
     sites: 80, rooms: 7,
     roomRatios: [0.12, 0.12, 0.25, 0.16, 0.07, 0.12, 0.15],  // displayed shares 12/12/25/16/7/12/15%
     wall: 0.02,
-    w_wall: 1.00, w_cosine: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 4217,
   },
   // C — orthogonal boundary, 5 rooms (user preset, 2026-06).
@@ -730,7 +730,7 @@ const PRESETS = {
     // so the weights are normalized to sum 1.0 here to reproduce that exact readout.
     roomRatios: [0.116, 0.266, 0.316, 0.116, 0.186],
     wall: 0.02,
-    w_wall: 1.00, w_cosine: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 3764,
   },
   // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
@@ -738,7 +738,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
     wall: 0.02,
-    w_wall: 1.00, w_cosine: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 2153,
   },
   // E — orthogonal runs with two diagonal walls, 6 rooms (user preset, 2026-06).
@@ -746,7 +746,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.13, 0.11, 0.21, 0.20, 0.11, 0.24],  // normalized shares 13/11/21/20/11/24%
     wall: 0.02,
-    w_wall: 1.00, w_cosine: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 4971,
   },
 };
