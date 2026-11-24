@@ -309,3 +309,17 @@ test("loss graph: value tags stay hidden until the mouse is on their row", { tim
         proc.kill();
     }
 });
+
+test("names: the bubble tools and their Display toggle read Bubble Diagram", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const labels = await page.$$eval(".panel[data-panel=rooms] .label", (ls) => ls.map((l) => l.textContent));
+            assert.ok(labels.includes("Bubble Diagram"), `Rooms panel sections: ${labels.join(", ")}`);
+            assert.equal(await page.getByLabel("Bubble Diagram", { exact: true }).count(), 1, "the Display toggle is named Bubble Diagram");
+            assert.equal(await page.getByText("Room bubbles").count(), 0, "the old name is gone");
+        });
+    } finally {
+        proc.kill();
+    }
+});
