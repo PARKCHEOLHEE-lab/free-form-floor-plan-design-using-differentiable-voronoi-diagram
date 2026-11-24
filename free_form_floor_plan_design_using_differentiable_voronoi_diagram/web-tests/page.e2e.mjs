@@ -5,6 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { serve } from "./serve.mjs";
+import { alignPlan, alignedShare } from "../web/plan/align.js";
+import { fromCells } from "../web/plan/graph.js";
 
 const SHOTS = process.env.E2E_SHOTS; // optional folder for screenshots
 
@@ -46,6 +48,16 @@ test("point and wall sliders redraw independently without restarting the plan", 
                 if (message.cmd === "build") window.buildCount++;
                 return postMessage.call(this, message, ...args);
             };
+            const Original = Worker;
+            window.Worker = class extends Original {
+                constructor(...args) {
+                    super(...args);
+                    this.addEventListener("message", ({ data }) => {
+                        if (data.type === "frame") window.lastFrame = data.frame;
+                        if (data.type === "built") window.lastBoundary = data.boundary;
+                    });
+                }
+            };
         });
         await page.goto(url);
         await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
@@ -78,8 +90,18 @@ test("point and wall sliders redraw independently without restarting the plan", 
 
         await setTolerance(snap, "0.04");
         assert.equal(await merge.inputValue(), "0.02");
-        // Independently applying 0.02 merge and 0.04 snap on the same frame gives 65%.
-        assert.match(await share.textContent(), /→ 65%$/);
+        // The readout is the alignment of the same frame with merge 0.02 and snap 0.04,
+        // the same steps the page takes (web/index.html alignFrame).
+        const { frame, boundary } = await page.evaluate(() => ({ frame: window.lastFrame, boundary: window.lastBoundary }));
+        const readout = (mergeTol, snapTol) => {
+            const g = fromCells(frame.cells, boundary, { roomCount: new Set(frame.cells.map(c => c.room)).size, simplifyTol: 0.004 });
+            const before = alignedShare(g, boundary);
+            alignPlan(g, boundary, { mergeTol, snapTol });
+            return `${Math.round(before * 100)}% → ${Math.round(alignedShare(g, boundary) * 100)}%`;
+        };
+        const expected = readout(0.02, 0.04);
+        assert.notEqual(expected, readout(0.02, 0.02), "on this frame a 0.04 snap changes the share");
+        assert.equal(await share.textContent(), expected);
         await snap.press("End");
         assert.equal(await page.locator("#align_tol_v").textContent(), "1.000");
         await snap.press("Home");
