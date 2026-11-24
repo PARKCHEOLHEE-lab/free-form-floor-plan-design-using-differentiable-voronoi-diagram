@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
 
@@ -375,6 +376,33 @@ test("rooms: Draw boundary is a full-width pencil button under the presets", { t
             const presets = await page.locator("#presets").boundingBox(), button = await draw.boundingBox();
             assert.ok(button.y >= presets.y + presets.height, "Draw boundary sits under the presets");
             assert.ok(Math.abs(button.width - presets.width) < 2, "Draw boundary is as wide as the preset row");
+        });
+    } finally { proc.kill(); }
+});
+
+test("rooms: preset buttons show an outline of their own boundary instead of a letter", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    // Scale a ring into a unit box from its lower-left corner, keeping its proportions.
+    const unit = (ring) => {
+        const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+        const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+        return ring.map(([x, y]) => [(x - Math.min(...xs)) / size, (y - Math.min(...ys)) / size]);
+    };
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("button[data-open=rooms]");
+            for (const k of ["a", "b", "c", "d", "e"]) {
+                const button = page.locator(`#presets button[data-mode=shape_${k}]`);
+                const name = `Boundary ${k.toUpperCase()}`;
+                assert.equal((await button.textContent()).trim(), "", `${name} shows no letter`);
+                assert.equal(await button.getAttribute("aria-label"), name);
+                const href = await button.locator("svg use").getAttribute("href");
+                const icon = await page.$eval(href, (s) => s.querySelector("polygon").getAttribute("points").trim().split(/\s+/).map((p) => p.split(",").map(Number)));
+                const boundary = JSON.parse(readFileSync(new URL(`./fixtures/shape_${k}.json`, import.meta.url))).boundary.slice(0, -1);
+                const drawn = unit(icon.map(([x, y]) => [x, -y])), expected = unit(boundary);   // SVG y points down
+                assert.equal(drawn.length, expected.length, `${name} draws every corner`);
+                drawn.forEach((p, i) => assert.ok(Math.hypot(p[0] - expected[i][0], p[1] - expected[i][1]) < 0.01, `${name} corner ${i} is at ${p}, expected ${expected[i]}`));
+            }
         });
     } finally { proc.kill(); }
 });
