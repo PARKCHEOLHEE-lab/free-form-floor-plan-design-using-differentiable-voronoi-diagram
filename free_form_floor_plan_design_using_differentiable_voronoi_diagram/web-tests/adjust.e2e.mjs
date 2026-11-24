@@ -72,3 +72,70 @@ test("adjustment: dragging a wall moves it, updates the room areas beside it, sh
         assert.deepEqual(await areasNow(page), after, "Shift+Cmd+Z redoes it");
     });
 });
+
+/** Drag the first wall found sideways by `dx` css px. */
+async function dragWall(page, dx = 40) {
+    const hit = await findWall(page);
+    assert.ok(hit, "a wall can be found under the pointer");
+    await page.mouse.down();
+    for (let x = 4; x <= dx; x += 4) await page.mouse.move(hit[0] + x, hit[1]);
+    await page.mouse.up();
+    await page.mouse.move(1100, 700);
+}
+const dialogOpen = (page) => page.$eval("#discard-walls", (d) => d.open);
+const hasEdits = (page) => page.$eval("#plan", (c) => c.hasAttribute("data-wall-edits"));
+
+test("adjustment: with wall edits, a control that rebuilds the walls asks first; Cancel keeps them, Discard clears them and goes on", { timeout: 120_000 }, async () => {
+    await onPage(async (page) => {
+        await page.click("button[data-open=adjust]");
+        assert.equal(await hasEdits(page), false);
+        await dragWall(page);
+        assert.equal(await hasEdits(page), true, "the drag left a wall edit");
+        const edited = await areasNow(page);
+
+        // display controls and the wall width never rebuild the walls, so they never ask
+        await page.click("button[data-open=rooms]");
+        await page.click("[data-walls=raw]");
+        await page.click("[data-walls=aligned]");
+        await page.click(".toggle:has(#show-doors)");
+        await page.locator("#wall").focus();
+        await page.keyboard.press("ArrowLeft");
+        assert.equal(await dialogOpen(page), false, "display controls do not ask");
+        assert.equal(await hasEdits(page), true);
+
+        // a room edit on the plan asks; Cancel draws nothing
+        const rooms = await page.locator("#rooms_v").textContent();
+        await page.mouse.move(560, 300);
+        await page.mouse.down();
+        assert.equal(await dialogOpen(page), true, "pressing on the plan in Rooms asks first");
+        await page.mouse.up();
+        await page.click("#discard-walls button[value=cancel]");
+        assert.equal(await page.locator("#rooms_v").textContent(), rooms, "Cancel draws no room");
+
+        // a slider that rebuilds asks, by keyboard and by mouse; Cancel keeps its value and the edits
+        await page.click("button[data-open=optimize]");
+        const iters = await page.locator("#iters").inputValue();
+        await page.locator("#iters").focus();
+        await page.keyboard.press("ArrowRight");
+        assert.equal(await dialogOpen(page), true, "a slider key asks first");
+        await page.click("#discard-walls button[value=cancel]");
+        await page.locator("#iters").click({ position: { x: 5, y: 2 } });
+        assert.equal(await dialogOpen(page), true, "a slider press asks first");
+        await page.click("#discard-walls button[value=cancel]");
+        assert.equal(await page.locator("#iters").inputValue(), iters, "Cancel keeps the slider value");
+        assert.deepEqual(await areasNow(page), edited, "Cancel keeps the wall edits");
+
+        // Run asks; Cancel does not run; Discard clears the edits and runs
+        await page.click("#run");
+        assert.equal(await dialogOpen(page), true, "Run asks first");
+        await page.click("#discard-walls button[value=cancel]");
+        assert.equal(await page.locator("#run").getAttribute("aria-label"), "Run", "Cancel does not run");
+        assert.equal(await hasEdits(page), true);
+        await page.click("#run");
+        await page.click("#discard-walls button[value=discard]");
+        await page.waitForFunction(() => !document.getElementById("discard-walls").open); // the dialog closes in the next task
+        assert.equal(await hasEdits(page), false, "Discard clears the wall edits");
+        await page.waitForFunction(() => document.getElementById("run").getAttribute("aria-label") === "Pause");
+        await page.click("#run");
+    });
+});

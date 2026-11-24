@@ -184,6 +184,15 @@
   #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
   #plan[data-boundary-drawing] { cursor:crosshair !important; }
   #plan[data-wall-hover] { cursor:move !important; }
+  #discard-walls { border:0; border-radius:14px; padding:18px 20px; width:min(320px, calc(100vw - 32px)); background:var(--light); color:var(--ui-fg); box-shadow:var(--ui-card-shadow); font:13.44px/1.45 var(--font); }
+  #discard-walls::backdrop { background:rgba(10, 10, 10, .2); }
+  #discard-walls .dialog-title { margin:0 0 6px; font-size:15px; font-weight:600; }
+  #discard-walls .bubble-help { margin:0 0 16px; }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:.5em; }
+  .dialog-actions button { padding:.42em .9em; border:1px solid var(--ui-border); border-radius:8px; background:transparent; color:var(--ui-fg); font:inherit; cursor:pointer; }
+  .dialog-actions button:hover { background:var(--ui-muted); }
+  .dialog-actions .primary { background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }   /* as Run */
+  .dialog-actions .primary:hover { background:#262626; }
   .area-head .val { color:var(--ui-muted-fg); font-family:var(--font); }
   #adjust-areas .raswatch, .area-head span:first-child { flex:1; }
   #adjust-areas .row .val + .val { color:var(--ui-muted-fg); }   /* the target share */
@@ -233,6 +242,13 @@
   <div class="stage">
     <div class="canvas-card">
       <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div>
+        <dialog id="discard-walls" aria-labelledby="discard-walls-title">
+          <form method="dialog">
+            <p id="discard-walls-title" class="dialog-title">Discard wall edits?</p>
+            <p class="bubble-help">This change rebuilds the walls from the plan, so the walls you moved go back.</p>
+            <div class="dialog-actions"><button value="cancel">Cancel</button><button value="discard" class="primary">Discard</button></div>
+          </form>
+        </dialog>
         <svg id="wall-sketch" aria-hidden="true" hidden><path data-wall></path><line data-guide hidden></line><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
         <svg id="boundary-sketch" aria-hidden="true" hidden><polyline></polyline><line data-edge-guide hidden></line><line data-tracking-guide hidden></line><circle data-first r="4" hidden></circle><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
       </div>
@@ -389,7 +405,7 @@ let wallsMode = 'raw';
 // plan from the optimizer frame on every draw). null while there are no edits.
 let adjusted = null;
 let lastAligned = null;                 // the live aligned plan of the last drawn frame
-const wallHistory = new History(null);  // committed wall edits; null = none
+let wallHistory = new History(null);    // committed wall edits; null = none
 const wallState = g => ({ corners: [...g.corners].map(([id, c]) => [id, { ...c }]), rooms: g.rooms });
 const wallGraph = s => s && { corners: new Map(s.corners.map(([id, c]) => [id, { ...c }])), rooms: structuredClone(s.rooms) };
 let boundaryRing = null;     // sent by the worker once the optimizer is built
@@ -562,6 +578,7 @@ let committedWalls = null;  // the wall edits as of the last commit, undo or red
 function restoreWalls(state) {
   committedWalls = state;
   adjusted = wallGraph(state);
+  $('plan').toggleAttribute('data-wall-edits', !!adjusted);
   setButtons();
   if (lastFrame) drawFrame(lastFrame);
 }
@@ -571,6 +588,7 @@ const wallEditor = createWallEditor($('plan'), view, {
   canEdit: () => wallsMode === 'aligned',
   onChange(graph, commit) {
     adjusted = graph;
+    $('plan').toggleAttribute('data-wall-edits', true);
     if (commit) {
       committedWalls = wallState(graph);
       wallHistory.commit(committedWalls);
@@ -580,6 +598,51 @@ const wallEditor = createWallEditor($('plan'), view, {
   },
   onCancel: () => restoreWalls(committedWalls),
 });
+
+// Wall edits last until the walls are rebuilt. With edits, anything that rebuilds them (a preview
+// or run, another boundary, room edits, the point merge and wall snap tolerances) asks first;
+// Discard drops the edits and, for a button, goes on with its click. The press or key that asked
+// does nothing, so Cancel changes nothing.
+const REBUILD_BUTTONS = '#run, #presets button, #custom-boundaries button, #boundary-draw';
+const REBUILD_SLIDERS = '.panel[data-panel=optimize] input[type=range], #merge_tol, #align_tol';
+const discardDialog = $('discard-walls');
+let asking = false;
+let afterDiscard = null;   // the click to go on with once the edits are dropped
+function askFirst(e, then) {
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (asking) return;
+  asking = true;
+  afterDiscard = then;
+  discardDialog.showModal();
+}
+// Act on the button itself (the form then closes the dialog); Escape or Cancel just close it.
+discardDialog.addEventListener('click', e => {
+  if (e.target.closest('button[value]')?.value !== 'discard') return;
+  const then = afterDiscard;
+  afterDiscard = null;
+  asking = false;
+  wallHistory = new History(null);
+  restoreWalls(null);
+  then?.();
+});
+discardDialog.addEventListener('close', () => { asking = false; afterDiscard = null; });
+document.addEventListener('click', e => {
+  if (!adjusted || discardDialog.contains(e.target)) return;
+  const button = e.target.closest?.(REBUILD_BUTTONS) ?? (openPanel === 'rooms' ? e.target.closest?.('#undo, #redo') : null);
+  if (button && !button.disabled) askFirst(e, () => button.click());
+}, true);
+document.addEventListener('pointerdown', e => {
+  if (!adjusted || e.button !== 0) return;
+  if (e.target.closest?.(REBUILD_SLIDERS) || (openPanel === 'rooms' && e.target === $('plan'))) askFirst(e);
+}, true);
+document.addEventListener('keydown', e => {
+  if (!adjusted || asking) return;
+  const sliderKey = e.target.closest?.(REBUILD_SLIDERS) && /^(Arrow|Page|Home|End)/.test(e.key);
+  const inField = e.target.closest?.('input, textarea, select, [contenteditable]');
+  const roomKey = openPanel === 'rooms' && !inField && (e.key === 'Delete' || e.key === 'Backspace' || ((e.metaKey || e.ctrlKey) && /^[zy]$/i.test(e.key)));
+  if (sliderKey || roomKey) askFirst(e);
+}, true);
 $('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubbles').checked));
 $('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
 
