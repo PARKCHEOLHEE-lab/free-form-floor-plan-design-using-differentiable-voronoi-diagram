@@ -286,3 +286,26 @@ test("rooms: one icon opens the boundary choice above the room bubbles", { timeo
         proc.kill();
     }
 });
+
+test("loss graph: value tags stay hidden until the mouse is on their row", { timeout: 120_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            await page.click("#run");
+            await page.waitForFunction(() => +(/iter (\d+)/.exec(document.getElementById("tick").textContent)?.[1] ?? 0) >= 10);
+            await page.click("#run"); // pause
+            await page.click("button[data-open=optimize]");
+            const shown = () =>
+                page.$$eval(".playhead .vtag", (ts) => ts.filter((t) => getComputedStyle(t).visibility === "visible" && t.textContent.length > 0).map((t) => t.id));
+            assert.deepEqual(await shown(), [], "no value shows until the mouse is on a row");
+            await page.locator(".lossrow").nth(0).hover();
+            assert.deepEqual(await shown(), ["vt_total"], "the total row shows only its own value");
+            await page.locator(".lossrow").nth(3).hover();
+            assert.deepEqual(await shown(), ["vt_area"], "moving to the area row swaps the value");
+            await page.mouse.move(1100, 700);
+            assert.deepEqual(await shown(), [], "leaving the graph hides the value again");
+        });
+    } finally {
+        proc.kill();
+    }
+});

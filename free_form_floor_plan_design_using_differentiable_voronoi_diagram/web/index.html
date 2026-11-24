@@ -100,6 +100,8 @@
       font-family: var(--mono); font-size: .72em; padding: .02em .34em; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .playhead .vtag::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
       border: 4px solid transparent; border-top-color: var(--c); border-bottom: 0; }
+    /* a value shows only while the mouse is on its row; hidden tags keep their size for placement */
+    .playhead .vtag { visibility: hidden; } .playhead .vtag.shown { visibility: visible; }
     #vt_total { --c: #66a1ff; } #vt_wall { --c: #e08a5a; } #vt_area { --c: #5aa469; }
     #sp_cosine { stroke: #4676b8; } #vt_cosine { --c: #4676b8; }
     #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
@@ -428,6 +430,12 @@ $('walls').addEventListener('click', e => {
 });
 // Each weighted loss contribution has its own y-scale.
 const LOSS_TERMS = ['total', 'wall', 'cosine', 'area', 'lloyd', 'topo'];
+// Each row's value tag (vt_<term>) shows while the mouse is on that row (sp_<term>).
+document.querySelectorAll('.lossrow').forEach(row => {
+  const tag = $('vt_' + row.querySelector('polyline').id.slice(3));
+  row.addEventListener('pointerenter', () => tag.classList.add('shown'));
+  row.addEventListener('pointerleave', () => tag.classList.remove('shown'));
+});
 
 let lastFrame = null;                          // last rendered cell-frame, for resize redraw
 let wallWidth = 0.02;                          // wall thickness (normalized half-width); JS-only render param
