@@ -274,11 +274,16 @@
   .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 0; border:0; border-radius:4px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
   .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
   .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
-  .boundary-actions { margin:8px 0 12px; }
-  #presets button { display:grid; place-items:center; }
+  /* six equal cells: the five presets, then Draw boundary */
+  .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }
+  #presets { display:contents; }
+  .boundary-row button { display:grid; place-items:center; }
   .preset-ic { width:20px; height:20px; stroke-width:1.6; }
-  .boundary-actions button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
-  .boundary-actions .ic { width:16px; height:16px; }
+  #boundary-draw { position:relative; }
+  #boundary-draw .ic { width:16px; height:16px; }
+  #boundary-draw::after { content:attr(aria-label); position:absolute; top:calc(100% + 6px); right:0; z-index:3; padding:4px 8px; border-radius:6px;
+    background:var(--ui-fg); color:var(--light); font:500 12px/1.2 var(--font); white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .1s; }
+  #boundary-draw:hover::after, #boundary-draw:focus-visible::after { opacity:1; transition-delay:.12s; }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -336,6 +341,7 @@
       <section class="panel" data-panel="rooms">
         <div class="label">Rooms</div>
         <div class="label">Boundary</div>
+        <div class="seg boundary-row">
         <div class="seg" id="presets">
           <button data-mode="shape_a" aria-label="Boundary A"><svg class="ic preset-ic"><use href="#b-shape_a"/></svg></button>
           <button data-mode="shape_b" aria-label="Boundary B"><svg class="ic preset-ic"><use href="#b-shape_b"/></svg></button>
@@ -343,8 +349,9 @@
           <button data-mode="shape_d" aria-label="Boundary D"><svg class="ic preset-ic"><use href="#b-shape_d"/></svg></button>
           <button data-mode="shape_e" class="active" aria-label="Boundary E"><svg class="ic preset-ic"><use href="#b-shape_e"/></svg></button>
         </div>
+        <button id="boundary-draw" type="button" aria-label="Draw boundary" aria-pressed="false" disabled><svg class="ic"><use href="#i-vector-square"/></svg></button>
+        </div>
 <div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
-        <div class="seg boundary-actions"><button id="boundary-draw" type="button" aria-pressed="false" disabled><svg class="ic"><use href="#i-vector-square"/></svg>Draw boundary</button></div>
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>

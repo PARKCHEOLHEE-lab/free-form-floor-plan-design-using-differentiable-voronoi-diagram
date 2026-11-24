@@ -364,19 +364,27 @@ test("editing bar: Undo and Redo sit beside Editing Bubble Diagram, only while R
     } finally { proc.kill(); }
 });
 
-test("rooms: Draw boundary is a full-width button with the corner-point square icon under the presets", { timeout: 60_000 }, async () => {
+test("rooms: Draw boundary is an icon-only button after the last preset, sized like a preset", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
             const draw = page.locator("#boundary-draw");
-            assert.equal((await draw.textContent()).trim(), "Draw boundary");
+            assert.equal((await draw.textContent()).trim(), "", "Draw boundary shows only its icon");
+            assert.equal(await draw.getAttribute("aria-label"), "Draw boundary");
             assert.equal(await draw.locator("svg use").getAttribute("href"), "#i-vector-square");
             assert.deepEqual(await page.$eval("#i-vector-square", (s) => [...s.children].map((c) => c.tagName)), ["path", "path", "path", "path", "rect", "rect", "rect", "rect"], "four sides and four corner points");
             assert.equal(await draw.locator("svg").evaluate((s) => s.getBoundingClientRect().width), 16, "the icon matches the 16px toolbar icons");
-            const presets = await page.locator("#presets").boundingBox(), button = await draw.boundingBox();
-            assert.ok(button.y >= presets.y + presets.height, "Draw boundary sits under the presets");
-            assert.ok(Math.abs(button.width - presets.width) < 2, "Draw boundary is as wide as the preset row");
+            const last = await page.locator("#presets button").last().boundingBox(), button = await draw.boundingBox();
+            assert.ok(Math.abs(button.y - last.y) < 1 && Math.abs(button.height - last.height) < 1, "Draw boundary sits on the preset row");
+            assert.ok(button.x > last.x + last.width && button.x - (last.x + last.width) < 10, "Draw boundary comes right after E");
+            assert.ok(Math.abs(button.width - last.width) < 1, "Draw boundary is as wide as a preset");
+            const panel = await page.locator(".panel[data-panel=rooms]").boundingBox();
+            assert.ok(button.x + button.width <= panel.x + panel.width, "the row fits in the panel");
+            await draw.hover();
+            await page.waitForTimeout(300);
+            const tip = await draw.evaluate((b) => { const s = getComputedStyle(b, "::after"); return [s.content, +s.opacity]; });
+            assert.deepEqual(tip, ['"Draw boundary"', 1], "hovering shows the name");
         });
     } finally { proc.kill(); }
 });
