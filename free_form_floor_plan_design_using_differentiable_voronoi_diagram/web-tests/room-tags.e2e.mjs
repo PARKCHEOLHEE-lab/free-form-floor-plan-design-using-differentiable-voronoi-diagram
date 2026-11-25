@@ -39,7 +39,7 @@ async function withPlan(coverageName, run) {
 }
 
 const ready = page => page.waitForFunction(() => document.querySelector('#status').textContent.includes('ready'));
-const roomName = (page, id) => page.getByRole('textbox', { name: 'Name for room R' + id, exact: true });
+const roomName = (page, id) => page.getByRole('textbox', { name: 'Name for Room ' + id, exact: true });
 const pixels = page => page.$eval('#plan', canvas => canvas.toDataURL());
 
 async function drag(page, start, end) {
@@ -77,9 +77,11 @@ test('room names follow their room and are exported without rebuilding the plan'
         await rooms.click();
         const first = roomName(page, 1);
         assert.equal(await first.count(), 1, 'the first preset room has a name field');
-        assert.equal(await first.getAttribute('placeholder'), 'R1');
+        assert.equal(await first.getAttribute('placeholder'), 'Room 1');
+        assert.equal((await page.locator('#roomareas .raswatch').first().textContent()).trim(), 'Room 1');
         await page.locator('.gizmo [data-axis="+z"]').click();
         await editWall(page);
+        assert.equal((await page.locator('#adjust-areas .raswatch').first().textContent()).trim(), 'Room 1');
         await rooms.click();
         const walls = await pixels(page);
         const builds = await page.evaluate(() => window.buildCount);
@@ -119,6 +121,8 @@ test('room names follow their room and are exported without rebuilding the plan'
         await roomName(page, 2).fill(' ');
         await roomName(page, 2).press('Enter');
         assert.equal(await roomName(page, 2).inputValue(), '');
+        assert.equal(await roomName(page, 2).getAttribute('placeholder'), 'Room 2');
+        assert.equal(await page.locator('#room-tags .room-tag-name').textContent(), 'Room 2');
         assert.equal((await downloadPlan(page)).plan.rooms[0].name, undefined);
     });
 });
@@ -143,7 +147,7 @@ test('room tags show the current area and follow the displayed walls and camera'
         const n = plan.rooms.length;
         assert.equal(await tags.count(), n, 'there is one tag for each room of the Raw plan');
         assert.deepEqual(await tags.locator('.room-tag-name').allTextContents(),
-            Array.from({ length: n }, (_, i) => 'R' + (i + 1)));
+            Array.from({ length: n }, (_, i) => 'Room ' + (i + 1)));
         const raw = fromCells(cells, ring, { roomCount: n, simplifyTol: 0 });
         alignPlan(raw, ring, { mergeTol: 0, snapTol: 0.30 * cellWidth(ring, sites.length) });
         const rawShares = await shares();

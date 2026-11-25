@@ -1,5 +1,7 @@
 import { inside, openRing, segmentDistance } from './geom.js';
 
+export const roomLabel = id => `Room ${id}`;
+
 /** Retained room intentions; snapshots map stable editor IDs to dense engine indices. */
 export class BubbleProgram {
     #rooms = [];

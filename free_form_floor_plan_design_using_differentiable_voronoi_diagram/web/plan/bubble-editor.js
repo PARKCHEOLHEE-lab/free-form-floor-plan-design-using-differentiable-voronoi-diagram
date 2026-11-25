@@ -1,4 +1,5 @@
 import {inside,segmentDistance} from './geom.js';
+import {roomLabel} from './bubbles.js';
 
 /**
  * Left-button room editing with no tool modes, active only while enabled (the Rooms panel is
@@ -41,7 +42,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
             const el=document.createElement('span');
             el.className='bubble-label'+(r.id===selected?' selected':'')+(r.id==='draft'?' draft':'');
             Object.assign(el.dataset,{id:r.id,x:r.center[0],y:r.center[1],radius:r.radius,ratio:s.ratios[i]??''});
-            el.textContent=r.id==='draft'?'+':`R${r.id}`;
+            el.textContent=r.id==='draft'?'+':roomLabel(r.id);
             labels.append(el);
         });
         const dotRoom=s.rooms.find(r=>r.id===(press?.kind==='link'?press.from.id:hover));

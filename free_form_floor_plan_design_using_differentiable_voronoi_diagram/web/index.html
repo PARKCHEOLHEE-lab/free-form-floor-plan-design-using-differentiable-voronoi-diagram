@@ -87,7 +87,7 @@
        with sites/rooms/wall/loss; the colour swatch sits in the 3.4em label slot. */
     .roomareas { margin: .1em 0 .2em; }
     .roomareas .row { margin: .32em 0; }
-    .roomareas .raswatch { width: 3.4em; flex: none; display: flex; align-items: center; justify-content: center; }
+    .roomareas .raswatch { flex: none; display: flex; align-items: center; white-space: nowrap; }
     .roomareas .sw { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--reduce-30); flex: none; }
 
     .seg { display: flex; flex-wrap: wrap; gap: .35em; }
@@ -226,7 +226,7 @@
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
   .roomareas .raswatch { justify-content:flex-start; gap:4px; color:var(--ui-muted-fg); }   /* a room name is a row label */
-  .room-entry { display:grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); align-items:center; gap:8px; }
+  .room-entry { display:grid; grid-template-columns: minmax(7.25rem, 2fr) minmax(0, 3fr); align-items:center; gap:8px; }
   .room-entry input { min-width:0; padding:3px 6px; border:1px solid var(--ui-border); border-radius:6px; background:var(--light); color:var(--ui-fg); font:inherit; }
   .room-entry input:focus-visible { outline:2px solid var(--ui-muted-fg); }
   #rooms_v { margin-left:auto; }
@@ -399,7 +399,7 @@ const R = 1.18; // normalized boundaries fit within radius 1
 // three.js draws the plan in 3D: it opens isometric with the plan flat on the floor, the wheel
 // zooms (0.5x to 8x), the mouse rotates and pans, and a double-click returns to isometric
 import { createPlanView } from './plan/view3d.js';
-import { BubbleProgram } from './plan/bubbles.js';
+import { BubbleProgram, roomLabel } from './plan/bubbles.js';
 import { History } from './plan/history.js';
 import { createBubbleEditor } from './plan/bubble-editor.js';
 import { createBoundaryEditor } from './plan/boundary-editor.js';
@@ -613,7 +613,7 @@ function refreshAdjustAreas(shares, color, input) {
   const sum = weights.reduce((a, b) => a + b, 0) || 1;
   $('adjust-areas').innerHTML = shares.map((share, r) => {
     const id = input ? input.rooms[r].id : r + 1;
-    return `<div class="row"><span class="raswatch"><i class="sw" style="background:${color(r)}"></i> R${id}</span><span class="val" data-now>${shareText(share)}</span><span class="val" data-target>${shareText((weights[r] ?? 0) / sum)}</span></div>`;
+    return `<div class="row"><span class="raswatch"><i class="sw" style="background:${color(r)}"></i> ${roomLabel(id)}</span><span class="val" data-now>${shareText(share)}</span><span class="val" data-target>${shareText((weights[r] ?? 0) / sum)}</span></div>`;
   }).join('');
 }
 
@@ -761,15 +761,17 @@ function refreshRoomReadout() {
   $('rooms_v').textContent=String(weights.length);
   $('roomareas').innerHTML=weights.map((v,i)=>{
     const id=input?input.rooms[i].id:i+1;
-    const content=`<span class="raswatch"><i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i> R${id}</span><span class="val">${Math.round(v/sum*100)}%</span>`;
-    const summary=input?`<button type="button" class="room-row${editor.selected===id?' selected':''}" data-room-id="${id}" aria-label="Select room R${id}">${content}</button>`:`<div class="row">${content}</div>`;
-    return `<div class="room-entry">${summary}<input type="text" data-name-index="${i}" aria-label="Name for room R${id}" placeholder="R${id}" autocomplete="off"></div>`;
+    const label=roomLabel(id);
+    const content=`<span class="raswatch"><i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i> ${label}</span><span class="val">${Math.round(v/sum*100)}%</span>`;
+    const summary=input?`<button type="button" class="room-row${editor.selected===id?' selected':''}" data-room-id="${id}" aria-label="Select ${label}">${content}</button>`:`<div class="row">${content}</div>`;
+    return `<div class="room-entry">${summary}<input type="text" data-name-index="${i}" aria-label="Name for ${label}" placeholder="${label}" autocomplete="off"></div>`;
   }).join('');
   $('roomareas').querySelectorAll('input').forEach((field, i) => { field.value = names[i] ?? ''; });
   const selected=editor.selectedLink;
   $('connections').innerHTML=(input?.links??[]).map(([a,b])=>{
     const x=input.rooms[a].id,y=input.rooms[b].id;
-    return `<button type="button" class="connection-row${selected&&selected[0]===x&&selected[1]===y?' selected':''}" data-from="${x}" data-to="${y}" aria-label="Select door link R${x} to R${y}">R${x} / R${y}</button>`;
+    const from=roomLabel(x),to=roomLabel(y);
+    return `<button type="button" class="connection-row${selected&&selected[0]===x&&selected[1]===y?' selected':''}" data-from="${x}" data-to="${y}" aria-label="Select door link ${from} to ${to}">${from} / ${to}</button>`;
   }).join('');
 }
 
@@ -1082,7 +1084,7 @@ function drawFrame(f) {
     ? shown.rooms.map((_, r) => ({
         rings: roomRings(shown, r),
         color: color(r),
-        tag: { name: names[r] ?? `R${input?.rooms[r]?.id ?? r + 1}`, share: shareText(shownShares[r]) },
+        tag: { name: names[r] ?? roomLabel(input?.rooms[r]?.id ?? r + 1), share: shareText(shownShares[r]) },
       }))
     : f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) }));
   view.draw({

@@ -172,6 +172,8 @@ test('linking and deleting circles updates visible door links and keeps the rema
         assert.equal(await page.locator('.connection-row').count(),1,'dragging one room\'s dot to another creates their door connection');
         assert.ok(await strip()>before+30,'the connection is drawn in the actual plan canvas');
         const edge=page.locator('.connection-row');
+        assert.equal(await edge.textContent(), `Room ${rooms[0].id} / Room ${rooms[1].id}`);
+        assert.equal(await edge.getAttribute('aria-label'), `Select door link Room ${rooms[0].id} to Room ${rooms[1].id}`);
         assert.equal(+await edge.getAttribute('data-from'),rooms[0].id);
         assert.equal(+await edge.getAttribute('data-to'),rooms[1].id);
         await mkdir(new URL('../../.agents/cache/screens/',import.meta.url),{recursive:true});
@@ -195,7 +197,8 @@ test('linking and deleting circles updates visible door links and keeps the rema
         const remaining=await labels(page);
         assert.equal(remaining.length,1);assert.equal(remaining[0].id,rooms[1].id);
         assert.equal(remaining[0].ratio,1);
-        assert.equal(await page.locator('.bubble-label:not(.draft)').textContent(),`R${rooms[1].id}`,'room names do not change after deleting another room');
+        assert.equal(await page.locator('.bubble-label:not(.draft)').textContent(),`Room ${rooms[1].id}`,'room labels do not change after deleting another room');
+        assert.equal(await page.getByRole('button', { name: `Select Room ${rooms[1].id}`, exact: true }).count(), 1);
         assert.equal(await page.locator(`.room-row[data-room-id="${rooms[1].id}"] .sw`).evaluate(e=>getComputedStyle(e).backgroundColor),remainingColor);
         await page.mouse.click(...await middle(page.locator('.bubble-label:not(.draft)')));await page.keyboard.press('Delete');
         assert.equal((await labels(page)).length,0);assert.equal(await page.locator('#run').isDisabled(),true);
