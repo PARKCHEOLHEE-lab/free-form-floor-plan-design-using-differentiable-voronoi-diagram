@@ -24,7 +24,7 @@ const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
 /**
  * Create the view on `canvas`. draw(plan) shows one plan:
  *   outline ring               the boundary the camera fits (optional; else the rooms)
- *   rooms  [{ rings, color, tag? }]  filled even-odd, with an optional { name, share } tag
+ *   rooms  [{ rings, color, tag? }]  filled even-odd, with an optional { id, name, share } tag
  *   walls  [ring]              wall centerlines, drawn as double-line walls
  *   lines  [ring]              faint cell outlines (optional)
  *   points [[x, y]]            Voronoi sites (optional)
@@ -252,16 +252,19 @@ export function createPlanView(canvas, { gizmo, tags } = {}) {
     return { draw, clear, resize, home, screenPoint, pointOnPlan, drawBubbles, onChange(fn){listeners.add(fn);return()=>listeners.delete(fn);} };
 }
 
-function makeTag({ name, share }) {
+function makeTag({ id, name, share }) {
     const tag = document.createElement('div');
     const label = document.createElement('span');
+    const number = document.createElement('span');
     const area = document.createElement('span');
     tag.className = 'room-tag';
     label.className = 'room-tag-name';
+    number.className = 'room-tag-number';
     area.className = 'room-tag-share';
     label.textContent = name;
+    number.textContent = String(id).padStart(3, '0');
     area.textContent = share;
-    tag.append(label, area);
+    tag.append(label, number, area);
     return tag;
 }
 

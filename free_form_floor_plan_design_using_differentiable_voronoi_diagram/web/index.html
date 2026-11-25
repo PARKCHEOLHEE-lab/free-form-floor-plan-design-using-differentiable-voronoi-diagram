@@ -204,10 +204,11 @@
   #custom-boundaries[hidden] { display:none; }
   #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
   #room-tags { position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:1; }
-  .room-tag { position:absolute; transform:translate(-50%,-50%); display:grid; justify-items:center; min-width:3em; max-width:11em;
-    gap:2px; padding:4px 7px; border:1px solid var(--ui-border); border-radius:5px; background:var(--light); color:var(--ui-fg);
-    text-align:center; overflow-wrap:anywhere; font:600 11px/1.2 var(--font); }
-  .room-tag-share { color:var(--ui-muted-fg); font:10px/1.2 var(--mono); }
+  .room-tag { position:absolute; transform:translate(-50%,-50%); display:grid; justify-items:center; max-width:11em;
+    gap:1px; color:var(--ui-fg); text-align:center; overflow-wrap:anywhere; font:11px/1.2 var(--font); }
+  .room-tag-name { font-weight:600; }
+  .room-tag-number, .room-tag-share { font:10px/1.2 var(--mono); }
+  .room-tag-number { min-width:3.4em; padding:0 5px; border:1px solid currentColor; background:var(--light); }
   #plan[data-bubble-editing] { cursor:crosshair !important; } /* OrbitControls sets an inline cursor */
   .edit-bar { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:2px;
     padding:4px 4px 4px 14px; border-radius:14px; background:var(--light); box-shadow:var(--ui-card-shadow); font-size:13px; color:var(--ui-fg); }
@@ -1081,11 +1082,14 @@ function drawFrame(f) {
   const names = roomNames(input);
   const shownShares = shown === aligned ? alignedShares : shown ? roomShares(shown) : [];
   const rooms = shown
-    ? shown.rooms.map((_, r) => ({
+    ? shown.rooms.map((_, r) => {
+      const id = input?.rooms[r]?.id ?? r + 1;
+      return {
         rings: roomRings(shown, r),
         color: color(r),
-        tag: { name: names[r] ?? roomLabel(input?.rooms[r]?.id ?? r + 1), share: shareText(shownShares[r]) },
-      }))
+        tag: { id, name: names[r] ?? roomLabel(id), share: shareText(shownShares[r]) },
+      };
+    })
     : f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) }));
   view.draw({
     ...voronoi,

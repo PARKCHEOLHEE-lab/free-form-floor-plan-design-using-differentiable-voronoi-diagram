@@ -123,6 +123,8 @@ test('room names follow their room and are exported without rebuilding the plan'
         assert.equal(await roomName(page, 2).inputValue(), '');
         assert.equal(await roomName(page, 2).getAttribute('placeholder'), 'Room 2');
         assert.equal(await page.locator('#room-tags .room-tag-name').textContent(), 'Room 2');
+        assert.deepEqual(await page.locator('#room-tags .room-tag-number').allTextContents(), ['002'],
+            'deleting Room 1 keeps the surviving room number');
         assert.equal((await downloadPlan(page)).plan.rooms[0].name, undefined);
     });
 });
@@ -148,10 +150,26 @@ test('room tags show the current area and follow the displayed walls and camera'
         assert.equal(await tags.count(), n, 'there is one tag for each room of the Raw plan');
         assert.deepEqual(await tags.locator('.room-tag-name').allTextContents(),
             Array.from({ length: n }, (_, i) => 'Room ' + (i + 1)));
+        assert.deepEqual(await tags.locator('.room-tag-number').allTextContents(),
+            Array.from({ length: n }, (_, i) => String(i + 1).padStart(3, '0')));
         const raw = fromCells(cells, ring, { roomCount: n, simplifyTol: 0 });
         alignPlan(raw, ring, { mergeTol: 0, snapTol: 0.30 * cellWidth(ring, sites.length) });
         const rawShares = await shares();
         assert.deepEqual(rawShares, roomShares(raw).map(share => (100 * share).toFixed(1) + '%'));
+        const tag = await tags.first().evaluate(element => {
+            const lines = [...element.children];
+            const rects = lines.map(line => line.getBoundingClientRect());
+            return {
+                text: lines.map(line => line.textContent),
+                borders: [element, ...lines].map(line => getComputedStyle(line).borderTopWidth),
+                background: getComputedStyle(element).backgroundColor,
+                stacked: rects[0].bottom <= rects[1].top && rects[1].bottom <= rects[2].top,
+            };
+        });
+        assert.deepEqual(tag.text, ['Room 1', '001', rawShares[0]]);
+        assert.deepEqual(tag.borders, ['0px', '0px', '1px', '0px'], 'only the room number is boxed');
+        assert.equal(tag.background, 'rgba(0, 0, 0, 0)', 'the tag leaves the room fill visible');
+        assert.equal(tag.stacked, true);
 
         const fromIso = await screenPoints();
         await page.locator('.gizmo [data-axis="+z"]').click();
