@@ -216,10 +216,12 @@ test("wall snap: a slider from 0 to 50 percent of the cell width, 13 percent at 
     });
 });
 
-test("export: the settings say whether the Voronoi cells show", { timeout: 60_000 }, async () => {
+test("export: the settings say whether the Voronoi cells and the Voronoi sites show", { timeout: 60_000 }, async () => {
     await onAligned(async (page, slide, exported) => {
-        assert.equal((await exported()).settings.voronoi, true, "on at first");
+        assert.deepEqual((await exported()).settings.voronoi, { cells: true, sites: true }, "both on at first");
         await page.click(".toggle:has(#show-cells)");
-        assert.equal((await exported()).settings.voronoi, false, "off after the toggle");
+        assert.deepEqual((await exported()).settings.voronoi, { cells: false, sites: true }, "the cells off");
+        await page.click(".toggle:has(#show-sites)");
+        assert.deepEqual((await exported()).settings.voronoi, { cells: false, sites: false }, "the sites off too");
     });
 });

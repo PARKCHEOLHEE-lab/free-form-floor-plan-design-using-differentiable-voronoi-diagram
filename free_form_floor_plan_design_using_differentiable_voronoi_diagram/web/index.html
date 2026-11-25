@@ -58,15 +58,12 @@
     .controls { font-size: .96em; }
     .label { font-size: 13px; font-weight: 600; color: var(--ui-fg); margin: 14px 0 8px; }
     .panel > .label:first-child, .panel-head > .label { font-size: 15px; margin: 0 0 12px; }   /* the panel title */
-    /* a heading with icon cells on its right, on the same six-cell grid as the preset row */
-    .panel-head, .section-head { display: grid; grid-template-columns: repeat(6, 1fr); gap: .35em; align-items: center; }
+    /* a heading with icon cells on its right, and the View cells under their heading, on the same six-cell grid as the preset row */
+    .panel-head, .view-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: .35em; align-items: center; }
     .panel-head { margin-bottom: 12px; }
     .panel-head > .label { grid-column: 1 / 5; margin: 0; }
-    /* the cells are 10px taller than the heading text, which centers 5px below the row top,
-       so 9px here keeps the text 14px below the section above, as every other heading */
-    .section-head { margin: 9px 0 8px; }
-    .section-head > .label { grid-column: 1 / 2; margin: 0; }
-    .panel :is(.panel-head, .section-head) .seg { display: contents; }
+    .view-row { margin-bottom: 12px; }   /* as .boundary-row */
+    .panel :is(.panel-head, .view-row) .seg { display: contents; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); }
@@ -234,8 +231,8 @@
   /* six equal cells: the five presets, then Draw boundary */
   .panel .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }   /* .panel: beats .panel .seg */
   #presets { display:contents; }
-  .boundary-row button, .panel-head button, .section-head :is(button, .toggle) { display:grid; place-items:center; }
-  .boundary-row .ic, .panel-head .ic, .section-head .ic { width:20px; height:20px; stroke-width:1.6; }   /* icon cells alike */
+  .boundary-row button, .panel-head button, .view-row :is(button, .toggle) { display:grid; place-items:center; }
+  .boundary-row .ic, .panel-head .ic, .view-row .ic { width:20px; height:20px; stroke-width:1.6; }   /* icon cells alike */
   /* Run, Pause and Resume: the last cell of the Optimization title row, filled as the main action */
   .panel-head #run { grid-column:6; background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }
   .panel-head #run:hover:not(:disabled) { background:#262626; }
@@ -281,7 +278,8 @@
         <symbol id="i-walls-raw" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3 10.5 7.5 13 12 11 16.5 12 21"/><path d="M3 12.5 7.5 11 13 12"/></symbol>
         <symbol id="i-walls-aligned" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h9"/></symbol>
         <symbol id="i-door" viewBox="0 0 24 24"><path d="M2 20h5"/><path d="M19 20h3"/><path d="M7 20V8"/><path d="M7 8a12 12 0 0 1 12 12"/></symbol>
-        <symbol id="i-voronoi" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M11 3 11.5 11 21 10"/><path d="M3 12.5 12.5 13 13 21"/><path d="M11.5 11 12.5 13"/><circle cx="7" cy="7.5" r=".6"/><circle cx="16.5" cy="6.5" r=".6"/><circle cx="7.5" cy="17" r=".6"/><circle cx="17" cy="16.5" r=".6"/></symbol>
+        <symbol id="i-voronoi" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M11 3 11.5 11 21 10"/><path d="M3 12.5 12.5 13 13 21"/><path d="M11.5 11 12.5 13"/></symbol>
+        <symbol id="i-sites" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><circle cx="7" cy="7.5" r=".6"/><circle cx="16.5" cy="6.5" r=".6"/><circle cx="7.5" cy="17" r=".6"/><circle cx="17" cy="16.5" r=".6"/></symbol>
         <symbol id="i-bubbles" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49"/><path d="M15.41 6.51 8.59 10.49"/></symbol>
         <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 2v20"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="m5 9-3 3 3 3"/><path d="m9 5 3-3 3 3"/></symbol>
         <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
@@ -326,13 +324,14 @@
         <div class="label">Door links</div>
         <div id="connections"></div>
         <div id="program-status" role="status"></div>
-        <div class="section-head">
-          <div class="label">View</div>
+        <div class="label">View</div>
+        <div class="view-row">
           <div class="seg" id="walls">
             <button data-walls="raw" class="active" aria-label="Raw walls"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
             <button data-walls="aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
           </div>
           <label class="toggle"><input type="checkbox" id="show-cells" aria-label="Voronoi cells" checked><svg class="ic"><use href="#i-voronoi"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-sites" aria-label="Voronoi sites" checked><svg class="ic"><use href="#i-sites"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-doors" aria-label="Doors" checked><svg class="ic"><use href="#i-door"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-bubbles" aria-label="Bubble Diagram" checked><svg class="ic"><use href="#i-bubbles"/></svg></label>
         </div>
@@ -448,7 +447,7 @@ const tip = document.createElement('div');
 tip.className = 'tip';
 tip.setAttribute('aria-hidden', 'true');   // the button's own aria-label is its accessible name
 document.body.append(tip);
-const TIP_CELLS = '.boundary-row button, .panel-head button, .section-head :is(button, .toggle)';
+const TIP_CELLS = '.boundary-row button, .panel-head button, .view-row :is(button, .toggle)';
 function showTip(button) {
   // a toggle cell is a label; its name is on the checkbox inside
   tip.textContent = button.getAttribute('aria-label') ?? button.querySelector('[aria-label]').getAttribute('aria-label');
@@ -663,6 +662,7 @@ document.addEventListener('keydown', e => {
 $('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubbles').checked));
 $('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
 $('show-cells').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
+$('show-sites').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
 
 // ---------- inputs ----------
 const SLIDERS = ['sites','wall','merge_tol','align_tol','w_wall','w_cosine','w_area','w_lloyd','w_topo','iters','lr','seed'];
@@ -854,7 +854,7 @@ document.querySelector('.toolbar [data-export]').addEventListener('click', () =>
       weights: { l1: +$('w_wall').value, cos: +$('w_cosine').value, area: +$('w_area').value, lloyd: +$('w_lloyd').value, topo: +$('w_topo').value },
       iterations: +$('iters').value, lr: +$('lr').value, seed: +$('seed').value | 0,
       wallWidth, pointMerge: +pointMergeInput.value, wallSnap: +wallSnapInput.value,
-      walls: wallsMode, voronoi: $('show-cells').checked, doors: $('show-doors').checked, bubbles: $('show-bubbles').checked,
+      walls: wallsMode, voronoi: { cells: $('show-cells').checked, sites: $('show-sites').checked }, doors: $('show-doors').checked, bubbles: $('show-bubbles').checked,
     },
     frame: lastFrame, finished: runFinished, plan, edited: !!adjusted, now,
   });
@@ -1029,11 +1029,13 @@ function drawFrame(f) {
   }else{$('program-status').textContent='';delete $('program-status').dataset.state;}
   // Aligned wall share before and after alignment, kept on the canvas for checks (the panel no longer shows it).
   if (al) $('plan').dataset.alignedShare = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
-  // the Voronoi cell lines and sites, over either wall view while the View toggle is on
-  const cells = $('show-cells').checked ? { lines: f.cells.map(cell => cell.ring), points: f.sites } : {};
+  // the Voronoi cell lines and sites, over either wall view, each while its View toggle is on
+  const voronoi = {};
+  if ($('show-cells').checked) voronoi.lines = f.cells.map(cell => cell.ring);
+  if ($('show-sites').checked) voronoi.points = f.sites;
   if (wallsMode === 'aligned' && al) {
     view.draw({
-      ...cells,
+      ...voronoi,
       outline: boundaryRing,
       rooms: al.rooms.map((_, r) => ({ rings: roomRings(shown, r), color: color(r) })),
       walls: al.rooms.map((_, r) => roomRings(shown, r)).flat(),
@@ -1045,7 +1047,7 @@ function drawFrame(f) {
       outline: boundaryRing,
       rooms: f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) })),
       walls: f.walls || [],
-      ...cells,
+      ...voronoi,
       wall: wallWidth,
       doors,
     });
