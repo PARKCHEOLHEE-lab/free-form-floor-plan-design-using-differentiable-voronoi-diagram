@@ -116,6 +116,57 @@ test("point and wall sliders redraw independently without restarting the plan", 
     }
 });
 
+test("Raw walls respond to both shared tolerances without rebuilding", { timeout: 30_000 }, async () => {
+    const { url, proc } = await serve();
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+        await page.addInitScript(() => {
+            window.buildCount = 0;
+            const postMessage = Worker.prototype.postMessage;
+            Worker.prototype.postMessage = function (message, ...args) {
+                if (message.cmd === "build") window.buildCount++;
+                return postMessage.call(this, message, ...args);
+            };
+        });
+        await page.goto(url);
+        await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
+        await page.locator("button[data-open=rooms]").click();
+        const raw = page.getByRole("button", { name: "Raw walls" });
+        const aligned = page.getByRole("button", { name: "Aligned walls" });
+        const merge = page.getByRole("slider", { name: "Point merge" });
+        const snap = page.getByRole("slider", { name: "Wall snap" });
+        const pixels = () => page.locator("#plan").evaluate(canvas => canvas.toDataURL());
+        const slide = (input, value) => input.evaluate((el, v) => {
+            el.value = v;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+        }, value);
+        const builds = await page.evaluate(() => window.buildCount);
+        assert.ok(builds > 0, "the initial optimizer build was observed");
+        assert.equal(await raw.evaluate(button => button.classList.contains("active")), true);
+        assert.deepEqual([await merge.inputValue(), await snap.inputValue()], ["13", "13"]);
+
+        const original = await pixels();
+        await slide(merge, "30");
+        assert.notEqual(await pixels(), original, "Point merge changes the Raw walls");
+        await slide(merge, "13");
+        assert.equal(await pixels(), original, "undoing the slider change restores the Raw walls");
+        await slide(snap, "30");
+        const snapped = await pixels();
+        assert.notEqual(snapped, original, "Wall snap changes the Raw walls");
+
+        await aligned.click();
+        assert.deepEqual([await merge.inputValue(), await snap.inputValue()], ["13", "30"]);
+        await raw.click();
+        assert.deepEqual([await merge.inputValue(), await snap.inputValue()], ["13", "30"]);
+        assert.equal(await pixels(), snapped, "returning to Raw shows the same snapped walls");
+        assert.equal(await page.evaluate(() => window.buildCount), builds, "the optimizer was not rebuilt");
+    } finally {
+        await browser.close();
+        proc.kill();
+    }
+});
+
 test("optimization: changing a loss weight or run setting rebuilds the step 0 preview and stops a run", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     const browser = await chromium.launch();
