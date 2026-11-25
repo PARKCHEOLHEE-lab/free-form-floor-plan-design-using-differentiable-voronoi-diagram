@@ -419,7 +419,7 @@ let wallHistory = new History(null);    // committed wall edits; null = none
 const wallState = g => ({ corners: [...g.corners].map(([id, c]) => [id, { ...c }]), rooms: g.rooms });
 const wallGraph = s => s && { corners: new Map(s.corners.map(([id, c]) => [id, { ...c }])), rooms: structuredClone(s.rooms) };
 let boundaryRing = null;     // sent by the worker once the optimizer is built
-// Align one frame; returns room rings and the aligned-wall share before and after.
+// Build both wall graphs for one frame and report the Aligned wall share.
 function alignFrame(f) {
   const n = roomCount();
   const g = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: SIMPLIFY_TOL });
@@ -427,11 +427,13 @@ function alignFrame(f) {
   const before = alignedShare(g, boundaryRing);
   // Point merge and Wall snap are percents of the typical cell width, so they mean the same at any site count
   const cell = cellWidth(boundaryRing, f.sites.length);
-  alignPlan(g, boundaryRing, {
+  const tolerances = {
     mergeTol: pointMergeInput.valueAsNumber / 100 * cell,
     snapTol: wallSnapInput.valueAsNumber / 100 * cell,
-  });
-  return { raw, aligned:g, rooms: Array.from({ length: n }, (_, r) => roomRings(g, r)), before, after: alignedShare(g, boundaryRing) };
+  };
+  alignPlan(g, boundaryRing, tolerances);
+  if (wallsMode === 'raw') alignPlan(raw, boundaryRing, tolerances);
+  return { raw, aligned: g, before, after: alignedShare(g, boundaryRing) };
 }
 $('walls').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -1007,20 +1009,20 @@ $('presets').addEventListener('click', selectBoundary);
 $('custom-boundaries').addEventListener('click', selectBoundary);
 
 // ---------- drawing ----------
-// Hand one frame to the view. Raw shows the optimizer's cells: pastel fills (matplotlib Accent
-// over white), double-line walls on the room outlines, faint grey cell lines on top, and the
-// sites. Aligned shows the welded and snapped rooms, each filled even-odd with its holes.
+// Hand one frame to the view. Both wall views apply Point merge and Wall snap to their room outlines.
+// The Voronoi cells and sites still come directly from the optimizer frame.
 // The camera fits the boundary, so switching Raw and Aligned keeps the zoom and pan.
 function drawFrame(f) {
   const input=currentProgram()?.snapshot();
   const color=r=>input?colorForRoomId(input.rooms[r].id):COLORS[r%COLORS.length];
   const al = boundaryRing ? alignFrame(f) : null;
   lastAligned = al?.aligned ?? null;
-  const shown = adjusted ?? al?.aligned;   // the aligned plan on screen, with any wall edits
-  if (al) refreshAdjustAreas(shown, color);
+  const aligned = adjusted ?? lastAligned;
+  const shown = wallsMode === 'aligned' ? aligned : al?.raw;
+  if (aligned) refreshAdjustAreas(aligned, color);
   let doors=[];
-  if(input&&al){
-    const result=evaluatePlan(wallsMode==='aligned'?shown:al.raw,input,DOOR_WIDTH,{finished:runFinished,running});
+  if(input&&shown){
+    const result=evaluatePlan(shown,input,DOOR_WIDTH,{finished:runFinished,running});
     $('program-status').dataset.state=result.state;
     $('program-status').textContent=result.state==='complete'?'Complete: all room centers and door links satisfied.':
       result.state==='unmet'?'Unmet: '+result.issues.map(i=>i.message).join(' '):
@@ -1033,25 +1035,17 @@ function drawFrame(f) {
   const voronoi = {};
   if ($('show-cells').checked) voronoi.lines = f.cells.map(cell => cell.ring);
   if ($('show-sites').checked) voronoi.points = f.sites;
-  if (wallsMode === 'aligned' && al) {
-    view.draw({
-      ...voronoi,
-      outline: boundaryRing,
-      rooms: al.rooms.map((_, r) => ({ rings: roomRings(shown, r), color: color(r) })),
-      walls: al.rooms.map((_, r) => roomRings(shown, r)).flat(),
-      wall: wallWidth,
-      doors,
-    });
-  } else {
-    view.draw({
-      outline: boundaryRing,
-      rooms: f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) })),
-      walls: f.walls || [],
-      ...voronoi,
-      wall: wallWidth,
-      doors,
-    });
-  }
+  const rooms = shown
+    ? shown.rooms.map((_, r) => ({ rings: roomRings(shown, r), color: color(r) }))
+    : f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) }));
+  view.draw({
+    ...voronoi,
+    outline: boundaryRing,
+    rooms,
+    walls: shown ? rooms.flatMap(room => room.rings) : f.walls || [],
+    wall: wallWidth,
+    doors,
+  });
   movePlayhead(f.iteration);   // the current-iteration playhead replaces the old iter/loss text
 }
 
