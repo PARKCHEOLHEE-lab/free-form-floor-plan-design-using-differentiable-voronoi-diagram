@@ -60,3 +60,20 @@ test('bubble program state restores the same rooms, links and next room ID', () 
     copy.update(a, [-1, 0.5], 0.2);
     assert.deepEqual(p.snapshot().rooms[0].center, [-1, 0], 'the restored program does not share rooms with the original');
 });
+
+test('a room name survives geometry edits and a state restore by room ID', () => {
+    const program = new BubbleProgram([[-2,-2],[2,-2],[2,2],[-2,2]]);
+    const a = program.add([-1, 0], 0.2), b = program.add([1, 0], 0.4);
+    const ratios = program.snapshot().ratios;
+    assert.equal(typeof program.rename, 'function', 'room names belong to the room model');
+    assert.equal(program.rename(b, ' Study '), true);
+    assert.deepEqual(program.snapshot().ratios, ratios);
+    assert.equal(program.rename(999, 'Missing'), false);
+    program.update(b, [1, 0.25], 0.3);
+    program.remove(a);
+    const restored = BubbleProgram.fromState(JSON.parse(JSON.stringify(program.state())));
+    assert.equal(restored.snapshot().rooms[0].id, b);
+    assert.equal(restored.snapshot().rooms[0].name, 'Study');
+    assert.equal(restored.rename(b, '  '), true);
+    assert.equal(restored.snapshot().rooms[0].name, undefined);
+});

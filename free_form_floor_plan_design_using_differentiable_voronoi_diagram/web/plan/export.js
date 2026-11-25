@@ -15,7 +15,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v, (_, x) => (ArrayBuffer.isView(
  * `finished` says whether the run ended; `plan` is the corner graph on screen and `edited` says
  * whether it holds wall edits. Rooms are named by their program id; rings list corner ids.
  */
-export function exportPlan({ mode, boundary, program, settings, frame, finished, plan, edited, now }) {
+export function exportPlan({ mode, boundary, program, roomNames = [], settings, frame, finished, plan, edited, now }) {
     const ids = program ? program.rooms.map((r) => r.id) : null;
     return plain({
         format: FORMAT,
@@ -31,7 +31,7 @@ export function exportPlan({ mode, boundary, program, settings, frame, finished,
         plan: {
             source: edited ? 'edited' : 'aligned',
             corners: [...plan.corners].sort(([a], [b]) => a - b).map(([id, c]) => ({ id, x: c.x, y: c.y, fixed: c.fixed })),
-            rooms: plan.rooms.map((rings, index) => ({ index, id: ids ? ids[index] : null, rings })),
+            rooms: plan.rooms.map((rings, index) => ({ index, id: ids ? ids[index] : null, rings, name: roomNames[index] })),
             areaShares: roomShares(plan),
         },
     });

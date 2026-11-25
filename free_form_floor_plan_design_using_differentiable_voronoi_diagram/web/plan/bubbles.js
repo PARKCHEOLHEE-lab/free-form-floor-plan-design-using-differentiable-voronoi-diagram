@@ -44,6 +44,16 @@ export class BubbleProgram {
         return true;
     }
 
+    rename(id, name) {
+        const room = this.#rooms.find(r => r.id === id);
+        if (!room) { this.error = 'Room not found.'; return false; }
+        const trimmed = name.trim();
+        if (trimmed) room.name = trimmed;
+        else delete room.name;
+        this.error = '';
+        return true;
+    }
+
     remove(id) {
         const i = this.#rooms.findIndex(r => r.id === id);
         if (i < 0) { this.error = 'Room not found.'; return false; }

@@ -221,6 +221,9 @@
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
   .roomareas .raswatch { justify-content:flex-start; gap:4px; color:var(--ui-muted-fg); }   /* a room name is a row label */
+  .room-entry { display:grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); align-items:center; gap:8px; }
+  .room-entry input { min-width:0; padding:3px 6px; border:1px solid var(--ui-border); border-radius:6px; background:var(--light); color:var(--ui-fg); font:inherit; }
+  .room-entry input:focus-visible { outline:2px solid var(--ui-muted-fg); }
   #rooms_v { margin-left:auto; }
   .bubble-help.error, #program-status[data-state=error] { color:var(--ui-error); }
   #program-status { font:11px/1.5 var(--font); margin-top:8px; }
@@ -319,7 +322,7 @@
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
         <div class="row"><label>Rooms</label><span class="val" id="rooms_v">6</span></div>
-        <div class="label">Target area</div>
+        <div class="label room-entry"><span>Target area</span><span>Room name</span></div>
         <div class="roomareas" id="roomareas"></div>
         <div class="label">Door links</div>
         <div id="connections"></div>
@@ -502,6 +505,7 @@ let gen = 0, curGen = 0;  // build generation; frames from a superseded build ar
 // thread; the UI stays responsive and only renders the frames it streams back.
 const worker = new Worker('./worker.js', { type: 'module' });
 const programs = new Map(); // retain each boundary's circles when switching presets
+const presetRoomNames = new Map();
 // One undo history over the whole design: which boundary is active, the drawn boundary, and every
 // boundary's room circles. Room edits and new boundaries are steps; choosing a preset is not.
 const designState = () => ({
@@ -571,6 +575,27 @@ function ensureProgram() {
   return currentProgram();
 }
 $('roomareas').addEventListener('click',e=>{const b=e.target.closest('[data-room-id]');if(b)editor.selectRoom(+b.dataset.roomId);});
+$('roomareas').addEventListener('change', ({ target: field }) => {
+  const index = Number(field.dataset.nameIndex);
+  const name = field.value.trim();
+  const program = currentProgram();
+  if (program) {
+    const room = program.snapshot().rooms[index];
+    program.rename(room.id, name);
+    history.replace(designState());
+  } else {
+    const names = [...roomNames(null)];
+    names[index] = name || undefined;
+    if (mode === CUSTOM_MODE) {
+      customBoundary.roomNames = names;
+      history.replace(designState());
+    } else presetRoomNames.set(mode, names);
+  }
+  field.value = name;
+});
+$('roomareas').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing && e.target.matches('input')) e.target.blur();
+});
 $('connections').addEventListener('click',e=>{const b=e.target.closest('[data-from]');if(b)editor.selectLink(+b.dataset.from,+b.dataset.to);});
 window.addEventListener('pagehide',()=>{editor.dispose();boundaryEditor.dispose();wallEditor.dispose();});
 
@@ -717,16 +742,24 @@ $('seed').addEventListener('change', rebuildPreviewSoon);
 for (const id of ['w_wall', 'w_cosine', 'w_area', 'w_lloyd', 'w_topo', 'iters', 'lr']) $(id).addEventListener('change', rebuildPreviewSoon);
 
 let roomRatios = []; // legacy preset shares; edited inputs come only from BubbleProgram
+function roomNames(program) {
+  if (program) return program.rooms.map(room => room.name);
+  return (mode === CUSTOM_MODE ? customBoundary.roomNames : presetRoomNames.get(mode)) ?? [];
+}
+
 function refreshRoomReadout() {
   const input=currentProgram()?.snapshot();
+  const names=roomNames(input);
   const weights=input?.ratios ?? roomRatios;
   const sum=weights.reduce((a,b)=>a+b,0)||1;
   $('rooms_v').textContent=String(weights.length);
   $('roomareas').innerHTML=weights.map((v,i)=>{
     const id=input?input.rooms[i].id:i+1;
     const content=`<span class="raswatch"><i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i> R${id}</span><span class="val">${Math.round(v/sum*100)}%</span>`;
-    return input?`<button type="button" class="room-row${editor.selected===id?' selected':''}" data-room-id="${id}" aria-label="Select room R${id}">${content}</button>`:`<div class="row">${content}</div>`;
+    const summary=input?`<button type="button" class="room-row${editor.selected===id?' selected':''}" data-room-id="${id}" aria-label="Select room R${id}">${content}</button>`:`<div class="row">${content}</div>`;
+    return `<div class="room-entry">${summary}<input type="text" data-name-index="${i}" aria-label="Name for room R${id}" placeholder="R${id}" autocomplete="off"></div>`;
   }).join('');
+  $('roomareas').querySelectorAll('input').forEach((field, i) => { field.value = names[i] ?? ''; });
   const selected=editor.selectedLink;
   $('connections').innerHTML=(input?.links??[]).map(([a,b])=>{
     const x=input.rooms[a].id,y=input.rooms[b].id;
@@ -849,8 +882,9 @@ document.querySelector('.toolbar [data-export]').addEventListener('click', () =>
   const plan = adjusted ?? lastAligned;
   if (!plan || !lastFrame || !boundaryRing) return;
   const now = new Date();
+  const program = currentProgram()?.snapshot() ?? null;
   const data = exportPlan({
-    mode, boundary: boundaryRing, program: currentProgram()?.snapshot() ?? null,
+    mode, boundary: boundaryRing, program, roomNames: roomNames(program),
     settings: {
       sites: +$('sites').value,
       weights: { l1: +$('w_wall').value, cos: +$('w_cosine').value, area: +$('w_area').value, lloyd: +$('w_lloyd').value, topo: +$('w_topo').value },
