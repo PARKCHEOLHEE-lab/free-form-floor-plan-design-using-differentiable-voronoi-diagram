@@ -163,12 +163,17 @@ test('room tags show the current area and follow the displayed walls and camera'
                 text: lines.map(line => line.textContent),
                 borders: [element, ...lines].map(line => getComputedStyle(line).borderTopWidth),
                 background: getComputedStyle(element).backgroundColor,
+                fonts: lines.map(line => getComputedStyle(line).fontFamily),
+                weights: lines.map(line => getComputedStyle(line).fontWeight),
+                roomFont: getComputedStyle(document.body).fontFamily,
                 stacked: rects[0].bottom <= rects[1].top && rects[1].bottom <= rects[2].top,
             };
         });
         assert.deepEqual(tag.text, ['Room 1', '001', rawShares[0]]);
         assert.deepEqual(tag.borders, ['0px', '0px', '1px', '0px'], 'only the room number is boxed');
         assert.equal(tag.background, 'rgba(0, 0, 0, 0)', 'the tag leaves the room fill visible');
+        assert.deepEqual(tag.fonts, [tag.roomFont, tag.roomFont, tag.roomFont], 'all three lines use the app font');
+        assert.deepEqual(tag.weights, ['400', '400', '400'], 'all three lines use regular weight');
         assert.equal(tag.stacked, true);
 
         const fromIso = await screenPoints();
