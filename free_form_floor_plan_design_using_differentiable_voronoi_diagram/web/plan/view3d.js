@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { strokeRing, strokeTriangles } from './stroke.js';
-import { signedArea2, inside } from './geom.js';
+import { signedArea2, inside, roomTagAnchor } from './geom.js';
 import { createGizmo } from './gizmo.js';
 
 const MIN_ZOOM = 0.5, MAX_ZOOM = 8;
@@ -24,7 +24,7 @@ const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
 /**
  * Create the view on `canvas`. draw(plan) shows one plan:
  *   outline ring               the boundary the camera fits (optional; else the rooms)
- *   rooms  [{ rings, color }]  filled even-odd, as the 2D canvas filled them
+ *   rooms  [{ rings, color, tag? }]  filled even-odd, with an optional { name, share } tag
  *   walls  [ring]              wall centerlines, drawn as double-line walls
  *   lines  [ring]              faint cell outlines (optional)
  *   points [[x, y]]            Voronoi sites (optional)
@@ -33,7 +33,7 @@ const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
  * The canvas carries data-zoom, data-azimuth and data-elevation (degrees).
  * `gizmo`, an empty box, becomes the view gizmo.
  */
-export function createPlanView(canvas, { gizmo } = {}) {
+export function createPlanView(canvas, { gizmo, tags } = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     renderer.setClearColor(0xffffff, 1);
     const scene = new THREE.Scene();
@@ -59,10 +59,16 @@ export function createPlanView(canvas, { gizmo } = {}) {
     let width = 1, height = 1;
     let fitted = null;                          // { cx, cy, extent } of the plan the camera is fitted to
     let lastPlan = null;
+    let tagAnchors = [];
     const axes = gizmo ? createGizmo(gizmo, { onPick: lookFrom, onDrag: turn }) : null;
 
     const render = () => {
         renderer.render(scene, camera);
+        for (const [tag, anchor] of tagAnchors) {
+            const [x, y] = screenPoint(anchor);
+            tag.style.left = x + 'px';
+            tag.style.top = y + 'px';
+        }
         if (axes) {
             // the camera's right, up and back directions are the first three columns of its world matrix
             const m = camera.matrixWorld.elements;
@@ -130,6 +136,8 @@ export function createPlanView(canvas, { gizmo } = {}) {
 
     function clear() {
         dispose();
+        tagAnchors = [];
+        tags?.replaceChildren();
         render();
     }
 
@@ -158,10 +166,17 @@ export function createPlanView(canvas, { gizmo } = {}) {
         const tris = new TriangleBuffer();
 
         const fill = new THREE.Color();
+        tagAnchors = [];
         for (const room of plan.rooms) {
             fill.set(room.color);
-            for (const t of fillTriangles(room.rings)) tris.add(t, 0, fill);
+            const triangles = fillTriangles(room.rings);
+            for (const t of triangles) tris.add(t, 0, fill);
+            if (tags && room.tag) {
+                const anchor = roomTagAnchor(room.rings, triangles);
+                if (anchor) tagAnchors.push([makeTag(room.tag), anchor]);
+            }
         }
+        tags?.replaceChildren(...tagAnchors.map(([tag]) => tag));
         if (hw > 0) {
             const black = new THREE.Color('#111111');
             for (const ring of plan.walls) for (const t of strokeTriangles(strokeRing(ring, hw))) tris.add(t, lift, black);
@@ -235,6 +250,19 @@ export function createPlanView(canvas, { gizmo } = {}) {
         render();
     }
     return { draw, clear, resize, home, screenPoint, pointOnPlan, drawBubbles, onChange(fn){listeners.add(fn);return()=>listeners.delete(fn);} };
+}
+
+function makeTag({ name, share }) {
+    const tag = document.createElement('div');
+    const label = document.createElement('span');
+    const area = document.createElement('span');
+    tag.className = 'room-tag';
+    label.className = 'room-tag-name';
+    area.className = 'room-tag-share';
+    label.textContent = name;
+    area.textContent = share;
+    tag.append(label, area);
+    return tag;
 }
 
 /** Triangles with one colour each, gathered into one geometry. */

@@ -4,6 +4,9 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { serve } from './serve.mjs';
+import { alignPlan, cellWidth } from '../web/plan/align.js';
+import { fromCells } from '../web/plan/graph.js';
+import { roomShares } from '../web/plan/wall-edit.js';
 
 async function withPlan(coverageName, run) {
     const { url, proc } = await serve();
@@ -117,5 +120,56 @@ test('room names follow their room and are exported without rebuilding the plan'
         await roomName(page, 2).press('Enter');
         assert.equal(await roomName(page, 2).inputValue(), '');
         assert.equal((await downloadPlan(page)).plan.rooms[0].name, undefined);
+    });
+});
+
+test('room tags show the current area and follow the displayed walls and camera', { timeout: 90_000 }, async () => {
+    await withPlan('room-tags', async page => {
+        const tags = page.locator('#room-tags .room-tag');
+        const shares = () => tags.locator('.room-tag-share').allTextContents();
+        const adjustmentShares = () => page.locator('#adjust-areas [data-now]').allTextContents();
+        const screenPoints = () => tags.evaluateAll(elements => elements.map(tag => [tag.style.left, tag.style.top]));
+        const rooms = page.getByRole('button', { name: 'Rooms', exact: true });
+        await rooms.click();
+        await page.getByRole('button', { name: 'Boundary B' }).click();
+        await ready(page);
+        await page.getByRole('slider', { name: 'Point merge' }).press('Home');
+        const snap = page.getByRole('slider', { name: 'Wall snap' });
+        await snap.evaluate(el => {
+            el.value = '30';
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        const { boundary: { ring }, frame: { cells, sites }, plan } = await downloadPlan(page);
+        const n = plan.rooms.length;
+        assert.equal(await tags.count(), n, 'there is one tag for each room of the Raw plan');
+        assert.deepEqual(await tags.locator('.room-tag-name').allTextContents(),
+            Array.from({ length: n }, (_, i) => 'R' + (i + 1)));
+        const raw = fromCells(cells, ring, { roomCount: n, simplifyTol: 0 });
+        alignPlan(raw, ring, { mergeTol: 0, snapTol: 0.30 * cellWidth(ring, sites.length) });
+        const rawShares = await shares();
+        assert.deepEqual(rawShares, roomShares(raw).map(share => (100 * share).toFixed(1) + '%'));
+
+        const fromIso = await screenPoints();
+        await page.locator('.gizmo [data-axis="+z"]').click();
+        assert.notDeepEqual(await screenPoints(), fromIso, 'the tags move with the camera');
+        await page.getByRole('button', { name: 'Aligned walls' }).click();
+        const alignedShares = await shares();
+        assert.deepEqual(alignedShares, await adjustmentShares());
+        assert.notDeepEqual(alignedShares, rawShares, 'preset B shows different shares in the two wall modes at these settings');
+        const targets = await page.locator('#roomareas .val').allTextContents();
+        assert.notDeepEqual(alignedShares.map(share => Math.round(parseFloat(share)) + '%'), targets,
+            'the tag uses current areas instead of targets');
+
+        const name = '<em>Kitchen</em>';
+        await roomName(page, 1).fill(name);
+        await roomName(page, 1).press('Enter');
+        assert.equal(await tags.first().locator('.room-tag-name').textContent(), name);
+        assert.equal(await tags.locator('em').count(), 0, 'names are plain text');
+        await editWall(page);
+        const editedShares = await shares();
+        assert.equal(editedShares.length, n);
+        assert.deepEqual(editedShares, await adjustmentShares());
+        assert.notDeepEqual(editedShares, alignedShares, 'the wall edit updates current areas');
+        assert.equal(await tags.first().locator('.room-tag-name').textContent(), name);
     });
 });

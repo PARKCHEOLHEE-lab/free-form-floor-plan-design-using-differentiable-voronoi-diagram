@@ -203,6 +203,11 @@
   #custom-boundaries { margin-top:10px; }
   #custom-boundaries[hidden] { display:none; }
   #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
+  #room-tags { position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:1; }
+  .room-tag { position:absolute; transform:translate(-50%,-50%); display:grid; justify-items:center; min-width:3em; max-width:11em;
+    gap:2px; padding:4px 7px; border:1px solid var(--ui-border); border-radius:5px; background:var(--light); color:var(--ui-fg);
+    text-align:center; overflow-wrap:anywhere; font:600 11px/1.2 var(--font); }
+  .room-tag-share { color:var(--ui-muted-fg); font:10px/1.2 var(--mono); }
   #plan[data-bubble-editing] { cursor:crosshair !important; } /* OrbitControls sets an inline cursor */
   .edit-bar { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:2px;
     padding:4px 4px 4px 14px; border-radius:14px; background:var(--light); box-shadow:var(--ui-card-shadow); font-size:13px; color:var(--ui-fg); }
@@ -247,7 +252,7 @@
 <div class="wrap">
   <div class="stage">
     <div class="canvas-card">
-      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div>
+      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div><div id="room-tags"></div>
         <dialog id="discard-walls" aria-labelledby="discard-walls-title">
           <form method="dialog">
             <p id="discard-walls-title" class="dialog-title">Discard wall edits?</p>
@@ -401,7 +406,7 @@ import { createBoundaryEditor } from './plan/boundary-editor.js';
 import { createWallEditor } from './plan/wall-editor.js';
 import { roomShares } from './plan/wall-edit.js';
 import { exportName, exportPlan } from './plan/export.js';
-const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo') });
+const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo'), tags: document.getElementById('room-tags') });
 const $ = id => document.getElementById(id);
 
 // ---------- wall alignment (web/plan) ----------
@@ -592,6 +597,7 @@ $('roomareas').addEventListener('change', ({ target: field }) => {
     } else presetRoomNames.set(mode, names);
   }
   field.value = name;
+  if (lastFrame) drawFrame(lastFrame);
 });
 $('roomareas').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.isComposing && e.target.matches('input')) e.target.blur();
@@ -601,13 +607,13 @@ window.addEventListener('pagehide',()=>{editor.dispose();boundaryEditor.dispose(
 
 // Each room's share now (from the plan on screen) beside its target share, in the Adjustment panel.
 // One decimal, so a small wall move shows.
-function refreshAdjustAreas(g, color) {
-  const input = currentProgram()?.snapshot();
+const shareText = share => (share * 100).toFixed(1) + '%';
+function refreshAdjustAreas(shares, color, input) {
   const weights = input?.ratios ?? roomRatios;
   const sum = weights.reduce((a, b) => a + b, 0) || 1;
-  $('adjust-areas').innerHTML = roomShares(g).map((share, r) => {
+  $('adjust-areas').innerHTML = shares.map((share, r) => {
     const id = input ? input.rooms[r].id : r + 1;
-    return `<div class="row"><span class="raswatch"><i class="sw" style="background:${color(r)}"></i> R${id}</span><span class="val" data-now>${(share * 100).toFixed(1)}%</span><span class="val" data-target>${((weights[r] ?? 0) / sum * 100).toFixed(1)}%</span></div>`;
+    return `<div class="row"><span class="raswatch"><i class="sw" style="background:${color(r)}"></i> R${id}</span><span class="val" data-now>${shareText(share)}</span><span class="val" data-target>${shareText((weights[r] ?? 0) / sum)}</span></div>`;
   }).join('');
 }
 
@@ -1053,7 +1059,8 @@ function drawFrame(f) {
   lastAligned = al?.aligned ?? null;
   const aligned = adjusted ?? lastAligned;
   const shown = wallsMode === 'aligned' ? aligned : al?.raw;
-  if (aligned) refreshAdjustAreas(aligned, color);
+  const alignedShares = aligned ? roomShares(aligned) : [];
+  if (aligned) refreshAdjustAreas(alignedShares, color, input);
   let doors=[];
   if(input&&shown){
     const result=evaluatePlan(shown,input,DOOR_WIDTH,{finished:runFinished,running});
@@ -1069,8 +1076,14 @@ function drawFrame(f) {
   const voronoi = {};
   if ($('show-cells').checked) voronoi.lines = f.cells.map(cell => cell.ring);
   if ($('show-sites').checked) voronoi.points = f.sites;
+  const names = roomNames(input);
+  const shownShares = shown === aligned ? alignedShares : shown ? roomShares(shown) : [];
   const rooms = shown
-    ? shown.rooms.map((_, r) => ({ rings: roomRings(shown, r), color: color(r) }))
+    ? shown.rooms.map((_, r) => ({
+        rings: roomRings(shown, r),
+        color: color(r),
+        tag: { name: names[r] ?? `R${input?.rooms[r]?.id ?? r + 1}`, share: shareText(shownShares[r]) },
+      }))
     : f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) }));
   view.draw({
     ...voronoi,
