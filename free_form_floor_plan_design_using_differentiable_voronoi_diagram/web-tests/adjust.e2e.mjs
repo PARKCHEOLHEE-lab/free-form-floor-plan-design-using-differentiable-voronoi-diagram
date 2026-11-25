@@ -463,20 +463,19 @@ test("adjustment: with the panel open, every corner and wall that can move is ma
     });
 });
 
-test("adjustment marks look like the Voronoi of the Raw view: wall marks as cell lines and corner marks as sites", { timeout: 120_000 }, async () => {
+test("adjustment marks are dark dashed walls and dark corner dots with a white edge", { timeout: 120_000 }, async () => {
     await onPage(async (page) => {
         await page.click("button[data-open=adjust]");
-        const look = await page.evaluate(async () => {
-            const { CELL_LINE, SITE } = await import("./plan/view3d.js");
+        const look = await page.evaluate(() => {
             const g = document.querySelector("#wall-sketch [data-movable]");
             const line = getComputedStyle(g.querySelector("line"));
             const dot = g.querySelector("circle"), d = getComputedStyle(dot);
-            return { CELL_LINE, SITE, dpr: devicePixelRatio,
+            return {
                 line: { stroke: line.stroke, opacity: +line.strokeOpacity, width: line.strokeWidth, dash: line.strokeDasharray },
-                dot: { fill: d.fill, opacity: +d.fillOpacity, stroke: d.stroke, r: +dot.getAttribute("r") } };
+                dot: { fill: d.fill, opacity: +d.fillOpacity, stroke: d.stroke, width: d.strokeWidth, r: +dot.getAttribute("r") } };
         });
-        const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
-        assert.deepEqual(look.line, { stroke: rgb(look.CELL_LINE.color), opacity: look.CELL_LINE.opacity, width: `${1 / look.dpr}px`, dash: "none" }, "a wall mark is drawn as a cell line");
-        assert.deepEqual(look.dot, { fill: rgb(look.SITE.color), opacity: look.SITE.opacity, stroke: "none", r: look.SITE.size / 2 }, "a corner mark is drawn as a site");
+        // look B, picked on 2026-11-25 so the marks read apart from the Voronoi cell lines and sites
+        assert.deepEqual(look.line, { stroke: "rgb(10, 10, 10)", opacity: 0.85, width: "1.5px", dash: "6px, 4px" }, "a wall mark is a dark dashed line");
+        assert.deepEqual(look.dot, { fill: "rgb(10, 10, 10)", opacity: 1, stroke: "rgb(255, 255, 255)", width: "1.5px", r: 3.5 }, "a corner mark is a dark dot with a white edge");
     });
 });
