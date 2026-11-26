@@ -217,6 +217,7 @@
   .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
   .bubble-label.selected { background:var(--ui-fg); color:white; }
   .bubble-label.draft { background:white; color:var(--ui-muted-fg); }
+  .bubble-label[data-covered] { visibility:hidden; }
   .bubble-link-dot { position:absolute; width:10px; height:10px; border:2px solid white; border-radius:50%; background:var(--ui-fg); transform:translate(-50%,-50%); }
   .bubble-link-preview { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
   .bubble-link-preview line { stroke:var(--ui-fg); stroke-width:2; stroke-dasharray:5 4; }   /* as #boundary-sketch */
@@ -529,7 +530,7 @@ const roomCount = () => currentProgram()?.snapshot().rooms.length ?? roomRatios.
 const colorForRoomId = id => COLORS[(id-1)%COLORS.length];
 const bubbleHelp = $('bubble-message').textContent;
 const editor = createBubbleEditor($('plan'),view,{
-  labels:$('bubble-labels'),colorForRoomId,ensureProgram:()=>ensureProgram(),boundary:()=>boundaryRing,
+  labels:$('bubble-labels'),tags:$('room-tags'),colorForRoomId,ensureProgram:()=>ensureProgram(),boundary:()=>boundaryRing,
   onChange({commit,selectionOnly}) {
     if(selectionOnly){refreshRoomReadout();return;}
     if(!editingBubbles){editingBubbles=true;stop();}

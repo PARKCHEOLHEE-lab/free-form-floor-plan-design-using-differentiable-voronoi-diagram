@@ -7,6 +7,16 @@ import { serve } from './serve.mjs';
 
 const ready = page => page.waitForFunction(() => document.querySelector('#status').textContent.includes('ready'));
 const panel = (page, name) => page.locator(`button[data-open="${name}"]`);
+const center = locator => locator.evaluate(element => {
+    const r = element.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+});
+async function drag(page, start, end) {
+    await page.mouse.move(...start);
+    await page.mouse.down();
+    await page.mouse.move(...end, { steps: 10 });
+    await page.mouse.up();
+}
 
 async function withPlan(name, run, viewport = { width: 1280, height: 800 }) {
     const { url, proc } = await serve();
@@ -88,4 +98,33 @@ test('audit: graph badges meet text contrast and tooltips have matching styles',
         await page.locator('#run').hover();
         assert.equal(await page.locator('.tip').textContent(), 'Run');
     });
+});
+
+test('audit: a room tag stays readable when a bubble moves onto it', { timeout: 60_000 }, async () => {
+    await withPlan('bubble-and-tag', async page => {
+        await panel(page, 'rooms').click();
+        await page.getByRole('button', { name: 'Boundary A' }).click();
+        await ready(page);
+        await page.locator('.gizmo [data-axis="+z"]').click();
+        const canvas = await page.locator('#plan').boundingBox();
+        const size = Math.min(canvas.width, canvas.height);
+        const start = [canvas.x + canvas.width / 2 - size * 22 / 820,
+            canvas.y + canvas.height / 2 + size * 120 / 820];
+        await drag(page, start, [start[0] + 30, start[1]]);
+        await ready(page);
+
+        const label = page.locator('.bubble-label:not(.draft)');
+        const tag = page.locator('.room-tag');
+        assert.equal(await label.isVisible(), true, 'separate labels remain visible');
+        const tagPoint = await center(tag);
+        await drag(page, await center(label), tagPoint);
+        await ready(page);
+        assert.deepEqual(await tag.locator('.room-tag-number').allTextContents(), ['001']);
+        assert.ok(Math.hypot(...(await center(label)).map((value, i) => value - tagPoint[i])) < 3);
+        assert.equal(await label.isVisible(), false, 'the bubble text cannot cover the room tag');
+        assert.equal(await page.locator('.bubble-handle').isVisible(), true, 'the resize handle stays visible');
+        await drag(page, await center(label), start);
+        await ready(page);
+        assert.equal(await label.isVisible(), true, 'the bubble text returns when it moves clear');
+    }, { width: 1145, height: 820 });
 });
