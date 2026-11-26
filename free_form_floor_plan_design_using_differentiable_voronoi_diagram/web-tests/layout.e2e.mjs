@@ -474,17 +474,30 @@ test("details: sliders show a focus ring when reached by keyboard", { timeout: 6
     } finally { proc.kill(); }
 });
 
-test("details: target area percentages keep the value style after the first room is drawn", { timeout: 60_000 }, async () => {
+test("details: target area percentages are centered for preset and drawn rooms", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
+            const checkAlignment = async () => {
+                const centers = await page.locator("#roomareas .val").evaluateAll(values => values.map(value => {
+                    const cell = value.getBoundingClientRect();
+                    const range = document.createRange();
+                    range.selectNodeContents(value);
+                    const text = range.getBoundingClientRect();
+                    return { cell: cell.left + cell.width / 2, text: text.left + text.width / 2 };
+                }));
+                assert.ok(centers.length > 0);
+                assert.ok(centers.every(({ cell, text }) => Math.abs(cell - text) < 1), "percentages are centered within the value column");
+            };
+            await checkAlignment();
             await page.click("button[data-mode=shape_a]");
             await page.waitForFunction(() => { const s = document.getElementById("status").textContent; return s.startsWith("shape_a") && s.includes("ready"); });
             await page.click('.gizmo [data-axis="+z"]');
             await page.mouse.move(600, 450); await page.mouse.down(); await page.mouse.move(630, 450, { steps: 8 }); await page.mouse.up();
-            const style = (sel) => page.$eval(sel, (v) => { const s = getComputedStyle(v); return [s.fontFamily, s.fontSize, s.textAlign, s.fontVariantNumeric]; });
-            assert.deepEqual(await style(".room-row .val"), await style("#sites_v"), "a room's percent uses the same value style as the other values");
+            await checkAlignment();
+            const style = (sel) => page.$eval(sel, (v) => { const s = getComputedStyle(v); return [s.fontFamily, s.fontSize, s.fontVariantNumeric]; });
+            assert.deepEqual(await style(".room-row .val"), await style("#sites_v"), "a room's percentage uses the shared number style");
         });
     } finally { proc.kill(); }
 });
