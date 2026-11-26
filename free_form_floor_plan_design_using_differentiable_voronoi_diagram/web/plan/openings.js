@@ -1,5 +1,6 @@
 import { inside } from './geom.js';
 import { roomRings, wallEdges } from './graph.js';
+import { roomLabel } from './bubbles.js';
 
 /** Check the actual output graph; a requested link needs one straight shared wall. */
 export function evaluatePlan(g, program, width, {finished=false,running=false}={}) {
@@ -8,7 +9,7 @@ export function evaluatePlan(g, program, width, {finished=false,running=false}={
     const rings=g.rooms.map((_,r)=>roomRings(g,r));
     const contains=(r,p)=>(rings[r]??[]).reduce((hit,ring)=>hit!==inside(p,ring),false);
     // The panel's label: the editor's stable id, which deleting a room does not renumber.
-    const name=r=>`R${program.rooms[r]?.id ?? r+1}`;
+    const name=r=>roomLabel(program.rooms[r]?.id ?? r+1);
     if (!program.rooms.length) issues.push({kind:'input',message:'Draw at least one room.'});
     if (g.rooms.length!==program.rooms.length) issues.push({kind:'rooms',message:'The generated room count does not match the bubbles.'});
     program.rooms.forEach((room,r)=>{

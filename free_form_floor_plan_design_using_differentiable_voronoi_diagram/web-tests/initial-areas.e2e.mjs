@@ -53,8 +53,10 @@ test('five drawn rooms keep one region each in raw and aligned initial views',{t
         const {boundary}=JSON.parse(await readFile(new URL('./fixtures/shape_e.json',import.meta.url),'utf8'));
         const xs=boundary.map(p=>p[0]),ys=boundary.map(p=>p[1]);
         const cx=(Math.max(...xs)+Math.min(...xs))/2,cy=(Math.max(...ys)+Math.min(...ys))/2;
-        const scale=Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys))/(0.8*820);
-        const screen=([x,y])=>[width/2+(x-cx)/scale,820/2-(y-cy)/scale];
+        const canvas=await page.locator('#plan').boundingBox();
+        const fitSize=Math.min(canvas.width,canvas.height);
+        const scale=Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys))/(0.8*fitSize);
+        const screen=([x,y])=>[canvas.x+canvas.width/2+(x-cx)/scale,canvas.y+canvas.height/2-(y-cy)/scale];
         for(const [x,y,r] of [[-.48,.35,.11],[-.2,-.32,.21],[.3,.25,.12],[.1,.55,.13],[-.5,-.1,.08]]){
             await drag(page,screen([x,y]),screen([x+r,y]));await ready(page);
         }
@@ -74,7 +76,7 @@ test('five drawn rooms keep one region each in raw and aligned initial views',{t
         const total=ringArea(capture.boundary);
         areas.forEach((a,r)=>assert.ok(Math.abs(a/total-input[r].ratio)<=0.05,`room ${r+1} keeps its target area`));
         assert.equal((await page.locator('#program-status').textContent()).trim(),'Ready to run.');
-        await page.click('button[data-open=rooms]');await page.click('button[data-walls=aligned]');await page.click('button[data-open=rooms]');
+        await page.click('button[data-open=rooms]');await page.locator('#show-aligned').check();await page.click('button[data-open=rooms]');
         assert.equal((await page.locator('#program-status').textContent()).trim(),'Ready to run.','alignment preserves one connected region per room');
         assert.deepEqual(await camera(page),pose);
         await page.screenshot({path:fileURLToPath(new URL('five-room-connectivity-aligned.png',dir))});
@@ -93,7 +95,12 @@ test('resizing a circle changes actual initial room areas before Run without mov
         await page.goto(url);await ready(page);
         await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');await ready(page);
         await page.click('.gizmo [data-axis="+z"]');
-        await drag(page,[550,530],[580,530]);await drag(page,[780,530],[840,530]);await ready(page);
+        const canvas=await page.locator('#plan').boundingBox();
+        const scale=Math.min(canvas.width,canvas.height)/820;
+        const center=([x,y])=>[Math.round(canvas.x+canvas.width/2+(x-1145/2)*scale),
+            Math.round(canvas.y+canvas.height/2+(y-820/2)*scale)];
+        const first=center([550,530]),second=center([780,530]);
+        await drag(page,first,[first[0]+30,first[1]]);await drag(page,second,[second[0]+60,second[1]]);await ready(page);
         const pose=await camera(page),beforeTarget=await target(page);
         assert.ok(Math.abs(beforeTarget[0]-0.2)<1e-6);
         await page.uncheck('#show-bubbles');
@@ -105,7 +112,7 @@ test('resizing a circle changes actual initial room areas before Run without mov
         const folder=new URL('../../.agents/cache/screens/',import.meta.url);await mkdir(folder,{recursive:true});
         await page.screenshot({path:fileURLToPath(new URL('initial-area-before.png',folder))});
         await page.check('#show-bubbles');
-        await page.mouse.click(550,530);
+        await page.mouse.click(...first);
         const h=await page.locator('.bubble-handle').boundingBox();assert.ok(h);
         await drag(page,[h.x+h.width/2,h.y+h.height/2],[h.x+h.width/2+30,h.y+h.height/2]);await ready(page);
         const afterTarget=await target(page);

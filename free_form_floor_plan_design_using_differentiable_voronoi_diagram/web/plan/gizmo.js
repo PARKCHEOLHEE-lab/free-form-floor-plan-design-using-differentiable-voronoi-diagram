@@ -82,7 +82,7 @@ export function createGizmo(el, { onPick, onDrag }) {
             axisTips(right, up, back, RADIUS).forEach((t, i) => {
                 lines[t.axis]?.setAttribute('x2', t.x);
                 lines[t.axis]?.setAttribute('y2', t.y);
-                ends[t.axis].style.transform = `translate(${t.x}px, ${t.y}px)`;
+                ends[t.axis].style.setProperty('--axis-shift', `translate(${t.x}px, ${t.y}px)`);
                 ends[t.axis].style.setProperty('--z', String(i + 1)); // nearer ends on top
             });
         },

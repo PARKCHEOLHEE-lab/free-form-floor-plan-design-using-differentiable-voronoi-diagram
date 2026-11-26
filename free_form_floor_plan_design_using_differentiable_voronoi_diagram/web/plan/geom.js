@@ -41,6 +41,28 @@ export function inside([px, py], ring) {
     return hit;
 }
 
+/** Use the area center, or a point in the largest filled triangle if it lies outside. */
+export function roomTagAnchor(rings, triangles) {
+    let area = 0, x = 0, y = 0, largestArea = 0, largestCenter = null;
+    for (const triangle of triangles) {
+        const weight = Math.abs(signedArea2(triangle));
+        if (weight === 0) continue;
+        const [a, b, c] = triangle;
+        const center = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3];
+        area += weight;
+        x += center[0] * weight;
+        y += center[1] * weight;
+        if (weight > largestArea) {
+            largestArea = weight;
+            largestCenter = center;
+        }
+    }
+    if (!largestCenter) return null;
+    const center = [x / area, y / area];
+    const inFill = rings.reduce((hit, ring) => hit !== inside(center, ring), false);
+    return inFill ? center : largestCenter;
+}
+
 /** A finite, open ring enclosing area without crossing or retracing its edges. */
 export function isSimpleBoundary(ring) {
     if (!Array.isArray(ring) || ring.length < 3 ||

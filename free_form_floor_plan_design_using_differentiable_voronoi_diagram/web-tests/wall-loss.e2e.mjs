@@ -155,11 +155,11 @@ test('L1 and Cos controls reach real WASM without changing the camera',{timeout:
         const after=await preview();assert.ok(after.cosine<before.cosine,`raw Cos contribution falls: ${before.cosine} -> ${after.cosine}`);
         assert.ok(after.wall<before.wall,'the L1 wall loss also falls');
         assert.notDeepEqual(after.cells,before.cells,'the engine changes raw geometry');
-        assert.equal(await page.locator('[data-walls=raw].active').count(),1);
+        assert.equal(await page.locator('#show-aligned').isChecked(),false);
         assert.ok((await page.locator('#sp_cosine').getAttribute('points')).length>0);
         assert.deepEqual(await camera(),pose,'controls and new loss rows preserve the camera');
         await page.screenshot({path:fileURLToPath(new URL('after-raw.png',dir))});
-        await page.click('button[data-open=rooms]');await page.click('[data-walls=aligned]');await page.click('button[data-open=rooms]');
+        await page.click('button[data-open=rooms]');await page.locator('#show-aligned').check();await page.click('button[data-open=rooms]');
         assert.deepEqual(await camera(),pose);await page.screenshot({path:fileURLToPath(new URL('after-aligned.png',dir))});
         await writeFile(new URL('measurements.json',dir),JSON.stringify({before,after,elapsedMs:Date.now()-start},null,2));
         if(process.env.VORONOI_COVERAGE_DIR)await writeFile(new URL('wall-loss-coverage.json',dir),JSON.stringify((await page.coverage.stopJSCoverage()).filter(e=>e.url===url||e.url.startsWith(url+'plan/'))));
@@ -206,7 +206,7 @@ test('the six-room Raw walls have smaller visible steps and keep the room progra
         const {frame,boundary} = await page.evaluate(()=>({frame:wallProof.frames.at(-1).frame,boundary:wallProof.boundary}));
         assert.equal(frame.iteration,500);
         assert.deepEqual(frame.sites.slice(0,6),initial.sites.slice(0,6),'bubble centers stay fixed');
-        assert.equal(await page.locator('[data-walls=raw].active').count(),1);
+        assert.equal(await page.locator('#show-aligned').isChecked(),false);
         const graph = fromCells(frame.cells,boundary,{roomCount:6,simplifyTol:0});
         assert.deepEqual(evaluatePlan(graph,input,input.doorWidth,{finished:true}).issues,[]);
         const face = ringArea(boundary);
@@ -261,7 +261,7 @@ test('the default E preset has fewer visible Raw steps after Run',{timeout:18000
         assert.equal(build.seed,4971);
         assert.equal(build.program,undefined,'opening the app and pressing Run uses the default preset');
         assert.equal(frame.iteration,500);
-        assert.equal(await page.locator('[data-walls=raw].active').count(),1);
+        assert.equal(await page.locator('#show-aligned').isChecked(),false);
         const graph = fromCells(frame.cells,boundary,{roomCount:6,simplifyTol:0});
         assert.deepEqual(graph.rooms.map(rings=>rings.length),[1,1,1,1,1,1],'each default room stays connected');
         assert.ok(areaErrors({frame,boundary,build}).every(error=>error<=.05),'each default room stays within 5 percentage points of its target area');

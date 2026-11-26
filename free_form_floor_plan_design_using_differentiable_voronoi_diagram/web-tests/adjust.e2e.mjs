@@ -39,18 +39,22 @@ test("adjustment: dragging a wall moves it, updates the room areas beside it, sh
         assert.deepEqual(await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label"))), ["Rooms", "Optimization", "Adjustment", "Export JSON"]);
         await page.click("button[data-open=adjust]");
         assert.equal(await page.locator(".panel[data-panel=adjust] .label").first().textContent(), "Adjustment");
-        assert.equal(await page.locator("[data-walls=aligned].active").count(), 1, "opening Adjustment shows the Aligned walls");
+        assert.equal(await page.locator("#show-aligned").isChecked(), true, "opening Adjustment shows the Aligned walls");
         assert.equal(await page.locator("#bubble-editing").isVisible(), true, "the editing bar shows");
         assert.equal(await page.locator("#bubble-editing [role=status]").textContent(), "Editing Walls");
 
         const before = await areasNow(page), shot = await pixels(page);
         assert.ok(before.length >= 3 && before.every((t) => /^\d+\.\d%$/.test(t)), `area list: ${before}`);
-        const hit = await findWall(page);
-        assert.ok(hit, "a wall can be found under the pointer");
+        const canvas = await page.locator('#plan').boundingBox();
+        const scale = Math.min(canvas.width, canvas.height) / 820;
+        // Keep the same preset E wall as the full-width, 1145 × 820 plan.
+        const hit = [canvas.x + canvas.width / 2 + (581 - 1145 / 2) * scale, canvas.y + canvas.height / 2];
+        await page.mouse.move(...hit);
+        assert.equal(await page.locator('#plan[data-wall-hover]').count(), 1, "the shared wall is under the pointer");
         const labels = new Set();
         await page.mouse.down();
         for (let dx = 2; dx <= 60; dx += 2) {
-            await page.mouse.move(hit[0] + dx, hit[1]);
+            await page.mouse.move(hit[0] + dx * scale, hit[1]);
             const label = await page.$eval("#wall-sketch text", (t) => (t.hasAttribute("hidden") ? "" : t.textContent));
             if (label) labels.add(label);
         }
@@ -96,8 +100,11 @@ test("adjustment: with wall edits, a control that rebuilds the walls asks first;
 
         // display controls and the wall width never rebuild the walls, so they never ask
         await page.click("button[data-open=rooms]");
-        await page.click("[data-walls=raw]");
-        await page.click("[data-walls=aligned]");
+        await page.locator("#show-aligned").uncheck();
+        await page.locator("#show-aligned").check();
+        await page.locator("#show-room-tags").uncheck();
+        assert.equal(await page.locator(".room-tag").count(), 0);
+        await page.locator("#show-room-tags").check();
         await page.click(".toggle:has(#show-doors)");
         await page.locator("#wall").focus();
         await page.keyboard.press("ArrowLeft");
@@ -105,13 +112,14 @@ test("adjustment: with wall edits, a control that rebuilds the walls asks first;
         assert.equal(await hasEdits(page), true);
 
         // a room edit on the plan asks; Cancel draws nothing
-        const rooms = await page.locator("#rooms_v").textContent();
+        const entries = page.locator("#roomareas .room-entry");
+        const rooms = await entries.count();
         await page.mouse.move(560, 300);
         await page.mouse.down();
         assert.equal(await dialogOpen(page), true, "pressing on the plan in Rooms asks first");
         await page.mouse.up();
         await page.click("#discard-walls button[value=cancel]");
-        assert.equal(await page.locator("#rooms_v").textContent(), rooms, "Cancel draws no room");
+        assert.equal(await entries.count(), rooms, "Cancel draws no room");
 
         // a slider that rebuilds asks, by keyboard and by mouse; Cancel keeps its value and the edits
         await page.click("button[data-open=optimize]");

@@ -24,7 +24,14 @@ test('floating controls keep 32px edge spacing and fit desktop and narrow window
             for(const name of ['rooms','optimize']){
                 await page.click(`button[data-open=${name}]`);
                 const panel=await rect(`.panel[data-panel=${name}]`);
-                assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
+                const plan=await rect('#plan');
+                if (size[0] <= 700) {
+                    assert.ok(near(panel.left,32)&&near(size[1]-panel.bottom,32)&&panel.top>=plan.bottom,`${name} docks below the plan`);
+                } else {
+                    assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
+                    assert.equal(plan.left, 0, `${name} floats over the plan`);
+                    assert.equal(plan.width, size[0], `${name} keeps the full plan width`);
+                }
                 assert.ok(panel.right<=size[0]-31&&panel.bottom<=size[1]-31,`${name} stays inside the outer spacing`);
                 await page.click(`button[data-open=${name}]`);
             }
@@ -115,16 +122,39 @@ test("one toolbar: every icon sits in the top-left toolbar, and the Rooms panel 
     }
 });
 
-test("optimization panel: the plan drawing stays the same, pixel for pixel", { timeout: 120_000 }, async () => {
+test("floating panels keep the full panned plan in place", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
-        await atSize(url, [1145, 820], async (page) => {
-            const pixels = () => page.$eval("#plan", (c) => c.toDataURL());
-            const shown = await pixels();
-            await page.click("button[data-open=optimize]");
-            assert.ok((await pixels()) === shown, "the plan changed when the Optimization panel opened");
-            await page.click("button[data-open=optimize]");
-            assert.ok((await pixels()) === shown, "the plan changed when the Optimization panel closed");
+        for (const [width, height] of [[1273, 822], [768, 1024]]) await atSize(url, [width, height], async (page) => {
+            const rooms = page.getByRole("button", { name: "Rooms", exact: true });
+            await rooms.click();
+            await page.getByRole("button", { name: "Boundary C", exact: true }).click();
+            await page.waitForFunction(() => /^shape_c.*ready/.test(document.querySelector("#status").textContent));
+            await page.getByRole("checkbox", { name: "Aligned walls", exact: true }).check();
+            await page.getByRole("slider", { name: "Point merge", exact: true }).press("End");
+            await rooms.click();
+            await page.mouse.move(width * 0.73, height * 0.51);
+            await page.mouse.down({ button: "middle" });
+            await page.mouse.move(width * 0.56, height * 0.64, { steps: 12 });
+            await page.mouse.up({ button: "middle" });
+
+            const state = () => page.$eval("#plan", c => ({
+                pose: [c.dataset.azimuth, c.dataset.elevation, c.dataset.zoom],
+                bounds: c.getBoundingClientRect().toJSON(),
+                pixels: c.toDataURL(),
+            }));
+            const before = await state();
+            for (const name of ["Rooms", "Optimization"]) {
+                const toggle = page.getByRole("button", { name, exact: true });
+                await toggle.click();
+                const opened = await state();
+                assert.deepEqual(opened.bounds, before.bounds, name + " keeps the full canvas");
+                assert.deepEqual(opened.pose, before.pose);
+                assert.ok(opened.pixels === before.pixels, name + " leaves the drawing in the same place");
+                assert.equal(await page.locator("#room-tags").evaluate(el => getComputedStyle(el).clipPath), "inset(0px)");
+                await toggle.click();
+                assert.ok((await state()).pixels === before.pixels, "closing the panel also keeps the drawing in place");
+            }
         });
     } finally {
         proc.kill();
@@ -444,17 +474,84 @@ test("details: sliders show a focus ring when reached by keyboard", { timeout: 6
     } finally { proc.kill(); }
 });
 
-test("details: target area percentages keep the value style after the first room is drawn", { timeout: 60_000 }, async () => {
+test("details: the Rooms list shows one name and a centered target percentage per row", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
+            const fields = page.locator("#roomareas input");
+            const names = await fields.evaluateAll(inputs => inputs.map(input => ({
+                label: input.placeholder,
+                repeated: input.closest(".room-entry").innerText.includes(input.placeholder),
+                border: getComputedStyle(input).borderTopColor,
+            })));
+            assert.equal(names.length, 6);
+            assert.equal(names[0].label, "Room 1");
+            assert.ok(names.every(({ repeated }) => !repeated), "the editable field is the only visible room name");
+            assert.ok(names.every(({ border }) => border === "rgba(0, 0, 0, 0)"), "unfocused fields have no visible border");
+            await fields.first().focus();
+            assert.notEqual(await fields.first().evaluate(input => getComputedStyle(input).borderTopColor), "rgba(0, 0, 0, 0)");
+            await fields.first().blur();
+            const checkAlignment = async () => {
+                const centers = await page.locator("#roomareas .val").evaluateAll(values => values.map(value => {
+                    const cell = value.getBoundingClientRect();
+                    const range = document.createRange();
+                    range.selectNodeContents(value);
+                    const text = range.getBoundingClientRect();
+                    return { cell: cell.left + cell.width / 2, text: text.left + text.width / 2 };
+                }));
+                assert.ok(centers.length > 0);
+                assert.ok(centers.every(({ cell, text }) => Math.abs(cell - text) < 1), "percentages are centered within the value column");
+            };
+            await checkAlignment();
             await page.click("button[data-mode=shape_a]");
             await page.waitForFunction(() => { const s = document.getElementById("status").textContent; return s.startsWith("shape_a") && s.includes("ready"); });
             await page.click('.gizmo [data-axis="+z"]');
             await page.mouse.move(600, 450); await page.mouse.down(); await page.mouse.move(630, 450, { steps: 8 }); await page.mouse.up();
-            const style = (sel) => page.$eval(sel, (v) => { const s = getComputedStyle(v); return [s.fontFamily, s.fontSize, s.textAlign, s.fontVariantNumeric]; });
-            assert.deepEqual(await style(".room-row .val"), await style("#sites_v"), "a room's percent uses the same value style as the other values");
+            await page.mouse.move(780, 530); await page.mouse.down(); await page.mouse.move(810, 530, { steps: 8 }); await page.mouse.up();
+            await checkAlignment();
+            await page.locator("#roomareas .val").first().click();
+            assert.equal(await page.locator(".room-row.selected").getAttribute("data-room-id"), "1");
+            const style = (sel) => page.$eval(sel, (v) => { const s = getComputedStyle(v); return [s.fontFamily, s.fontSize, s.fontVariantNumeric]; });
+            assert.deepEqual(await style("#roomareas .val"), await style("#sites_v"), "a room's percentage uses the shared number style");
+        });
+    } finally { proc.kill(); }
+});
+
+test("details: the Rooms list matches the Area readout", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const metrics = (list, name) => page.$eval(list, (area, nameSelector) => {
+                const row = area.firstElementChild;
+                const textStyle = (element, pseudo) => {
+                    const s = getComputedStyle(element, pseudo);
+                    return [s.fontFamily, s.fontSize, s.fontWeight, s.color];
+                };
+                const label = row.querySelector(nameSelector);
+                const value = row.querySelector(".val:last-child").getBoundingClientRect();
+                return {
+                    name: textStyle(label),
+                    placeholder: textStyle(label, "::placeholder"),
+                    heading: textStyle(area.previousElementSibling.lastElementChild),
+                    areaWidth: value.width,
+                    areaInset: area.getBoundingClientRect().right - value.right,
+                    swatchLeft: row.querySelector(".sw").getBoundingClientRect().left - area.getBoundingClientRect().left,
+                    rowSpacing: row.nextElementSibling.getBoundingClientRect().top - row.getBoundingClientRect().top,
+                };
+            }, name);
+            await page.click("button[data-open=adjust]");
+            await page.locator("#adjust-areas .raswatch").first().waitFor();
+            const reference = await metrics("#adjust-areas", ".raswatch");
+            await page.click("button[data-open=rooms]");
+            const rooms = await metrics("#roomareas", "input");
+            assert.deepEqual(rooms.heading, reference.heading, "Target uses the same style as Adjustment's column headings");
+            assert.deepEqual(rooms.name, reference.name, "custom names look like the existing room labels");
+            assert.deepEqual(rooms.placeholder, reference.name, "default names look like the existing room labels");
+            assert.equal(rooms.areaWidth, reference.areaWidth, "the percentage uses the shared value width");
+            assert.equal(rooms.areaInset, reference.areaInset, "the percentage column sits on the panel's value edge");
+            assert.ok(Math.abs(rooms.swatchLeft - reference.swatchLeft) < 1, "room colors start at the same left edge");
+            assert.ok(Math.abs(rooms.rowSpacing - reference.rowSpacing) <= 3, "room rows follow the compact Area list spacing");
         });
     } finally { proc.kill(); }
 });
@@ -613,19 +710,20 @@ test("polish: disabled buttons get no hover fill, and rows fade their hover like
     } finally { proc.kill(); }
 });
 
-test("walls: Raw and Aligned are plan icons that switch the walls", { timeout: 60_000 }, async () => {
+test("walls: a single Aligned walls icon switches between Aligned and Raw", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
-            for (const [mode, name] of [["raw", "Raw walls"], ["aligned", "Aligned walls"]]) {
-                const button = page.locator(`#walls [data-walls=${mode}]`);
-                assert.equal((await button.textContent()).trim(), "", `${name} shows an icon, not text`);
-                assert.equal(await button.getAttribute("aria-label"), name);
-                assert.equal(await button.locator("svg use").getAttribute("href"), `#i-walls-${mode}`);
-            }
-            await page.click("[data-walls=aligned]");
-            assert.equal(await page.locator("[data-walls=aligned].active").count(), 1, "Aligned still switches the walls");
+            const cell = page.locator(".toggle:has(#show-aligned)");
+            const aligned = page.getByRole("checkbox", { name: "Aligned walls", exact: true });
+            assert.equal((await cell.textContent()).trim(), "");
+            assert.equal(await cell.locator("svg use").getAttribute("href"), "#i-walls-aligned");
+            assert.equal(await aligned.isChecked(), false);
+            await cell.click();
+            assert.equal(await aligned.isChecked(), true);
+            await cell.click();
+            assert.equal(await aligned.isChecked(), false);
         });
     } finally { proc.kill(); }
 });
@@ -647,7 +745,8 @@ test("tooltips: icon names in panels show centered under the icon and are never 
                 assert.ok(t.x >= 0 && t.x + t.width <= 1145, `${name} is inside the window`);
             };
             await page.click("button[data-open=rooms]");
-            await check("[data-walls=aligned]", "Aligned walls");
+            await check(".toggle:has(#show-aligned)", "Aligned walls");
+            await check(".toggle:has(#show-room-tags)", "Room tags");
             await check("#boundary-draw", "Draw boundary");
             await check("[data-mode=shape_a]", "Boundary A");
             await page.mouse.move(700, 700);
@@ -722,13 +821,13 @@ test("rooms: View is the last section of Rooms and holds the display controls", 
             await page.click("button[data-open=rooms]");
             const order = await page.$eval(".panel[data-panel=rooms]", (p) => {
                 const display = [...p.querySelectorAll(".label")].at(-1);
-                return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-cells", "show-sites", "show-doors", "show-bubbles"].map((id) => {
+                return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-aligned", "show-cells", "show-sites", "show-doors", "show-bubbles", "show-room-tags"].map((id) => {
                     const el = document.getElementById(id);
                     return !!el && p.contains(el) && !!(display.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
                 }) };
             });
             assert.equal(order.last, "View", "View is the last section of Rooms");
-            assert.deepEqual(order.after, [true, true, true, true, true, true, true], "the display controls sit under it");
+            assert.deepEqual(order.after, Array(9).fill(true), "the display controls sit under it");
         });
     } finally { proc.kill(); }
 });
@@ -801,7 +900,7 @@ test("view: the View heading sits above six icon cells lined up with the Boundar
             const title = await panel.locator(".label", { hasText: /^View$/ }).boundingBox(), rowBox = await row.boundingBox();
             assert.ok(title && rowBox && title.y + title.height <= rowBox.y, "View is a heading on its own line, above its cells");
             const boundary = ["shape_a", "shape_b", "shape_c", "shape_d", "shape_e"].map((m) => `[data-mode=${m}]`).concat("#boundary-draw");
-            const cells = ["[data-walls=raw]", "[data-walls=aligned]", ".toggle:has(#show-cells)", ".toggle:has(#show-sites)", ".toggle:has(#show-doors)", ".toggle:has(#show-bubbles)"];
+            const cells = ["show-aligned", "show-cells", "show-sites", "show-doors", "show-bubbles", "show-room-tags"].map(id => `.toggle:has(#${id})`);
             for (const [i, sel] of cells.entries()) {
                 const box = await row.locator(sel).boundingBox(), under = await page.locator(boundary[i]).boundingBox();
                 assert.ok(box, `${sel} sits in the View row`);
@@ -810,7 +909,7 @@ test("view: the View heading sits above six icon cells lined up with the Boundar
                 assert.ok(Math.abs(box.y - rowBox.y) < 1, `${sel} is in the one row`);
             }
             assert.equal(await page.locator("input[type=checkbox]:visible").evaluateAll((cs) => cs.filter((c) => +getComputedStyle(c).opacity > 0).length), 0, "no checkbox box shows");
-            for (const [id, name] of [["show-cells", "Voronoi cells"], ["show-sites", "Voronoi sites"], ["show-doors", "Doors"], ["show-bubbles", "Bubble Diagram"]]) {
+            for (const [id, name] of [["show-cells", "Voronoi cells"], ["show-sites", "Voronoi sites"], ["show-doors", "Doors"], ["show-bubbles", "Bubble Diagram"], ["show-room-tags", "Room tags"]]) {
                 const toggle = row.locator(`.toggle:has(#${id})`);
                 const on = await toggle.evaluate((t) => getComputedStyle(t).borderColor);
                 await toggle.click();
@@ -823,7 +922,9 @@ test("view: the View heading sits above six icon cells lined up with the Boundar
                 await toggle.click();
                 assert.equal(await page.$eval(`#${id}`, (c) => c.checked), true, `clicking ${name} again turns it on`);
             }
-            assert.equal(await page.$eval(".toggle:has(#show-doors)", (t) => getComputedStyle(t).borderColor), await page.$eval("[data-walls=raw]", (b) => getComputedStyle(b).borderColor), "an on toggle looks like the selected wall view");
+            await page.locator("#show-aligned").check();
+            await page.waitForTimeout(200);
+            assert.equal(await page.$eval(".toggle:has(#show-doors)", (t) => getComputedStyle(t).borderColor), await page.$eval(".toggle:has(#show-aligned)", (b) => getComputedStyle(b).borderColor), "the wall switch uses the same selected style");
         });
     } finally { proc.kill(); }
 });
@@ -858,7 +959,7 @@ test("view: the cells toggle and the sites toggle each switch their own layer wi
             const shot = async () => { await page.waitForTimeout(150); return page.$eval("#plan", (c) => c.toDataURL()); };
             const set = async (id, on) => { if (await page.$eval(`#${id}`, (c) => c.checked) !== on) await page.click(`.toggle:has(#${id})`); };
             for (const mode of ["raw", "aligned"]) {
-                await page.click(`[data-walls=${mode}]`);
+                await page.locator("#show-aligned").setChecked(mode === "aligned");
                 const pics = new Map();
                 for (const [cells, sites] of [[true, true], [false, true], [true, false], [false, false]]) {
                     await set("show-cells", cells);

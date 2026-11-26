@@ -45,14 +45,14 @@
       border: 4px solid transparent; border-top-color: var(--dark); border-bottom: 0; }
     /* per-row value tags ride the playhead, centered on the line (top set per row in JS);
        each is a speech balloon with a downward tail in its own term colour (--c) */
-    .playhead .vtag { position: absolute; left: 0; transform: translate(-50%, -50%); color: var(--light); background: var(--c);
+    .playhead .vtag { position: absolute; left: 0; transform: translate(-50%, -50%); color: var(--ui-fg); background: var(--c);
       font-family: var(--mono); font-size: .72em; padding: .02em .34em; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .playhead .vtag::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
       border: 4px solid transparent; border-top-color: var(--c); border-bottom: 0; }
     /* a value shows only while the mouse is on its row; hidden tags keep their size for placement */
     .playhead .vtag { visibility: hidden; } .playhead .vtag.shown { visibility: visible; }
     #vt_total { --c: #66a1ff; } #vt_wall { --c: #e08a5a; } #vt_area { --c: #5aa469; }
-    #sp_cosine { stroke: #4676b8; } #vt_cosine { --c: #4676b8; }
+    #sp_cosine { stroke: #4676b8; } .playhead #vt_cosine { --c: #4676b8; color: var(--light); }
     #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
 
     .controls { font-size: .96em; }
@@ -63,12 +63,12 @@
     .panel-head { margin-bottom: 12px; }
     .panel-head > .label { grid-column: 1 / 5; margin: 0; }
     .view-row { margin-bottom: 12px; }   /* as .boundary-row */
-    .panel :is(.panel-head, .view-row) .seg { display: contents; }
+    .panel .panel-head .seg { display: contents; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); }
     .label:has(+ #connections:empty) { display: none; }   /* no door links yet: no empty heading */
-    .row .val, .room-row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
+    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
 
     /* thin track + outlined thumb */
     input[type=range] {
@@ -87,7 +87,7 @@
        with sites/rooms/wall/loss; the colour swatch sits in the 3.4em label slot. */
     .roomareas { margin: .1em 0 .2em; }
     .roomareas .row { margin: .32em 0; }
-    .roomareas .raswatch { width: 3.4em; flex: none; display: flex; align-items: center; justify-content: center; }
+    .roomareas .raswatch { flex: none; display: flex; align-items: center; white-space: nowrap; }
     .roomareas .sw { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--reduce-30); flex: none; }
 
     .seg { display: flex; flex-wrap: wrap; gap: .35em; }
@@ -122,7 +122,12 @@
     }
     html, body { height: 100%; overflow: hidden; }
     .stage, .canvas-card, .controls { display: contents; }
-    .planbox { position: fixed; inset: 0; }
+    body { --panel-left: calc(var(--ui-edge) + 48px); --panel-width: 300px;
+      --plan-top: 0px; --plan-bottom: 0px; --plan-left: 0px; }
+    .planbox { position: fixed; inset: var(--plan-top) 0 var(--plan-bottom) var(--plan-left); }
+    :is(#room-tags, #bubble-labels, .bubble-link-preview, #boundary-sketch, #wall-sketch) {
+      clip-path: inset(var(--plan-top) 0 var(--plan-bottom) var(--plan-left));
+    }
 
     .toolbar, .panel { position: fixed; background: var(--light); border-radius: 14px; box-shadow: var(--ui-card-shadow); }
     .toolbar { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; z-index: 2; }
@@ -136,18 +141,17 @@
     /* hover names: each icon's or gizmo end's aria-label, shown beside it after a short pause
        (aria-label is the one source, so Run's name follows Pause and Resume) */
     .tool { position: relative; }
-    .tool::after, .axis::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%);
+    .tool::after, .axis::after, .tip {
       padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light); font: 500 12px/1.2 var(--font);
       white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
+    .tool::after, .axis::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%); }
     .tool::after { left: calc(100% + 10px); }
     .axis::after { right: calc(100% + 8px); }  /* the gizmo is at the right edge */
     .tool:hover::after, .tool:focus-visible::after,
-    .axis:hover::after, .axis:focus-visible::after { opacity: 1; transition-delay: .12s; }
+    .axis:hover::after, .axis:focus-visible::after, .tip.shown { opacity: 1; transition-delay: .12s; }
     /* icon cells inside a panel: the panel cuts off what overflows it, so their name is one
        floating .tip over the page, centered under the icon (see showTip) */
-    .tip { position: fixed; z-index: 10; padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light);
-      font: 500 12px/1.2 var(--font); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
-    .tip.shown { opacity: 1; transition-delay: .12s; }
+    .tip { position: fixed; z-index: 10; }
 
     /* top-right: the view gizmo, the plan's axes as the camera sees them, floating with no card;
        a drag in it rotates the view and a click on an end turns the view to that side */
@@ -157,16 +161,23 @@
     .gizmo line { stroke-width: 2; stroke-linecap: round; }
     .axis { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; padding: 0; border: 0;
       border-radius: 50%; background: var(--axis); color: #fff; font: 600 10px/18px var(--font); text-align: center;
-      cursor: pointer; z-index: var(--z); }
+      cursor: pointer; z-index: var(--z); transform: var(--axis-shift, none); }
     .axis[data-axis^="-"] { width: 12px; height: 12px; margin: -6px 0 0 -6px; background: color-mix(in srgb, var(--axis) 40%, #fff); }
     .axis:hover, .axis:focus-visible { z-index: 9; outline: 2px solid var(--ui-fg); outline-offset: 1px; }
     .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-    .panel { display: none; top: var(--ui-edge); left: calc(var(--ui-edge) + 48px); width: min(300px, calc(100vw - 2 * var(--ui-edge) - 48px)); max-height: calc(100dvh - 2 * var(--ui-edge));
+    .panel { display: none; top: var(--ui-edge); left: var(--panel-left); width: var(--panel-width); max-height: calc(100dvh - 2 * var(--ui-edge));
       overflow-y: auto; padding: 14px 16px; z-index: 1; }
     .panel.open { display: block; }
     /* panels are see-through, so the plan stays visible behind an open panel */
     .panel { background: rgba(255, 255, 255, .75); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+    @media (max-width: 700px) {
+      body { --panel-height: min(46dvh, 400px); }
+      body:has(.panel.open) { --plan-top: 144px;
+        --plan-bottom: calc(var(--ui-edge) + var(--panel-height) + 12px); --plan-left: calc(var(--ui-edge) + 60px); }
+      .panel { top: auto; bottom: var(--ui-edge); left: var(--ui-edge); right: var(--ui-edge);
+        width: auto; height: var(--panel-height); }
+    }
     .lossrow { margin: 2px 0; }
     .panel .seg { margin-bottom: 4px; }
   #boundary-sketch, #wall-sketch { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; color:var(--ui-fg); }
@@ -203,6 +214,11 @@
   #custom-boundaries { margin-top:10px; }
   #custom-boundaries[hidden] { display:none; }
   #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
+  #room-tags { position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:1; }
+  .room-tag { position:absolute; transform:translate(-50%,-50%); display:grid; justify-items:center; max-width:11em;
+    gap:1px; color:var(--ui-fg); text-align:center; overflow-wrap:anywhere; font:11px/1.2 var(--font); }
+  .room-tag-number, .room-tag-share { font-size:10px; }
+  .room-tag-number { min-width:3.4em; padding:0 5px; border:1px solid currentColor; background:var(--light); }
   #plan[data-bubble-editing] { cursor:crosshair !important; } /* OrbitControls sets an inline cursor */
   .edit-bar { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:2px;
     padding:4px 4px 4px 14px; border-radius:14px; background:var(--light); box-shadow:var(--ui-card-shadow); font-size:13px; color:var(--ui-fg); }
@@ -213,6 +229,7 @@
   .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
   .bubble-label.selected { background:var(--ui-fg); color:white; }
   .bubble-label.draft { background:white; color:var(--ui-muted-fg); }
+  .bubble-label[data-covered] { visibility:hidden; }
   .bubble-link-dot { position:absolute; width:10px; height:10px; border:2px solid white; border-radius:50%; background:var(--ui-fg); transform:translate(-50%,-50%); }
   .bubble-link-preview { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
   .bubble-link-preview line { stroke:var(--ui-fg); stroke-width:2; stroke-dasharray:5 4; }   /* as #boundary-sketch */
@@ -220,8 +237,19 @@
   .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
+  #room-area-head .val, #roomareas .val { min-width:var(--tap-size, 0px); text-align:center; }
   .roomareas .raswatch { justify-content:flex-start; gap:4px; color:var(--ui-muted-fg); }   /* a room name is a row label */
-  #rooms_v { margin-left:auto; }
+  #room-area-head { margin:14px 0 4px; }
+  #room-area-head .val { font-weight:400; }
+  #roomareas .room-entry { gap:0; }
+  .room-entry :is(.room-swatch, .room-row) { flex:0 0 var(--tap-size, 24px); margin-inline:-6px; } /* align the dot with Area without shrinking its hit area */
+  .room-entry .room-swatch { display:grid; place-items:center; }
+  .room-entry .room-row { justify-content:center; align-self:stretch; padding:0; }
+  .room-entry label.val { display:grid; place-items:center; align-self:stretch; cursor:pointer; }
+  .room-entry input { flex:1; min-width:0; padding:0 2px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--ui-muted-fg); font:inherit; }
+  .room-entry input::placeholder { color:inherit; opacity:1; }
+  .room-entry input:is(:hover, :focus) { border-color:var(--ui-border); background:var(--light); }
+  .room-entry input:focus-visible { outline:2px solid var(--ui-muted-fg); }
   .bubble-help.error, #program-status[data-state=error] { color:var(--ui-error); }
   #program-status { font:11px/1.5 var(--font); margin-top:8px; }
   .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 6px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background .12s, box-shadow .12s; }
@@ -236,6 +264,42 @@
   /* Run, Pause and Resume: the last cell of the Optimization title row, filled as the main action */
   .panel-head #run { grid-column:6; background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }
   .panel-head #run:hover:not(:disabled) { background:#262626; }
+  @media (max-width: 700px) {
+    .edit-bar { top:calc(var(--ui-edge) + 54px); left:calc(var(--ui-edge) + 60px); transform:none;
+      max-width:calc(100vw - 2 * var(--ui-edge) - 60px); }
+    .edit-bar [role="status"] { line-height:1.2; }
+  }
+  @media (max-width: 500px) {
+    body { --tap-size:44px; --panel-height:min(42dvh, 380px); }
+    .toolbar .tool, .edit-bar .tool { width:var(--tap-size); height:var(--tap-size); flex:none; }
+    .gizmo { display:grid; grid-template-columns:repeat(5, var(--tap-size)); gap:4px; width:auto; height:auto; }
+    .gizmo svg { display:none; }
+    .gizmo .axis { position:relative; top:auto; left:auto; transform:none; margin:0;
+      width:var(--tap-size); height:var(--tap-size); border:1px solid var(--ui-border); border-radius:8px;
+      background:var(--light); color:var(--ui-fg); font-size:12px; }
+    .gizmo .axis:hover { background:var(--ui-muted); }
+    .gizmo [data-axis="-x"]::before { content:"−X"; }
+    .gizmo [data-axis="-y"]::before { content:"−Y"; }
+    .panel :is(button, .toggle, input[type=text], input[type=range]) {
+      min-width:var(--tap-size); min-height:var(--tap-size);
+    }
+    .room-entry :is(.room-swatch, .room-row) { margin-inline:0; }
+    .panel input[type=range] { background:transparent; }
+    .panel input[type=range]::-webkit-slider-runnable-track { height:4px; border-radius:3px; background:var(--ui-border); }
+    .panel input[type=range]::-webkit-slider-thumb { margin-top:-5px; }
+    .panel input[type=range]::-moz-range-track { height:4px; border-radius:3px; background:var(--ui-border); }
+    .panel-head { grid-template-columns:1fr var(--tap-size); }
+    .panel-head > .label { grid-column:1; }
+    .panel-head #run { grid-column:2; }
+  }
+  @media (max-width: 382px) {
+    .panel :is(.boundary-row, .view-row) { grid-template-columns:repeat(3, 1fr); }
+  }
+  @media (max-width: 359px) {
+    .gizmo { grid-template-columns:repeat(3, var(--tap-size)); }
+    .edit-bar { top:calc(var(--ui-edge) + 100px); }
+    body:has(.panel.open) { --plan-top:190px; }
+  }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
@@ -244,7 +308,7 @@
 <div class="wrap">
   <div class="stage">
     <div class="canvas-card">
-      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div>
+      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div><div id="room-tags"></div>
         <dialog id="discard-walls" aria-labelledby="discard-walls-title">
           <form method="dialog">
             <p id="discard-walls-title" class="dialog-title">Discard wall edits?</p>
@@ -275,8 +339,8 @@
         <symbol id="b-shape_c" viewBox="0 0 24 24"><polygon points="3.00,18.82 7.83,18.82 7.83,15.37 12.42,15.37 12.42,18.82 18.67,18.82 18.67,12.31 21.00,12.31 21.00,5.18 3.00,5.18"/></symbol>
         <symbol id="b-shape_d" viewBox="0 0 24 24"><polygon points="6.94,4.12 3.00,14.81 5.81,19.88 14.25,19.88 14.25,14.81 21.00,14.81 21.00,5.81 9.75,5.81 9.75,4.12"/></symbol>
         <symbol id="b-shape_e" viewBox="0 0 24 24"><polygon points="20.69,11.69 16.97,3.00 3.31,3.00 3.31,13.55 7.03,21.00 13.24,21.00 13.24,14.79 20.69,14.79"/></symbol>
-        <symbol id="i-walls-raw" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3 10.5 7.5 13 12 11 16.5 12 21"/><path d="M3 12.5 7.5 11 13 12"/></symbol>
         <symbol id="i-walls-aligned" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h9"/></symbol>
+        <symbol id="i-room-tag" viewBox="0 0 24 24"><path d="M5 5h14M8 19h8"/><rect x="6" y="9" width="12" height="6" rx="1"/></symbol>
         <symbol id="i-door" viewBox="0 0 24 24"><path d="M2 20h5"/><path d="M19 20h3"/><path d="M7 20V8"/><path d="M7 8a12 12 0 0 1 12 12"/></symbol>
         <symbol id="i-voronoi" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M11 3 11.5 11 21 10"/><path d="M3 12.5 12.5 13 13 21"/><path d="M11.5 11 12.5 13"/></symbol>
         <symbol id="i-sites" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><circle cx="7" cy="7.5" r=".6"/><circle cx="16.5" cy="6.5" r=".6"/><circle cx="7.5" cy="17" r=".6"/><circle cx="17" cy="16.5" r=".6"/></symbol>
@@ -306,11 +370,11 @@
         <div class="label">Boundary</div>
         <div class="seg boundary-row">
         <div class="seg" id="presets">
-          <button data-mode="shape_a" aria-label="Boundary A"><svg class="ic preset-ic"><use href="#b-shape_a"/></svg></button>
-          <button data-mode="shape_b" aria-label="Boundary B"><svg class="ic preset-ic"><use href="#b-shape_b"/></svg></button>
-          <button data-mode="shape_c" aria-label="Boundary C"><svg class="ic preset-ic"><use href="#b-shape_c"/></svg></button>
-          <button data-mode="shape_d" aria-label="Boundary D"><svg class="ic preset-ic"><use href="#b-shape_d"/></svg></button>
-          <button data-mode="shape_e" class="active" aria-label="Boundary E"><svg class="ic preset-ic"><use href="#b-shape_e"/></svg></button>
+          <button data-mode="shape_a" aria-label="Boundary A" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_a"/></svg></button>
+          <button data-mode="shape_b" aria-label="Boundary B" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_b"/></svg></button>
+          <button data-mode="shape_c" aria-label="Boundary C" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_c"/></svg></button>
+          <button data-mode="shape_d" aria-label="Boundary D" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_d"/></svg></button>
+          <button data-mode="shape_e" class="active" aria-label="Boundary E" aria-pressed="true"><svg class="ic preset-ic"><use href="#b-shape_e"/></svg></button>
         </div>
         <button id="boundary-draw" type="button" aria-label="Draw boundary" aria-pressed="false" disabled><svg class="ic"><use href="#i-vector-square"/></svg></button>
         </div>
@@ -318,25 +382,22 @@
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
-        <div class="row"><label>Rooms</label><span class="val" id="rooms_v">6</span></div>
-        <div class="label">Target area</div>
+        <div class="label row area-head" id="room-area-head"><span>Room name</span><span class="val">Target</span></div>
         <div class="roomareas" id="roomareas"></div>
         <div class="label">Door links</div>
         <div id="connections"></div>
         <div id="program-status" role="status"></div>
         <div class="label">View</div>
         <div class="view-row">
-          <div class="seg" id="walls">
-            <button data-walls="raw" class="active" aria-label="Raw walls"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
-            <button data-walls="aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
-          </div>
+          <label class="toggle"><input type="checkbox" id="show-aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-cells" aria-label="Voronoi cells" checked><svg class="ic"><use href="#i-voronoi"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-sites" aria-label="Voronoi sites" checked><svg class="ic"><use href="#i-sites"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-doors" aria-label="Doors" checked><svg class="ic"><use href="#i-door"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-bubbles" aria-label="Bubble Diagram" checked><svg class="ic"><use href="#i-bubbles"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-room-tags" aria-label="Room tags" checked><svg class="ic"><use href="#i-room-tag"/></svg></label>
         </div>
         <div class="display-rows">
-          <div class="row"><label>Wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+          <div class="row"><label for="wall">Wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
           <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0" max="50" step="1" value="13"><span class="val" id="merge_tol_v">13%</span></div>
           <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0" max="50" step="1" value="13"><span class="val" id="align_tol_v">13%</span></div>
         </div>
@@ -350,14 +411,14 @@
         <div class="label">Loss weight (0–1)</div>
         <div class="row"><label for="w_wall">L1</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="1.00"><span class="val" id="w_wall_v">1.00</span></div>
         <div class="row"><label for="w_cosine">Cos</label><input id="w_cosine" type="range" min="0" max="1" step="0.01" value="1"><span class="val" id="w_cosine_v">1.00</span></div>
-        <div class="row"><label>Area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.50"><span class="val" id="w_area_v">0.50</span></div>
-        <div class="row"><label>Lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
-        <div class="row"><label>Topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
+        <div class="row"><label for="w_area">Area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.50"><span class="val" id="w_area_v">0.50</span></div>
+        <div class="row"><label for="w_lloyd">Lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
+        <div class="row"><label for="w_topo">Topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
         <div class="label">Run settings</div>
-        <div class="row"><label>Sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
-        <div class="row"><label>Iterations</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
-        <div class="row"><label>LR</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
-        <div class="row"><label>Seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
+        <div class="row"><label for="sites">Sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
+        <div class="row"><label for="iters">Iterations</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
+        <div class="row"><label for="lr">LR</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
+        <div class="row"><label for="seed">Seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
         <div class="label">Loss</div>
         <div class="losspanel" id="losspanel">
           <div class="lossrow"><span class="lk">Total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
@@ -391,14 +452,14 @@ const R = 1.18; // normalized boundaries fit within radius 1
 // three.js draws the plan in 3D: it opens isometric with the plan flat on the floor, the wheel
 // zooms (0.5x to 8x), the mouse rotates and pans, and a double-click returns to isometric
 import { createPlanView } from './plan/view3d.js';
-import { BubbleProgram } from './plan/bubbles.js';
+import { BubbleProgram, roomLabel } from './plan/bubbles.js';
 import { History } from './plan/history.js';
 import { createBubbleEditor } from './plan/bubble-editor.js';
 import { createBoundaryEditor } from './plan/boundary-editor.js';
 import { createWallEditor } from './plan/wall-editor.js';
 import { roomShares } from './plan/wall-edit.js';
 import { exportName, exportPlan } from './plan/export.js';
-const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo') });
+const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo'), tags: document.getElementById('room-tags') });
 const $ = id => document.getElementById(id);
 
 // ---------- wall alignment (web/plan) ----------
@@ -410,7 +471,8 @@ import { evaluatePlan } from './plan/openings.js';
 const SIMPLIFY_TOL = 0.004;  // the kink tolerance web/src/lib.rs uses for room outlines
 const pointMergeInput = $('merge_tol');
 const wallSnapInput = $('align_tol');
-let wallsMode = 'raw';
+const alignedWallsInput = $('show-aligned');
+const roomTagsInput = $('show-room-tags');
 // Wall edits from the Adjustment panel live on a copy of the aligned plan (alignFrame rebuilds the
 // plan from the optimizer frame on every draw). null while there are no edits.
 let adjusted = null;
@@ -432,15 +494,9 @@ function alignFrame(f) {
     snapTol: wallSnapInput.valueAsNumber / 100 * cell,
   };
   alignPlan(g, boundaryRing, tolerances);
-  if (wallsMode === 'raw') alignPlan(raw, boundaryRing, tolerances);
+  if (!alignedWallsInput.checked) alignPlan(raw, boundaryRing, tolerances);
   return { raw, aligned: g, before, after: alignedShare(g, boundaryRing) };
 }
-$('walls').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  [...$('walls').children].forEach(x => x.classList.toggle('active', x === b));
-  wallsMode = b.dataset.walls;
-  if (lastFrame) drawFrame(lastFrame);
-});
 // Each weighted loss contribution has its own y-scale.
 const LOSS_TERMS = ['total', 'wall', 'cosine', 'area', 'lloyd', 'topo'];
 // Each row's value tag (vt_<term>) shows while the mouse is on that row (sp_<term>).
@@ -502,6 +558,7 @@ let gen = 0, curGen = 0;  // build generation; frames from a superseded build ar
 // thread; the UI stays responsive and only renders the frames it streams back.
 const worker = new Worker('./worker.js', { type: 'module' });
 const programs = new Map(); // retain each boundary's circles when switching presets
+const presetRoomNames = new Map();
 // One undo history over the whole design: which boundary is active, the drawn boundary, and every
 // boundary's room circles. Room edits and new boundaries are steps; choosing a preset is not.
 const designState = () => ({
@@ -517,7 +574,7 @@ const roomCount = () => currentProgram()?.snapshot().rooms.length ?? roomRatios.
 const colorForRoomId = id => COLORS[(id-1)%COLORS.length];
 const bubbleHelp = $('bubble-message').textContent;
 const editor = createBubbleEditor($('plan'),view,{
-  labels:$('bubble-labels'),colorForRoomId,ensureProgram:()=>ensureProgram(),boundary:()=>boundaryRing,
+  labels:$('bubble-labels'),tags:$('room-tags'),colorForRoomId,ensureProgram:()=>ensureProgram(),boundary:()=>boundaryRing,
   onChange({commit,selectionOnly}) {
     if(selectionOnly){refreshRoomReadout();return;}
     if(!editingBubbles){editingBubbles=true;stop();}
@@ -571,18 +628,40 @@ function ensureProgram() {
   return currentProgram();
 }
 $('roomareas').addEventListener('click',e=>{const b=e.target.closest('[data-room-id]');if(b)editor.selectRoom(+b.dataset.roomId);});
+$('roomareas').addEventListener('change', ({ target: field }) => {
+  const index = Number(field.dataset.nameIndex);
+  const name = field.value.trim();
+  const program = currentProgram();
+  if (program) {
+    const room = program.snapshot().rooms[index];
+    program.rename(room.id, name);
+    history.replace(designState());
+  } else {
+    const names = [...roomNames(null)];
+    names[index] = name || undefined;
+    if (mode === CUSTOM_MODE) {
+      customBoundary.roomNames = names;
+      history.replace(designState());
+    } else presetRoomNames.set(mode, names);
+  }
+  field.value = name;
+  if (lastFrame) drawFrame(lastFrame);
+});
+$('roomareas').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing && e.target.matches('input')) e.target.blur();
+});
 $('connections').addEventListener('click',e=>{const b=e.target.closest('[data-from]');if(b)editor.selectLink(+b.dataset.from,+b.dataset.to);});
 window.addEventListener('pagehide',()=>{editor.dispose();boundaryEditor.dispose();wallEditor.dispose();});
 
 // Each room's share now (from the plan on screen) beside its target share, in the Adjustment panel.
 // One decimal, so a small wall move shows.
-function refreshAdjustAreas(g, color) {
-  const input = currentProgram()?.snapshot();
+const shareText = share => (share * 100).toFixed(1) + '%';
+function refreshAdjustAreas(shares, color, input) {
   const weights = input?.ratios ?? roomRatios;
   const sum = weights.reduce((a, b) => a + b, 0) || 1;
-  $('adjust-areas').innerHTML = roomShares(g).map((share, r) => {
+  $('adjust-areas').innerHTML = shares.map((share, r) => {
     const id = input ? input.rooms[r].id : r + 1;
-    return `<div class="row"><span class="raswatch"><i class="sw" style="background:${color(r)}"></i> R${id}</span><span class="val" data-now>${(share * 100).toFixed(1)}%</span><span class="val" data-target>${((weights[r] ?? 0) / sum * 100).toFixed(1)}%</span></div>`;
+    return `<div class="row"><span class="raswatch"><i class="sw" style="background:${color(r)}"></i> ${roomLabel(id)}</span><span class="val" data-now>${shareText(share)}</span><span class="val" data-target>${shareText((weights[r] ?? 0) / sum)}</span></div>`;
   }).join('');
 }
 
@@ -602,7 +681,7 @@ const wallEditor = createWallEditor($('plan'), view, {
   overlay: $('wall-sketch'),
   plan: () => adjusted ?? lastAligned,
   boundary: () => boundaryRing,
-  canEdit: () => wallsMode === 'aligned' && !running,   // the plan changes under the pointer while it runs
+  canEdit: () => alignedWallsInput.checked && !running,   // the plan changes under the pointer while it runs
   onChange(graph, commit) {
     adjusted = graph;
     $('plan').toggleAttribute('data-wall-edits', true);
@@ -662,9 +741,12 @@ document.addEventListener('keydown', e => {
   if (sliderKey || roomKey) askFirst(e);
 }, true);
 $('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubbles').checked));
-$('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
-$('show-cells').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
-$('show-sites').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
+function redrawFrame() {
+  if (lastFrame) drawFrame(lastFrame);
+}
+for (const id of ['show-aligned', 'show-room-tags', 'show-doors', 'show-cells', 'show-sites']) {
+  $(id).addEventListener('change', redrawFrame);
+}
 
 // ---------- inputs ----------
 const SLIDERS = ['sites','wall','merge_tol','align_tol','w_wall','w_cosine','w_area','w_lloyd','w_topo','iters','lr','seed'];
@@ -717,20 +799,34 @@ $('seed').addEventListener('change', rebuildPreviewSoon);
 for (const id of ['w_wall', 'w_cosine', 'w_area', 'w_lloyd', 'w_topo', 'iters', 'lr']) $(id).addEventListener('change', rebuildPreviewSoon);
 
 let roomRatios = []; // legacy preset shares; edited inputs come only from BubbleProgram
+function roomNames(program) {
+  if (program) return program.rooms.map(room => room.name);
+  return (mode === CUSTOM_MODE ? customBoundary.roomNames : presetRoomNames.get(mode)) ?? [];
+}
+
 function refreshRoomReadout() {
   const input=currentProgram()?.snapshot();
+  const names=roomNames(input);
   const weights=input?.ratios ?? roomRatios;
   const sum=weights.reduce((a,b)=>a+b,0)||1;
-  $('rooms_v').textContent=String(weights.length);
   $('roomareas').innerHTML=weights.map((v,i)=>{
     const id=input?input.rooms[i].id:i+1;
-    const content=`<span class="raswatch"><i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i> R${id}</span><span class="val">${Math.round(v/sum*100)}%</span>`;
-    return input?`<button type="button" class="room-row${editor.selected===id?' selected':''}" data-room-id="${id}" aria-label="Select room R${id}">${content}</button>`:`<div class="row">${content}</div>`;
+    const label=roomLabel(id);
+    const marker=`<i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i>`;
+    const selectId=`room-select-${id}`;
+    const selection=input
+      ? `<button type="button" class="room-row${editor.selected===id?' selected':''}" id="${selectId}" data-room-id="${id}" aria-label="Select ${label}">${marker}</button>`
+      : `<span class="room-swatch" aria-hidden="true">${marker}</span>`;
+    const percentage=`${Math.round(v/sum*100)}%`;
+    const area=input ? `<label class="val" for="${selectId}">${percentage}</label>` : `<span class="val">${percentage}</span>`;
+    return `<div class="row room-entry">${selection}<input type="text" data-name-index="${i}" aria-label="Name for ${label}" placeholder="${label}" autocomplete="off">${area}</div>`;
   }).join('');
+  $('roomareas').querySelectorAll('input').forEach((field, i) => { field.value = names[i] ?? ''; });
   const selected=editor.selectedLink;
   $('connections').innerHTML=(input?.links??[]).map(([a,b])=>{
     const x=input.rooms[a].id,y=input.rooms[b].id;
-    return `<button type="button" class="connection-row${selected&&selected[0]===x&&selected[1]===y?' selected':''}" data-from="${x}" data-to="${y}" aria-label="Select door link R${x} to R${y}">R${x} / R${y}</button>`;
+    const from=roomLabel(x),to=roomLabel(y);
+    return `<button type="button" class="connection-row${selected&&selected[0]===x&&selected[1]===y?' selected':''}" data-from="${x}" data-to="${y}" aria-label="Select door link ${from} to ${to}">${from} / ${to}</button>`;
   }).join('');
 }
 
@@ -849,14 +945,17 @@ document.querySelector('.toolbar [data-export]').addEventListener('click', () =>
   const plan = adjusted ?? lastAligned;
   if (!plan || !lastFrame || !boundaryRing) return;
   const now = new Date();
+  const program = currentProgram()?.snapshot() ?? null;
   const data = exportPlan({
-    mode, boundary: boundaryRing, program: currentProgram()?.snapshot() ?? null,
+    mode, boundary: boundaryRing, program, roomNames: roomNames(program),
     settings: {
       sites: +$('sites').value,
       weights: { l1: +$('w_wall').value, cos: +$('w_cosine').value, area: +$('w_area').value, lloyd: +$('w_lloyd').value, topo: +$('w_topo').value },
       iterations: +$('iters').value, lr: +$('lr').value, seed: +$('seed').value | 0,
       wallWidth, pointMerge: +pointMergeInput.value, wallSnap: +wallSnapInput.value,
-      walls: wallsMode, voronoi: { cells: $('show-cells').checked, sites: $('show-sites').checked }, doors: $('show-doors').checked, bubbles: $('show-bubbles').checked,
+      walls: alignedWallsInput.checked ? 'aligned' : 'raw',
+      voronoi: { cells: $('show-cells').checked, sites: $('show-sites').checked },
+      doors: $('show-doors').checked, bubbles: $('show-bubbles').checked, roomTags: roomTagsInput.checked,
     },
     frame: lastFrame, finished: runFinished, plan, edited: !!adjusted, now,
   });
@@ -940,7 +1039,7 @@ function activateBoundary(nextMode) {
   document.querySelectorAll('#presets button, #custom-boundaries button').forEach(button => {
     const active = button.dataset.mode === mode;
     button.classList.toggle('active', active);
-    if (button.parentElement.id === 'custom-boundaries') button.setAttribute('aria-pressed', String(active));
+    button.setAttribute('aria-pressed', String(active));
   });
   editor.setProgram(null);
   editingBubbles = false;
@@ -1018,8 +1117,9 @@ function drawFrame(f) {
   const al = boundaryRing ? alignFrame(f) : null;
   lastAligned = al?.aligned ?? null;
   const aligned = adjusted ?? lastAligned;
-  const shown = wallsMode === 'aligned' ? aligned : al?.raw;
-  if (aligned) refreshAdjustAreas(aligned, color);
+  const shown = alignedWallsInput.checked ? aligned : al?.raw;
+  const alignedShares = aligned ? roomShares(aligned) : [];
+  if (aligned) refreshAdjustAreas(alignedShares, color, input);
   let doors=[];
   if(input&&shown){
     const result=evaluatePlan(shown,input,DOOR_WIDTH,{finished:runFinished,running});
@@ -1035,8 +1135,17 @@ function drawFrame(f) {
   const voronoi = {};
   if ($('show-cells').checked) voronoi.lines = f.cells.map(cell => cell.ring);
   if ($('show-sites').checked) voronoi.points = f.sites;
+  const names = roomNames(input);
+  const shownShares = shown === aligned ? alignedShares : shown ? roomShares(shown) : [];
   const rooms = shown
-    ? shown.rooms.map((_, r) => ({ rings: roomRings(shown, r), color: color(r) }))
+    ? shown.rooms.map((_, r) => {
+      const id = input?.rooms[r]?.id ?? r + 1;
+      return {
+        rings: roomRings(shown, r),
+        color: color(r),
+        tag: roomTagsInput.checked ? { id, name: names[r] ?? roomLabel(id), share: shareText(shownShares[r]) } : undefined,
+      };
+    })
     : f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) }));
   view.draw({
     ...voronoi,
@@ -1153,12 +1262,17 @@ function showPanel(name) {
   if (pendingBoundary) return;
   openPanel = openPanel === name ? null : name;
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('open', p.dataset.panel === openPanel));
+  view.resize();
   document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));
   // The playhead measures the graph, which has no size while its panel is closed.
   if (openPanel === 'optimize' && lastFrame) movePlayhead(lastFrame.iteration);
   editor.setEnabled(openPanel === 'rooms');
+  // Walls are edited on the Aligned plan.
+  if (openPanel === 'adjust' && !alignedWallsInput.checked) {
+    alignedWallsInput.checked = true;
+    redrawFrame();
+  }
   wallEditor.setEnabled(openPanel === 'adjust');
-  if (openPanel === 'adjust' && wallsMode !== 'aligned') $('walls').querySelector('[data-walls=aligned]').click(); // walls are edited on the Aligned plan
   $('bubble-editing').hidden = openPanel !== 'rooms' && openPanel !== 'adjust';
   $('bubble-editing').querySelector('[role=status]').textContent = openPanel === 'adjust' ? 'Editing Walls' : 'Editing Bubble Diagram';
   setButtons();

@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { strokeRing, strokeTriangles } from './stroke.js';
-import { signedArea2, inside } from './geom.js';
+import { signedArea2, inside, roomTagAnchor } from './geom.js';
 import { createGizmo } from './gizmo.js';
 
 const MIN_ZOOM = 0.5, MAX_ZOOM = 8;
@@ -24,7 +24,7 @@ const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
 /**
  * Create the view on `canvas`. draw(plan) shows one plan:
  *   outline ring               the boundary the camera fits (optional; else the rooms)
- *   rooms  [{ rings, color }]  filled even-odd, as the 2D canvas filled them
+ *   rooms  [{ rings, color, tag? }]  filled even-odd, with an optional { id, name, share } tag
  *   walls  [ring]              wall centerlines, drawn as double-line walls
  *   lines  [ring]              faint cell outlines (optional)
  *   points [[x, y]]            Voronoi sites (optional)
@@ -33,7 +33,7 @@ const SITE = { color: '#000000', opacity: 0.4, size: 2.8 };
  * The canvas carries data-zoom, data-azimuth and data-elevation (degrees).
  * `gizmo`, an empty box, becomes the view gizmo.
  */
-export function createPlanView(canvas, { gizmo } = {}) {
+export function createPlanView(canvas, { gizmo, tags } = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     renderer.setClearColor(0xffffff, 1);
     const scene = new THREE.Scene();
@@ -59,10 +59,16 @@ export function createPlanView(canvas, { gizmo } = {}) {
     let width = 1, height = 1;
     let fitted = null;                          // { cx, cy, extent } of the plan the camera is fitted to
     let lastPlan = null;
+    let tagAnchors = [];
     const axes = gizmo ? createGizmo(gizmo, { onPick: lookFrom, onDrag: turn }) : null;
 
     const render = () => {
         renderer.render(scene, camera);
+        for (const [tag, anchor] of tagAnchors) {
+            const [x, y] = screenPoint(anchor);
+            tag.style.left = x + 'px';
+            tag.style.top = y + 'px';
+        }
         if (axes) {
             // the camera's right, up and back directions are the first three columns of its world matrix
             const m = camera.matrixWorld.elements;
@@ -79,8 +85,28 @@ export function createPlanView(canvas, { gizmo } = {}) {
     const extent = () => fitted?.extent ?? 2;
     // zoom 1 shows the fitted extent across FIT of the shorter side
     function frustum() {
-        const perPx = extent() / (FIT * Math.min(width, height));
-        Object.assign(camera, { left: -width / 2 * perPx, right: width / 2 * perPx, top: height / 2 * perPx, bottom: -height / 2 * perPx });
+        let perPx = extent() / (FIT * Math.min(width, height));
+        let x = 0, y = 0;
+        if (fitted && lastPlan?.outline?.length && (width < innerWidth || height < innerHeight)) {
+            // A dock can cut off the longer side of the projected outline. Fit the lens
+            // around it without moving the camera target or changing the user's zoom.
+            camera.updateMatrixWorld();
+            const m = camera.matrixWorld.elements;
+            const wallEdge = strokeRing(lastPlan.outline, lastPlan.wall * WALL_UNIT * extent()).flat();
+            const projected = wallEdge.map(([px, py]) => {
+                const dx = px - fitted.cx, dy = py - fitted.cy;
+                return [m[0] * dx - m[2] * dy, m[4] * dx - m[6] * dy];
+            });
+            const box = bounds([projected]);
+            const margin = Math.min(6, width / 4, height / 4);
+            perPx = Math.max(perPx, box.width / (width - 2 * margin), box.height / (height - 2 * margin));
+            const paddingX = Math.max(0, (width / 2 - margin) * perPx - box.width / 2);
+            const paddingY = Math.max(0, (height / 2 - margin) * perPx - box.height / 2);
+            x = THREE.MathUtils.clamp(0, box.cx - paddingX, box.cx + paddingX);
+            y = THREE.MathUtils.clamp(0, box.cy - paddingY, box.cy + paddingY);
+        }
+        const halfWidth = width / 2 * perPx, halfHeight = height / 2 * perPx;
+        Object.assign(camera, { left: x - halfWidth, right: x + halfWidth, top: y + halfHeight, bottom: y - halfHeight });
         camera.near = 0;
         camera.far = 10 * extent();
         camera.updateProjectionMatrix();
@@ -97,8 +123,8 @@ export function createPlanView(canvas, { gizmo } = {}) {
         const { cx = 0, cy = 0 } = fitted ?? {};
         controls.target.set(cx, 0, -cy);
         camera.zoom = 1;
-        frustum();
         orient();
+        frustum();
         render();
     }
     canvas.addEventListener('dblclick', home);
@@ -125,11 +151,14 @@ export function createPlanView(canvas, { gizmo } = {}) {
     function lookFrom(axis) {
         if (axis === '+z') orient(0, TOP_POLAR);
         else orient(THREE.MathUtils.degToRad(SIDE_AZIMUTH[axis]));
+        frustum();
         render();
     }
 
     function clear() {
         dispose();
+        tagAnchors = [];
+        tags?.replaceChildren();
         render();
     }
 
@@ -158,10 +187,17 @@ export function createPlanView(canvas, { gizmo } = {}) {
         const tris = new TriangleBuffer();
 
         const fill = new THREE.Color();
+        tagAnchors = [];
         for (const room of plan.rooms) {
             fill.set(room.color);
-            for (const t of fillTriangles(room.rings)) tris.add(t, 0, fill);
+            const triangles = fillTriangles(room.rings);
+            for (const t of triangles) tris.add(t, 0, fill);
+            if (tags && room.tag) {
+                const anchor = roomTagAnchor(room.rings, triangles);
+                if (anchor) tagAnchors.push([makeTag(room.tag), anchor]);
+            }
         }
+        tags?.replaceChildren(...tagAnchors.map(([tag]) => tag));
         if (hw > 0) {
             const black = new THREE.Color('#111111');
             for (const ring of plan.walls) for (const t of strokeTriangles(strokeRing(ring, hw))) tris.add(t, lift, black);
@@ -237,6 +273,22 @@ export function createPlanView(canvas, { gizmo } = {}) {
     return { draw, clear, resize, home, screenPoint, pointOnPlan, drawBubbles, onChange(fn){listeners.add(fn);return()=>listeners.delete(fn);} };
 }
 
+function makeTag({ id, name, share }) {
+    const tag = document.createElement('div');
+    const label = document.createElement('span');
+    const number = document.createElement('span');
+    const area = document.createElement('span');
+    tag.className = 'room-tag';
+    label.className = 'room-tag-name';
+    number.className = 'room-tag-number';
+    area.className = 'room-tag-share';
+    label.textContent = name;
+    number.textContent = String(id).padStart(3, '0');
+    area.textContent = share;
+    tag.append(label, number, area);
+    return tag;
+}
+
 /** Triangles with one colour each, gathered into one geometry. */
 class TriangleBuffer {
     pos = [];
@@ -288,7 +340,8 @@ function bounds(rings) {
             minY = Math.min(minY, y); maxY = Math.max(maxY, y);
         }
     if (!(minX <= maxX)) return null;
-    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, extent: Math.max(maxX - minX, maxY - minY) || 1 };
+    const width = maxX - minX, height = maxY - minY;
+    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, width, height, extent: Math.max(width, height) || 1 };
 }
 
 const sameFit = (a, b) =>

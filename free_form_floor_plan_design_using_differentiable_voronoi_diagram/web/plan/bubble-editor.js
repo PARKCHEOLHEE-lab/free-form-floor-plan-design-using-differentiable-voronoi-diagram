@@ -1,4 +1,5 @@
 import {inside,segmentDistance} from './geom.js';
+import {roomLabel} from './bubbles.js';
 
 /**
  * Left-button room editing with no tool modes, active only while enabled (the Rooms panel is
@@ -7,7 +8,7 @@ import {inside,segmentDistance} from './geom.js';
  * (`ensureProgram` supplies a program on the first one). A press outside `boundary()` does nothing.
  * The view owns projection and the program owns validity.
  */
-export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,onStatus,ensureProgram,boundary}) {
+export function createBubbleEditor(canvas,view,{labels,tags,colorForRoomId,onChange,onStatus,ensureProgram,boundary}) {
     let model=null,enabled=false,selected=null,selectedLink=null,press=null,draft=null,visible=true,hover=null;
     const empty={rooms:[],links:[],ratios:[]};
     const snapshot=()=>model?model.snapshot():empty;
@@ -28,6 +29,15 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
             const p=view.screenPoint([+el.dataset.x,+el.dataset.y]);
             el.style.left=p[0]+'px';el.style.top=p[1]+'px';
         }
+        const bubbles = [...labels.querySelectorAll('.bubble-label:not(.draft)')];
+        if (!bubbles.length) return;
+        const tagBounds = [...tags.children].map(tag => tag.getBoundingClientRect());
+        const bounds = bubbles.map(bubble => bubble.getBoundingClientRect());
+        bubbles.forEach((bubble, i) => {
+            const b = bounds[i];
+            const covered = tagBounds.some(t => t.left < b.right && b.left < t.right && t.top < b.bottom && b.top < t.bottom);
+            bubble.toggleAttribute('data-covered', covered);
+        });
     }
     function refresh() {
         canvas.toggleAttribute('data-bubble-editing',enabled&&visible);
@@ -41,7 +51,7 @@ export function createBubbleEditor(canvas,view,{labels,colorForRoomId,onChange,o
             const el=document.createElement('span');
             el.className='bubble-label'+(r.id===selected?' selected':'')+(r.id==='draft'?' draft':'');
             Object.assign(el.dataset,{id:r.id,x:r.center[0],y:r.center[1],radius:r.radius,ratio:s.ratios[i]??''});
-            el.textContent=r.id==='draft'?'+':`R${r.id}`;
+            el.textContent=r.id==='draft'?'+':roomLabel(r.id);
             labels.append(el);
         });
         const dotRoom=s.rooms.find(r=>r.id===(press?.kind==='link'?press.from.id:hover));

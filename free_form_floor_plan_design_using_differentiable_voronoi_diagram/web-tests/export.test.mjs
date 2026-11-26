@@ -66,3 +66,11 @@ test("without a room program or wall edits the export says so, and the file name
     assert.equal(exportName("shape_e", now), "plan-shape_e-20261124-090507.json");
     assert.equal(exportName("custom", new Date(2027, 0, 2, 23, 59, 0)), "plan-custom-20270102-235900.json");
 });
+
+test("optional names are saved on the matching plan rooms", () => {
+    const named = state({ roomNames: [undefined, 'Work & Study'] });
+    assert.deepEqual(exportPlan(named).plan.rooms.map(({ id, name }) => [id, name]),
+        [[4, undefined], [9, 'Work & Study'], [2, undefined]]);
+    assert.deepEqual(exportPlan({ ...named, program: null }).plan.rooms.map(({ id, name }) => [id, name]),
+        [[null, undefined], [null, 'Work & Study'], [null, undefined]]);
+});

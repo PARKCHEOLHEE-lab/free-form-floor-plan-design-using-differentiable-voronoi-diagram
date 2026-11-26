@@ -1,5 +1,7 @@
 import { inside, openRing, segmentDistance } from './geom.js';
 
+export const roomLabel = id => `Room ${id}`;
+
 /** Retained room intentions; snapshots map stable editor IDs to dense engine indices. */
 export class BubbleProgram {
     #rooms = [];
@@ -41,6 +43,16 @@ export class BubbleProgram {
         if (!room) { this.error = 'Room not found.'; return false; }
         if (!this.#valid(center, radius, id)) return false;
         Object.assign(room, { center: [...center], radius });
+        return true;
+    }
+
+    rename(id, name) {
+        const room = this.#rooms.find(r => r.id === id);
+        if (!room) { this.error = 'Room not found.'; return false; }
+        const trimmed = name.trim();
+        if (trimmed) room.name = trimmed;
+        else delete room.name;
+        this.error = '';
         return true;
     }
 
