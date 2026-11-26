@@ -84,7 +84,6 @@ test('room names follow their room and are exported without rebuilding the plan'
         const first = roomName(page, 1);
         assert.equal(await first.count(), 1, 'the first preset room has a name field');
         assert.equal(await first.getAttribute('placeholder'), 'Room 1');
-        assert.equal((await page.locator('#roomareas .raswatch').first().textContent()).trim(), 'Room 1');
         await page.locator('.gizmo [data-axis="+z"]').click();
         await editWall(page);
         assert.equal((await page.locator('#adjust-areas .raswatch').first().textContent()).trim(), 'Room 1');

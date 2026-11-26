@@ -68,7 +68,7 @@
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); }
     .label:has(+ #connections:empty) { display: none; }   /* no door links yet: no empty heading */
-    .row .val, .room-row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
+    .row .val, .room-entry .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
 
     /* thin track + outlined thumb */
     input[type=range] {
@@ -237,10 +237,17 @@
   .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
-  #roomareas .val { text-align:center; }
+  #roomareas { display:grid; gap:4px; }
+  #roomareas .val { width:auto; text-align:center; }
   .roomareas .raswatch { justify-content:flex-start; gap:4px; color:var(--ui-muted-fg); }   /* a room name is a row label */
-  .room-entry { display:grid; grid-template-columns: minmax(7.25rem, 2fr) minmax(0, 3fr); align-items:center; gap:8px; }
-  .room-entry input { min-width:0; padding:3px 6px; border:1px solid var(--ui-border); border-radius:6px; background:var(--light); color:var(--ui-fg); font:inherit; }
+  .room-entry { display:grid; grid-template-columns:var(--tap-size, 28px) minmax(0, 1fr) var(--ui-label-w); align-items:center; gap:4px; }
+  .room-name-heading { grid-column:2; padding-inline:6px; }
+  .room-area-heading { text-align:center; }
+  .room-entry .room-swatch { display:grid; place-items:center; }
+  .room-entry .room-row { justify-content:center; align-self:stretch; padding:0; }
+  .room-entry label.val { display:grid; place-items:center; align-self:stretch; cursor:pointer; }
+  .room-entry input { min-width:0; padding:4px 6px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--ui-fg); font:inherit; }
+  .room-entry input:is(:hover, :focus) { border-color:var(--ui-border); background:var(--light); }
   .room-entry input:focus-visible { outline:2px solid var(--ui-muted-fg); }
   #rooms_v { margin-left:auto; }
   .bubble-help.error, #program-status[data-state=error] { color:var(--ui-error); }
@@ -375,7 +382,7 @@
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
         <div class="row"><label>Rooms</label><span class="val" id="rooms_v">6</span></div>
-        <div class="label room-entry"><span>Target area</span><span>Room name</span></div>
+        <div class="label room-entry"><span class="room-name-heading">Room name</span><span class="room-area-heading">Target area</span></div>
         <div class="roomareas" id="roomareas"></div>
         <div class="label">Door links</div>
         <div id="connections"></div>
@@ -806,9 +813,14 @@ function refreshRoomReadout() {
   $('roomareas').innerHTML=weights.map((v,i)=>{
     const id=input?input.rooms[i].id:i+1;
     const label=roomLabel(id);
-    const content=`<span class="raswatch"><i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i> ${label}</span><span class="val">${Math.round(v/sum*100)}%</span>`;
-    const summary=input?`<button type="button" class="room-row${editor.selected===id?' selected':''}" data-room-id="${id}" aria-label="Select ${label}">${content}</button>`:`<div class="row">${content}</div>`;
-    return `<div class="room-entry">${summary}<input type="text" data-name-index="${i}" aria-label="Name for ${label}" placeholder="${label}" autocomplete="off"></div>`;
+    const marker=`<i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i>`;
+    const selectId=`room-select-${id}`;
+    const selection=input
+      ? `<button type="button" class="room-row${editor.selected===id?' selected':''}" id="${selectId}" data-room-id="${id}" aria-label="Select ${label}">${marker}</button>`
+      : `<span class="room-swatch" aria-hidden="true">${marker}</span>`;
+    const percentage=`${Math.round(v/sum*100)}%`;
+    const area=input ? `<label class="val" for="${selectId}">${percentage}</label>` : `<span class="val">${percentage}</span>`;
+    return `<div class="room-entry">${selection}<input type="text" data-name-index="${i}" aria-label="Name for ${label}" placeholder="${label}" autocomplete="off">${area}</div>`;
   }).join('');
   $('roomareas').querySelectorAll('input').forEach((field, i) => { field.value = names[i] ?? ''; });
   const selected=editor.selectedLink;

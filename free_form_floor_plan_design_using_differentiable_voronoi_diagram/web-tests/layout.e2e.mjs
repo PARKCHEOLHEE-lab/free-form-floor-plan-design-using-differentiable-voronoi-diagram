@@ -474,11 +474,24 @@ test("details: sliders show a focus ring when reached by keyboard", { timeout: 6
     } finally { proc.kill(); }
 });
 
-test("details: target area percentages are centered for preset and drawn rooms", { timeout: 60_000 }, async () => {
+test("details: the Rooms list shows one name and a centered target percentage per row", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
+            const fields = page.locator("#roomareas input");
+            const names = await fields.evaluateAll(inputs => inputs.map(input => ({
+                label: input.placeholder,
+                repeated: input.closest(".room-entry").innerText.includes(input.placeholder),
+                border: getComputedStyle(input).borderTopColor,
+            })));
+            assert.equal(names.length, 6);
+            assert.equal(names[0].label, "Room 1");
+            assert.ok(names.every(({ repeated }) => !repeated), "the editable field is the only visible room name");
+            assert.ok(names.every(({ border }) => border === "rgba(0, 0, 0, 0)"), "unfocused fields have no visible border");
+            await fields.first().focus();
+            assert.notEqual(await fields.first().evaluate(input => getComputedStyle(input).borderTopColor), "rgba(0, 0, 0, 0)");
+            await fields.first().blur();
             const checkAlignment = async () => {
                 const centers = await page.locator("#roomareas .val").evaluateAll(values => values.map(value => {
                     const cell = value.getBoundingClientRect();
@@ -495,9 +508,12 @@ test("details: target area percentages are centered for preset and drawn rooms",
             await page.waitForFunction(() => { const s = document.getElementById("status").textContent; return s.startsWith("shape_a") && s.includes("ready"); });
             await page.click('.gizmo [data-axis="+z"]');
             await page.mouse.move(600, 450); await page.mouse.down(); await page.mouse.move(630, 450, { steps: 8 }); await page.mouse.up();
+            await page.mouse.move(780, 530); await page.mouse.down(); await page.mouse.move(810, 530, { steps: 8 }); await page.mouse.up();
             await checkAlignment();
+            await page.locator("#roomareas .val").first().click();
+            assert.equal(await page.locator(".room-row.selected").getAttribute("data-room-id"), "1");
             const style = (sel) => page.$eval(sel, (v) => { const s = getComputedStyle(v); return [s.fontFamily, s.fontSize, s.fontVariantNumeric]; });
-            assert.deepEqual(await style(".room-row .val"), await style("#sites_v"), "a room's percentage uses the shared number style");
+            assert.deepEqual(await style("#roomareas .val"), await style("#sites_v"), "a room's percentage uses the shared number style");
         });
     } finally { proc.kill(); }
 });
