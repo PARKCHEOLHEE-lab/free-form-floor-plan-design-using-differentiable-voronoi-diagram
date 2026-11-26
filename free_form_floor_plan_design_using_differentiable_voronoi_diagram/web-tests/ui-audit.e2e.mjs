@@ -162,6 +162,18 @@ test('audit: panels give room tags their own space without resetting the camera'
                 const label = name + ' at ' + width + ' px';
                 assert.ok(layout.separate, label + ' leaves a clear area for the plan');
                 assert.ok(layout.tagsInView, label + ' shows all six tags inside the plan area');
+                if (name === 'rooms') {
+                    const clear = await page.locator('#plan').evaluate(canvas => {
+                        const copy = document.createElement('canvas');
+                        copy.width = canvas.width;
+                        copy.height = canvas.height;
+                        const ctx = copy.getContext('2d');
+                        ctx.drawImage(canvas, 0, 0);
+                        const left = ctx.getImageData(0, 0, 2, copy.height).data;
+                        return left.every((value, i) => i % 4 === 3 || value >= 245);
+                    });
+                    assert.ok(clear, label + ' has space between the fitted plan and the panel');
+                }
                 if (width === 390) assert.ok(layout.phoneBelow, label + ' docks below the plan');
                 assert.equal(layout.overflow, false);
                 assert.deepEqual(await pose(), originalPose);

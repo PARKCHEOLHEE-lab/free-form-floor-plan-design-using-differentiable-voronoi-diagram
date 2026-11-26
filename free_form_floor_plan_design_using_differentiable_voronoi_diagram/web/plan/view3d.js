@@ -85,8 +85,28 @@ export function createPlanView(canvas, { gizmo, tags } = {}) {
     const extent = () => fitted?.extent ?? 2;
     // zoom 1 shows the fitted extent across FIT of the shorter side
     function frustum() {
-        const perPx = extent() / (FIT * Math.min(width, height));
-        Object.assign(camera, { left: -width / 2 * perPx, right: width / 2 * perPx, top: height / 2 * perPx, bottom: -height / 2 * perPx });
+        let perPx = extent() / (FIT * Math.min(width, height));
+        let x = 0, y = 0;
+        if (fitted && lastPlan?.outline?.length && (width < innerWidth || height < innerHeight)) {
+            // A dock can cut off the longer side of the projected outline. Fit the lens
+            // around it without moving the camera target or changing the user's zoom.
+            camera.updateMatrixWorld();
+            const m = camera.matrixWorld.elements;
+            const wallEdge = strokeRing(lastPlan.outline, lastPlan.wall * WALL_UNIT * extent()).flat();
+            const projected = wallEdge.map(([px, py]) => {
+                const dx = px - fitted.cx, dy = py - fitted.cy;
+                return [m[0] * dx - m[2] * dy, m[4] * dx - m[6] * dy];
+            });
+            const box = bounds([projected]);
+            const margin = Math.min(6, width / 4, height / 4);
+            perPx = Math.max(perPx, box.width / (width - 2 * margin), box.height / (height - 2 * margin));
+            const paddingX = Math.max(0, (width / 2 - margin) * perPx - box.width / 2);
+            const paddingY = Math.max(0, (height / 2 - margin) * perPx - box.height / 2);
+            x = THREE.MathUtils.clamp(0, box.cx - paddingX, box.cx + paddingX);
+            y = THREE.MathUtils.clamp(0, box.cy - paddingY, box.cy + paddingY);
+        }
+        const halfWidth = width / 2 * perPx, halfHeight = height / 2 * perPx;
+        Object.assign(camera, { left: x - halfWidth, right: x + halfWidth, top: y + halfHeight, bottom: y - halfHeight });
         camera.near = 0;
         camera.far = 10 * extent();
         camera.updateProjectionMatrix();
@@ -103,8 +123,8 @@ export function createPlanView(canvas, { gizmo, tags } = {}) {
         const { cx = 0, cy = 0 } = fitted ?? {};
         controls.target.set(cx, 0, -cy);
         camera.zoom = 1;
-        frustum();
         orient();
+        frustum();
         render();
     }
     canvas.addEventListener('dblclick', home);
@@ -131,6 +151,7 @@ export function createPlanView(canvas, { gizmo, tags } = {}) {
     function lookFrom(axis) {
         if (axis === '+z') orient(0, TOP_POLAR);
         else orient(THREE.MathUtils.degToRad(SIDE_AZIMUTH[axis]));
+        frustum();
         render();
     }
 
@@ -319,7 +340,8 @@ function bounds(rings) {
             minY = Math.min(minY, y); maxY = Math.max(maxY, y);
         }
     if (!(minX <= maxX)) return null;
-    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, extent: Math.max(maxX - minX, maxY - minY) || 1 };
+    const width = maxX - minX, height = maxY - minY;
+    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, width, height, extent: Math.max(width, height) || 1 };
 }
 
 const sameFit = (a, b) =>
