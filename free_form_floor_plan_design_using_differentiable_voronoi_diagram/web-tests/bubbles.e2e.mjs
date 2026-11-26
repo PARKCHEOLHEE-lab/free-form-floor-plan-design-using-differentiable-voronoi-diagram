@@ -114,7 +114,9 @@ test('generated plans keep centers and show only requested doors in raw and alig
             const image=new Image();image.src=c.toDataURL();await image.decode();
             const copy=document.createElement('canvas');copy.width=image.width;copy.height=image.height;
             const ctx=copy.getContext('2d');ctx.drawImage(image,0,0);
-            return [[550,530,[191,228,191]],[780,530,[222,215,234]]].map(([x,y,color])=>{
+            const r=c.getBoundingClientRect();
+            return [[550,530,[191,228,191]],[780,530,[222,215,234]]].map(([screenX,screenY,color])=>{
+                const x=(screenX-r.left)*copy.width/r.width,y=(screenY-r.top)*copy.height/r.height;
                 let n=0;for(let i=0;i<8;i++){
                     const a=i*Math.PI/4,px=ctx.getImageData(Math.round(x+5*Math.cos(a)),Math.round(y+5*Math.sin(a)),1,1).data;
                     if(Math.abs(px[0]-color[0])+Math.abs(px[1]-color[1])+Math.abs(px[2]-color[2])<20)n++;
@@ -163,7 +165,9 @@ test('linking and deleting circles updates visible door links and keeps the rema
             const image=new Image();image.src=c.toDataURL();await image.decode();
             const copy=document.createElement('canvas');copy.width=image.width;copy.height=image.height;
             const ctx=copy.getContext('2d');ctx.drawImage(image,0,0);
-            const px=ctx.getImageData(610,528,110,5).data;let count=0;
+            const r=c.getBoundingClientRect();
+            const sx=copy.width/r.width,sy=copy.height/r.height;
+            const px=ctx.getImageData((610-r.left)*sx,(528-r.top)*sy,110*sx,5*sy).data;let count=0;
             for(let i=0;i<px.length;i+=4)if(px[i]<140&&px[i+1]<140&&px[i+2]<140)count++;
             return count;
         });

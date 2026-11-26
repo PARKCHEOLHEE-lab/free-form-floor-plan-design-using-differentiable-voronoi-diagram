@@ -24,7 +24,13 @@ test('floating controls keep 32px edge spacing and fit desktop and narrow window
             for(const name of ['rooms','optimize']){
                 await page.click(`button[data-open=${name}]`);
                 const panel=await rect(`.panel[data-panel=${name}]`);
-                assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
+                const plan=await rect('#plan');
+                if (size[0] <= 700) {
+                    assert.ok(near(panel.left,32)&&near(size[1]-panel.bottom,32)&&panel.top>=plan.bottom,`${name} docks below the plan`);
+                } else {
+                    assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
+                    assert.ok(plan.left>=panel.right,`${name} leaves the plan clear`);
+                }
                 assert.ok(panel.right<=size[0]-31&&panel.bottom<=size[1]-31,`${name} stays inside the outer spacing`);
                 await page.click(`button[data-open=${name}]`);
             }
@@ -115,16 +121,22 @@ test("one toolbar: every icon sits in the top-left toolbar, and the Rooms panel 
     }
 });
 
-test("optimization panel: the plan drawing stays the same, pixel for pixel", { timeout: 120_000 }, async () => {
+test("optimization panel reserves drawing space and keeps the same camera", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
-            const pixels = () => page.$eval("#plan", (c) => c.toDataURL());
-            const shown = await pixels();
+            const state = () => page.$eval("#plan", c => ({
+                pose: [c.dataset.azimuth, c.dataset.elevation, c.dataset.zoom],
+                width: c.width,
+                pixels: c.toDataURL(),
+            }));
+            const before = await state();
             await page.click("button[data-open=optimize]");
-            assert.ok((await pixels()) === shown, "the plan changed when the Optimization panel opened");
+            const opened = await state();
+            assert.deepEqual(opened.pose, before.pose);
+            assert.ok(opened.width < before.width, "the open panel has space beside the drawing");
             await page.click("button[data-open=optimize]");
-            assert.ok((await pixels()) === shown, "the plan changed when the Optimization panel closed");
+            assert.deepEqual(await state(), before, "closing the panel restores the full drawing");
         });
     } finally {
         proc.kill();

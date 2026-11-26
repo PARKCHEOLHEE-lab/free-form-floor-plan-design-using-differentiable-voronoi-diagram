@@ -51,6 +51,8 @@ async function drag(page, start, end) {
 
 async function editWall(page) {
     await page.getByRole('button', { name: 'Adjustment', exact: true }).click();
+    const shares = page.locator('#adjust-areas [data-now]');
+    const before = await shares.allTextContents();
     const lines = await page.locator('#wall-sketch [data-movable] line').evaluateAll(elements => elements.map(line =>
         ['x1', 'y1', 'x2', 'y2'].map(k => Number(line.getAttribute(k)))));
     for (const [x1, y1, x2, y2] of lines) {
@@ -60,7 +62,11 @@ async function editWall(page) {
         if (!await page.locator('#plan[data-wall-hover]').count()) continue;
         const length = Math.hypot(x2 - x1, y2 - y1);
         await drag(page, start, [start[0] - 36 * (y2 - y1) / length, start[1] + 36 * (x2 - x1) / length]);
-        if (await page.locator('#plan[data-wall-edits]').count()) return;
+        if (await page.locator('#plan[data-wall-edits]').count()) {
+            const after = await shares.allTextContents();
+            if (after.some((share, i) => share !== before[i])) return;
+            await page.locator('#undo').click();
+        }
     }
     assert.fail('a movable wall can be dragged in the preset');
 }

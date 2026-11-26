@@ -45,12 +45,16 @@ test("adjustment: dragging a wall moves it, updates the room areas beside it, sh
 
         const before = await areasNow(page), shot = await pixels(page);
         assert.ok(before.length >= 3 && before.every((t) => /^\d+\.\d%$/.test(t)), `area list: ${before}`);
-        const hit = await findWall(page);
-        assert.ok(hit, "a wall can be found under the pointer");
+        const canvas = await page.locator('#plan').boundingBox();
+        const scale = Math.min(canvas.width, canvas.height) / 820;
+        // Keep the same preset E wall as the full-width, 1145 × 820 plan.
+        const hit = [canvas.x + canvas.width / 2 + (581 - 1145 / 2) * scale, canvas.y + canvas.height / 2];
+        await page.mouse.move(...hit);
+        assert.equal(await page.locator('#plan[data-wall-hover]').count(), 1, "the shared wall is under the pointer");
         const labels = new Set();
         await page.mouse.down();
         for (let dx = 2; dx <= 60; dx += 2) {
-            await page.mouse.move(hit[0] + dx, hit[1]);
+            await page.mouse.move(hit[0] + dx * scale, hit[1]);
             const label = await page.$eval("#wall-sketch text", (t) => (t.hasAttribute("hidden") ? "" : t.textContent));
             if (label) labels.add(label);
         }

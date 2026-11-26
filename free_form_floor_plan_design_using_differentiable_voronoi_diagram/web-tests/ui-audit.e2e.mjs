@@ -29,6 +29,14 @@ async function withPlan(name, run, viewport = { width: 1280, height: 800 }) {
             await page.coverage.startJSCoverage();
             await page.coverage.startCSSCoverage();
         }
+        await page.addInitScript(() => {
+            window.auditBuildCount = 0;
+            const post = Worker.prototype.postMessage;
+            Worker.prototype.postMessage = function (message, ...args) {
+                if (message.cmd === 'build') window.auditBuildCount++;
+                return post.call(this, message, ...args);
+            };
+        });
         await page.goto(url);
         await ready(page);
         await run(page);
@@ -127,4 +135,39 @@ test('audit: a room tag stays readable when a bubble moves onto it', { timeout: 
         await ready(page);
         assert.equal(await label.isVisible(), true, 'the bubble text returns when it moves clear');
     }, { width: 1145, height: 820 });
+});
+
+test('audit: panels give room tags their own space without resetting the camera', { timeout: 60_000 }, async () => {
+    await withPlan('docked-panels', async page => {
+        const pose = () => page.locator('#plan').evaluate(canvas =>
+            [canvas.dataset.azimuth, canvas.dataset.elevation, canvas.dataset.zoom]);
+        const originalPose = await pose();
+        const builds = await page.evaluate(() => window.auditBuildCount);
+        for (const [width, height] of [[1280, 800], [768, 1024], [390, 844]]) {
+            await page.setViewportSize({ width, height });
+            for (const name of ['rooms', 'optimize', 'adjust']) {
+                await panel(page, name).click();
+                const layout = await page.evaluate(() => {
+                    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+                    const plan = rect('#plan'), panel = rect('.panel.open');
+                    const tags = [...document.querySelectorAll('.room-tag')].map(tag => tag.getBoundingClientRect());
+                    return {
+                        separate: plan.left >= panel.right || plan.bottom <= panel.top,
+                        tagsInView: tags.length === 6 && tags.every(tag => tag.left >= plan.left && tag.top >= plan.top &&
+                            tag.right <= plan.right && tag.bottom <= plan.bottom),
+                        phoneBelow: panel.top >= plan.bottom,
+                        overflow: document.documentElement.scrollWidth > innerWidth,
+                    };
+                });
+                const label = name + ' at ' + width + ' px';
+                assert.ok(layout.separate, label + ' leaves a clear area for the plan');
+                assert.ok(layout.tagsInView, label + ' shows all six tags inside the plan area');
+                if (width === 390) assert.ok(layout.phoneBelow, label + ' docks below the plan');
+                assert.equal(layout.overflow, false);
+                assert.deepEqual(await pose(), originalPose);
+                assert.equal(await page.evaluate(() => window.auditBuildCount), builds);
+                await panel(page, name).click();
+            }
+        }
+    });
 });
