@@ -29,7 +29,8 @@ test('floating controls keep 32px edge spacing and fit desktop and narrow window
                     assert.ok(near(panel.left,32)&&near(size[1]-panel.bottom,32)&&panel.top>=plan.bottom,`${name} docks below the plan`);
                 } else {
                     assert.ok(near(panel.top,32)&&panel.left>=toolbar.right&&panel.left-toolbar.right<=16,`${name} remains beside its toolbar`);
-                    assert.ok(plan.left>=panel.right,`${name} leaves the plan clear`);
+                    assert.equal(plan.left, 0, `${name} floats over the plan`);
+                    assert.equal(plan.width, size[0], `${name} keeps the full plan width`);
                 }
                 assert.ok(panel.right<=size[0]-31&&panel.bottom<=size[1]-31,`${name} stays inside the outer spacing`);
                 await page.click(`button[data-open=${name}]`);
@@ -121,22 +122,39 @@ test("one toolbar: every icon sits in the top-left toolbar, and the Rooms panel 
     }
 });
 
-test("optimization panel reserves drawing space and keeps the same camera", { timeout: 120_000 }, async () => {
+test("floating panels keep the full panned plan in place", { timeout: 120_000 }, async () => {
     const { url, proc } = await serve();
     try {
-        await atSize(url, [1145, 820], async (page) => {
+        for (const [width, height] of [[1273, 822], [768, 1024]]) await atSize(url, [width, height], async (page) => {
+            const rooms = page.getByRole("button", { name: "Rooms", exact: true });
+            await rooms.click();
+            await page.getByRole("button", { name: "Boundary C", exact: true }).click();
+            await page.waitForFunction(() => /^shape_c.*ready/.test(document.querySelector("#status").textContent));
+            await page.getByRole("checkbox", { name: "Aligned walls", exact: true }).check();
+            await page.getByRole("slider", { name: "Point merge", exact: true }).press("End");
+            await rooms.click();
+            await page.mouse.move(width * 0.73, height * 0.51);
+            await page.mouse.down({ button: "middle" });
+            await page.mouse.move(width * 0.56, height * 0.64, { steps: 12 });
+            await page.mouse.up({ button: "middle" });
+
             const state = () => page.$eval("#plan", c => ({
                 pose: [c.dataset.azimuth, c.dataset.elevation, c.dataset.zoom],
-                width: c.width,
+                bounds: c.getBoundingClientRect().toJSON(),
                 pixels: c.toDataURL(),
             }));
             const before = await state();
-            await page.click("button[data-open=optimize]");
-            const opened = await state();
-            assert.deepEqual(opened.pose, before.pose);
-            assert.ok(opened.width < before.width, "the open panel has space beside the drawing");
-            await page.click("button[data-open=optimize]");
-            assert.deepEqual(await state(), before, "closing the panel restores the full drawing");
+            for (const name of ["Rooms", "Optimization"]) {
+                const toggle = page.getByRole("button", { name, exact: true });
+                await toggle.click();
+                const opened = await state();
+                assert.deepEqual(opened.bounds, before.bounds, name + " keeps the full canvas");
+                assert.deepEqual(opened.pose, before.pose);
+                assert.ok(opened.pixels === before.pixels, name + " leaves the drawing in the same place");
+                assert.equal(await page.locator("#room-tags").evaluate(el => getComputedStyle(el).clipPath), "inset(0px)");
+                await toggle.click();
+                assert.ok((await state()).pixels === before.pixels, "closing the panel also keeps the drawing in place");
+            }
         });
     } finally {
         proc.kill();

@@ -124,7 +124,6 @@
     .stage, .canvas-card, .controls { display: contents; }
     body { --panel-left: calc(var(--ui-edge) + 48px); --panel-width: 300px;
       --plan-top: 0px; --plan-bottom: 0px; --plan-left: 0px; }
-    body:has(.panel.open) { --plan-left: calc(var(--panel-left) + var(--panel-width) + 12px); }
     .planbox { position: fixed; inset: var(--plan-top) 0 var(--plan-bottom) var(--plan-left); }
     :is(#room-tags, #bubble-labels, .bubble-link-preview, #boundary-sketch, #wall-sketch) {
       clip-path: inset(var(--plan-top) 0 var(--plan-bottom) var(--plan-left));

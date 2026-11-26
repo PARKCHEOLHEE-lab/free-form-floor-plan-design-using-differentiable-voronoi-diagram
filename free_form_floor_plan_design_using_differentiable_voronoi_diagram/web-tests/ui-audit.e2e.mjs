@@ -142,8 +142,8 @@ test('audit: a room tag stays readable when a bubble moves onto it', { timeout: 
     }, { width: 1145, height: 820 });
 });
 
-test('audit: panels give room tags their own space without resetting the camera', { timeout: 60_000 }, async () => {
-    await withPlan('docked-panels', async page => {
+test('audit: wide panels float and phone panels dock without resetting the camera', { timeout: 60_000 }, async () => {
+    await withPlan('panel-layouts', async page => {
         const pose = () => page.locator('#plan').evaluate(canvas =>
             [canvas.dataset.azimuth, canvas.dataset.elevation, canvas.dataset.zoom]);
         const originalPose = await pose();
@@ -157,7 +157,7 @@ test('audit: panels give room tags their own space without resetting the camera'
                     const plan = rect('#plan'), panel = rect('.panel.open');
                     const tags = [...document.querySelectorAll('.room-tag')].map(tag => tag.getBoundingClientRect());
                     return {
-                        separate: plan.left >= panel.right || plan.bottom <= panel.top,
+                        fullView: plan.left === 0 && plan.top === 0 && plan.right === innerWidth && plan.bottom === innerHeight,
                         tagsInView: tags.length === 6 && tags.every(tag => tag.left >= plan.left && tag.top >= plan.top &&
                             tag.right <= plan.right && tag.bottom <= plan.bottom),
                         phoneBelow: panel.top >= plan.bottom,
@@ -165,9 +165,10 @@ test('audit: panels give room tags their own space without resetting the camera'
                     };
                 });
                 const label = name + ' at ' + width + ' px';
-                assert.ok(layout.separate, label + ' leaves a clear area for the plan');
+                if (width === 390) assert.ok(layout.phoneBelow, label + ' docks below the plan');
+                else assert.ok(layout.fullView, label + ' floats over the full drawing area');
                 assert.ok(layout.tagsInView, label + ' shows all six tags inside the plan area');
-                if (name === 'rooms') {
+                if (width === 390 && name === 'rooms') {
                     const clear = await page.locator('#plan').evaluate(canvas => {
                         const copy = document.createElement('canvas');
                         copy.width = canvas.width;
@@ -179,7 +180,6 @@ test('audit: panels give room tags their own space without resetting the camera'
                     });
                     assert.ok(clear, label + ' has space between the fitted plan and the panel');
                 }
-                if (width === 390) assert.ok(layout.phoneBelow, label + ' docks below the plan');
                 assert.equal(layout.overflow, false);
                 assert.deepEqual(await pose(), originalPose);
                 assert.equal(await page.evaluate(() => window.auditBuildCount), builds);
