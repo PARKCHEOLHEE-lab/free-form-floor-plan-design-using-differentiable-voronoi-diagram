@@ -59,3 +59,33 @@ test('audit: sliders and choices expose their names and selected state', { timeo
         }
     });
 });
+
+test('audit: graph badges meet text contrast and tooltips have matching styles', { timeout: 60_000 }, async () => {
+    await withPlan('badges-and-tooltips', async page => {
+        await panel(page, 'optimize').click();
+        const badges = await page.locator('.vtag').evaluateAll(elements => elements.map(element => {
+            const luminance = color => {
+                const rgb = color.match(/\d+(?:\.\d+)?/g).slice(0, 3).map(channel => Number(channel) / 255);
+                const [r, g, b] = rgb.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+                return r * 0.2126 + g * 0.7152 + b * 0.0722;
+            };
+            const style = getComputedStyle(element);
+            const fg = luminance(style.color), bg = luminance(style.backgroundColor);
+            return { id: element.id, contrast: (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05) };
+        }));
+        assert.equal(badges.length, 6);
+        for (const { id, contrast } of badges) assert.ok(contrast >= 4.5, id + ' contrast is ' + contrast.toFixed(2));
+
+        const appearance = await page.evaluate(() => {
+            const parts = ['backgroundColor', 'color', 'fontSize', 'fontWeight', 'padding', 'borderRadius', 'transitionDuration'];
+            return ['.toolbar .tool', '.gizmo .axis', '.tip'].map(selector => {
+                const style = getComputedStyle(document.querySelector(selector), selector === '.tip' ? null : '::after');
+                return parts.map(part => style[part]);
+            });
+        });
+        assert.deepEqual(appearance[0], appearance[1]);
+        assert.deepEqual(appearance[0], appearance[2]);
+        await page.locator('#run').hover();
+        assert.equal(await page.locator('.tip').textContent(), 'Run');
+    });
+});
