@@ -171,3 +171,52 @@ test('audit: panels give room tags their own space without resetting the camera'
         }
     });
 });
+
+test('audit: phone buttons have clear touch targets and reachable undo and redo', { timeout: 60_000 }, async () => {
+    await withPlan('phone-targets', async page => {
+        const targets = async selector => page.locator(selector).evaluateAll(elements =>
+            elements.map(element => element.getBoundingClientRect().toJSON()));
+        const separate = (a, b) => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
+        const startup = await targets('.toolbar button, .gizmo button');
+        assert.equal(startup.length, 9);
+        for (const target of startup) {
+            assert.ok(target.width >= 44 && target.height >= 44, 'startup controls have room for a tap');
+            assert.ok(target.left >= 0 && target.right <= 390 && target.top >= 0 && target.bottom <= 844);
+        }
+        for (let i = 0; i < startup.length; i++) for (const other of startup.slice(i + 1)) {
+            const target = startup[i];
+            assert.ok(separate(target, other), 'phone buttons have separate tap areas');
+        }
+        await panel(page, 'rooms').click();
+        const tagLines = await targets('.room-tag span');
+        assert.equal(tagLines.length, 18);
+        for (let i = 0; i < tagLines.length; i++) for (const other of tagLines.slice(i + 1)) {
+            assert.ok(separate(tagLines[i], other), 'room labels remain readable above the phone panel');
+        }
+        await page.getByRole('button', { name: 'View from top' }).click();
+        assert.equal(await page.locator('#plan').getAttribute('data-elevation'), '90');
+        for (const target of await targets('.panel.open :is(button, .toggle, input[type=range], input[type=text])')) {
+            if (!target.width) continue;
+            assert.ok(target.width >= 44 && target.height >= 44, 'room controls have room for a tap');
+        }
+        await page.setViewportSize({ width: 1145, height: 820 });
+        await page.getByRole('button', { name: 'Boundary A' }).click();
+        await ready(page);
+        const canvas = await page.locator('#plan').boundingBox();
+        const start = [canvas.x + canvas.width / 2, canvas.y + canvas.height / 2 + 90];
+        await drag(page, start, [start[0] + 25, start[1]]);
+        await ready(page);
+        const bubbles = page.locator('.bubble-label:not(.draft)');
+        assert.equal(await bubbles.count(), 1);
+
+        await page.setViewportSize({ width: 390, height: 844 });
+        for (const target of await targets('#undo, #redo')) {
+            assert.ok(target.width >= 44 && target.height >= 44);
+            assert.ok(target.left >= 0 && target.right <= 390 && target.top >= 0 && target.bottom <= 844);
+        }
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        assert.equal(await bubbles.count(), 0);
+        await page.getByRole('button', { name: 'Redo', exact: true }).click();
+        assert.equal(await bubbles.count(), 1);
+    }, { width: 390, height: 844 });
+});

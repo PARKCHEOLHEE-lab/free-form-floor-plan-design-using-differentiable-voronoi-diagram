@@ -162,7 +162,7 @@
     .gizmo line { stroke-width: 2; stroke-linecap: round; }
     .axis { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; padding: 0; border: 0;
       border-radius: 50%; background: var(--axis); color: #fff; font: 600 10px/18px var(--font); text-align: center;
-      cursor: pointer; z-index: var(--z); }
+      cursor: pointer; z-index: var(--z); transform: var(--axis-shift, none); }
     .axis[data-axis^="-"] { width: 12px; height: 12px; margin: -6px 0 0 -6px; background: color-mix(in srgb, var(--axis) 40%, #fff); }
     .axis:hover, .axis:focus-visible { z-index: 9; outline: 2px solid var(--ui-fg); outline-offset: 1px; }
     .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -257,6 +257,41 @@
   /* Run, Pause and Resume: the last cell of the Optimization title row, filled as the main action */
   .panel-head #run { grid-column:6; background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }
   .panel-head #run:hover:not(:disabled) { background:#262626; }
+  @media (max-width: 700px) {
+    .edit-bar { top:calc(var(--ui-edge) + 54px); left:calc(var(--ui-edge) + 60px); transform:none;
+      max-width:calc(100vw - 2 * var(--ui-edge) - 60px); }
+    .edit-bar [role="status"] { line-height:1.2; }
+  }
+  @media (max-width: 500px) {
+    body { --tap-size:44px; --panel-height:min(42dvh, 380px); }
+    .toolbar .tool, .edit-bar .tool { width:var(--tap-size); height:var(--tap-size); flex:none; }
+    .gizmo { display:grid; grid-template-columns:repeat(5, var(--tap-size)); gap:4px; width:auto; height:auto; }
+    .gizmo svg { display:none; }
+    .gizmo .axis { position:relative; top:auto; left:auto; transform:none; margin:0;
+      width:var(--tap-size); height:var(--tap-size); border:1px solid var(--ui-border); border-radius:8px;
+      background:var(--light); color:var(--ui-fg); font-size:12px; }
+    .gizmo .axis:hover { background:var(--ui-muted); }
+    .gizmo [data-axis="-x"]::before { content:"−X"; }
+    .gizmo [data-axis="-y"]::before { content:"−Y"; }
+    .panel :is(button, .toggle, input[type=text], input[type=range]) {
+      min-width:var(--tap-size); min-height:var(--tap-size);
+    }
+    .panel input[type=range] { background:transparent; }
+    .panel input[type=range]::-webkit-slider-runnable-track { height:4px; border-radius:3px; background:var(--ui-border); }
+    .panel input[type=range]::-webkit-slider-thumb { margin-top:-5px; }
+    .panel input[type=range]::-moz-range-track { height:4px; border-radius:3px; background:var(--ui-border); }
+    .panel-head { grid-template-columns:1fr var(--tap-size); }
+    .panel-head > .label { grid-column:1; }
+    .panel-head #run { grid-column:2; }
+  }
+  @media (max-width: 382px) {
+    .panel :is(.boundary-row, .view-row) { grid-template-columns:repeat(3, 1fr); }
+  }
+  @media (max-width: 359px) {
+    .gizmo { grid-template-columns:repeat(3, var(--tap-size)); }
+    .edit-bar { top:calc(var(--ui-edge) + 100px); }
+    body:has(.panel.open) { --plan-top:190px; }
+  }
 </style>
   <!-- three.js r187 (MIT), vendored in ./vendor/three -->
   <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
