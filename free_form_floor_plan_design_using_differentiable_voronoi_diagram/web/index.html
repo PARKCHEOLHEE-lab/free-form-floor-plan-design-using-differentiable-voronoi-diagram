@@ -6,33 +6,11 @@
   <link rel="icon" type="image/png" href="favicon.png" />
   <title>Floor Plan Generation with Voronoi Diagram</title>
   <style>
-    /* Self-hosted PT Sans (vendored, no CDN) — matches the reference site's
-       design system: PT Sans, flat surfaces (border + tint, no shadows or
-       gradients), em-based spacing. Room/plot colors stay semantic. */
-    @font-face {
-      font-family: "PT Sans";
-      src: local("PT Sans"), local("PTSans-Regular"), url("./fonts/PTSans-Regular.woff") format("woff");
-      font-weight: normal; font-style: normal; font-display: swap;
-    }
-    @font-face {
-      font-family: "PT Sans";
-      src: local("PT Sans Bold"), local("PTSans-Bold"), url("./fonts/PTSans-Bold.woff") format("woff");
-      font-weight: bold; font-style: normal; font-display: swap;
-    }
-
     :root {
-      --font: "PT Sans", -apple-system, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       --dark: #000;
       --light: #fff;
-      --text-dark: #000;   /* match the reference site: body text is pure black */
-      --link: #66a1ff;
-      --featured: #0011e3;
-      --bg-subtle: #f7f7f8;
-      --divider: #e5e5e6;
-      --reduce-14: rgba(128, 128, 128, 0.14);
       --reduce-30: rgba(128, 128, 128, 0.30);
-      --reduce-90: rgba(128, 128, 128, 0.90);
     }
 
     * { box-sizing: border-box; }
@@ -40,50 +18,21 @@
     body {
       margin: 0;
       background: var(--light);
-      color: var(--dark);
+      color: var(--ui-fg);
       font-family: var(--font);
-      font-size: calc(0.76rem + 0.2vw);
+      font-size: 14px;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
-    /* the reference keeps backgrounds flat even in dark mode */
-    @media (prefers-color-scheme: dark) { body { background: var(--light); color: var(--dark); } }
 
-    .wrap { max-width: 940px; margin: 0 auto; padding: 2.8em clamp(1.2em, 4vw, 2.4em) 3.4em; }
-
-    /* one restrained, staggered load reveal */
-    @keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
-    header, .lede, .stage, footer { animation: rise .55s cubic-bezier(.2, .7, .2, 1) both; }
-    .lede { animation-delay: .08s; }   /* intro paragraph under the header */
-    .stage { animation-delay: .14s; }
-    footer { animation-delay: .26s; }
-    @media (prefers-reduced-motion: reduce) { header, .lede, .stage, footer { animation: none; } }
-
-    header { margin-bottom: 1.1em; }
-    h1 { font-size: 1.7em; font-weight: bold; letter-spacing: -0.015em; margin: 0 0 .15em; }
-    .sub { color: var(--text-dark); margin: 0; text-align: justify; }
-    .lede { color: var(--text-dark); margin: 0 0 1.6em; text-align: justify; }   /* intro paragraph under the header */
-    .lede p { margin: 0 0 .9em; }
-    .lede p:last-child { margin-bottom: 0; }
-    .lede strong { color: var(--dark); font-weight: bold; }
-
-    a { color: var(--link); text-decoration: inherit; }
-    a:hover { text-decoration: underline; }
-    code { font-family: var(--mono); background: var(--bg-subtle); padding: .05em .35em; border-radius: 3px; font-size: .92em; }
-
-    .stage { display: grid; grid-template-columns: minmax(0, 1fr) 268px; gap: 2em; align-items: start; }
-    @media (max-width: 760px) { .stage { grid-template-columns: 1fr; } }
-
-    canvas#plan { width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--divider); border-radius: 8px; background: var(--light); touch-action: none; display: block; }
-    /* loss panel section subtitle (styled like LAYOUT / WALL / … via .label) */
-    .canvas-sub { margin-top: .9em; }
+    canvas#plan { width: 100%; height: 100%; background: var(--light); touch-action: none; display: block; }
     /* per-term loss graphs: one row each (label · own-scale sparkline); the
        current value rides the playhead as a per-row tag (see .vtag below) */
     .losspanel { margin-top: 0; position: relative; }   /* relative: the playhead spans the rows */
     .lossrow { display: flex; align-items: center; gap: .7em; margin: .34em 0; }
-    .lossrow .lk { width: 3.4em; flex: none; color: var(--text-dark); }
-    .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 30px; border: 1px solid var(--divider); border-radius: 6px; background: var(--light); display: block; }
+    .lossrow .lk { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); font-size: 12px; }
+    .lossrow .spark { flex: 1 1 auto; min-width: 0; height: 20px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--light); display: block; }
     .lossrow .spark polyline { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
     #sp_total { stroke: #66a1ff; } #sp_wall { stroke: #e08a5a; } #sp_area { stroke: #5aa469; }
     #sp_lloyd { stroke: #8c7bd0; } #sp_topo { stroke: #c75d8f; }
@@ -96,146 +45,399 @@
       border: 4px solid transparent; border-top-color: var(--dark); border-bottom: 0; }
     /* per-row value tags ride the playhead, centered on the line (top set per row in JS);
        each is a speech balloon with a downward tail in its own term colour (--c) */
-    .playhead .vtag { position: absolute; left: 0; transform: translate(-50%, -50%); color: var(--light); background: var(--c);
+    .playhead .vtag { position: absolute; left: 0; transform: translate(-50%, -50%); color: var(--ui-fg); background: var(--c);
       font-family: var(--mono); font-size: .72em; padding: .02em .34em; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .playhead .vtag::after { content: ""; position: absolute; left: var(--tail-x, 50%); bottom: -4px; transform: translateX(-50%);
       border: 4px solid transparent; border-top-color: var(--c); border-bottom: 0; }
+    /* a value shows only while the mouse is on its row; hidden tags keep their size for placement */
+    .playhead .vtag { visibility: hidden; } .playhead .vtag.shown { visibility: visible; }
     #vt_total { --c: #66a1ff; } #vt_wall { --c: #e08a5a; } #vt_area { --c: #5aa469; }
+    #sp_cosine { stroke: #4676b8; } .playhead #vt_cosine { --c: #4676b8; color: var(--light); }
     #vt_lloyd { --c: #8c7bd0; } #vt_topo { --c: #c75d8f; }
 
     .controls { font-size: .96em; }
-    .group { margin-bottom: 1.5em; }
-    .label { font-weight: bold; font-size: .76em; text-transform: uppercase; letter-spacing: .07em; color: var(--reduce-90); margin-bottom: .6em; }
+    .label { font-size: 13px; font-weight: 600; color: var(--ui-fg); margin: 14px 0 8px; }
+    .panel > .label:first-child, .panel-head > .label { font-size: 15px; margin: 0 0 12px; }   /* the panel title */
+    /* a heading with icon cells on its right, and the View cells under their heading, on the same six-cell grid as the preset row */
+    .panel-head, .view-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: .35em; align-items: center; }
+    .panel-head { margin-bottom: 12px; }
+    .panel-head > .label { grid-column: 1 / 5; margin: 0; }
+    .view-row { margin-bottom: 12px; }   /* as .boundary-row */
+    .panel .panel-head .seg { display: contents; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
-    .row > label { width: 3.4em; flex: none; color: var(--text-dark); }
-    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: .85em; color: var(--dark); font-variant-numeric: tabular-nums; }
+    .row > label { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); }
+    .label:has(+ #connections:empty) { display: none; }   /* no door links yet: no empty heading */
+    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
 
-    /* thin track + link-colored thumb (the reference's scrubber) */
+    /* thin track + outlined thumb */
     input[type=range] {
-      -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0;
-      height: 4px; border-radius: 3px; background: var(--reduce-30); outline: none; cursor: pointer;
+      -webkit-appearance: none; appearance: none; flex: 1 1 auto; min-width: 0; margin: 0;   /* no default 2px, so the track lines up with the loss graph */
+      height: 4px; border-radius: 3px; background: var(--ui-border); outline: none; cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
-      background: var(--link); cursor: pointer; transition: transform .1s;
+      background: var(--light); border: 1.5px solid var(--ui-fg); cursor: pointer; transition: transform .1s;
     }
+    input[type=range]:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 4px; }
     input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.18); }
-    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 50%; background: var(--link); cursor: pointer; }
-
-    input[type=number] {
-      font-family: var(--mono); font-size: .85em; width: 4.6em; padding: .3em .4em;
-      border: 1px solid var(--reduce-30); border-radius: 4px; background: var(--light); color: var(--dark);
-    }
-    input[type=number]:focus { outline: none; border-color: var(--featured); }
+    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 1.5px solid var(--ui-fg); border-radius: 50%; background: var(--light); cursor: pointer; }
 
     /* room-ratio rows reuse the .row grid so their slider tracks line up exactly
        with sites/rooms/wall/loss; the colour swatch sits in the 3.4em label slot. */
     .roomareas { margin: .1em 0 .2em; }
     .roomareas .row { margin: .32em 0; }
-    .roomareas .raswatch { width: 3.4em; flex: none; display: flex; align-items: center; justify-content: center; }
+    .roomareas .raswatch { flex: none; display: flex; align-items: center; white-space: nowrap; }
     .roomareas .sw { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--reduce-30); flex: none; }
 
     .seg { display: flex; flex-wrap: wrap; gap: .35em; }
-    .seg button {
-      flex: 1 1 auto; padding: .42em .5em; border: 1px solid var(--reduce-30); background: transparent;
-      border-radius: 4px; font: inherit; font-size: .85em; color: var(--text-dark); cursor: pointer;
+    .seg button, .toggle {
+      flex: 1 1 auto; padding: .42em .5em; border: 1px solid var(--ui-border); background: transparent;
+      border-radius: 8px; font: inherit; font-size: .85em; color: var(--ui-fg); cursor: pointer;
       transition: background .12s, border-color .12s, color .12s;
     }
-    .seg button:hover:not(.active) { background: var(--reduce-14); color: var(--dark); }
-    .seg button.active { background: var(--dark); border-color: var(--dark); color: var(--light); }
+    .seg button:hover:not(.active):not(:disabled), .toggle:hover:not(:has(input:checked)) { background: var(--ui-muted); }
+    .seg button.active, .toggle:has(input:checked) { background: var(--ui-muted); border-color: var(--ui-fg); color: var(--ui-fg); font-weight: 600; }
+    /* an on/off icon cell: the checkbox covers the cell, unseen, so a click anywhere toggles it */
+    .toggle { position: relative; }
+    .toggle input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+    .toggle:has(input:focus-visible) { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
+    .seg button:disabled { opacity: .4; cursor: default; }   /* as .tool:disabled */
 
-
-    .actions { display: flex; gap: .4em; margin-bottom: 1.5em; }
-    .actions button {
-      flex: 1; padding: .62em; border: 1px solid var(--reduce-30); background: transparent; border-radius: 4px;
-      font: inherit; font-weight: bold; color: var(--dark); cursor: pointer;
-      transition: background .12s, border-color .12s, opacity .12s;
+    /* Canvas UI: the plan canvas covers the window (view.resize reads its width and height)
+       and every control floats over it: icon toolbars in the corners, one settings panel at
+       a time beside its toolbar, and the loss card at the bottom left. The plan's own look
+       (pastel cells, double-line walls, sites, loss colours) is unchanged. */
+    @font-face {
+      font-family: "Geist"; src: url("./fonts/Geist-Variable.woff2") format("woff2");
+      font-weight: 100 900; font-style: normal; font-display: swap;
     }
-    .actions button:hover:not(:disabled) { background: var(--reduce-14); }
-    .actions button.primary { background: var(--dark); border-color: var(--dark); color: var(--light); }
-    .actions button.primary:hover:not(:disabled) { background: var(--dark); }
-    .actions button:disabled { opacity: .4; cursor: default; }
+    :root {
+      --font: "Geist", -apple-system, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+      --ui-fg: #0a0a0a; --ui-muted: #f5f5f5; --ui-muted-fg: #737373; --ui-border: #e5e5e5;
+      --ui-edge: 32px;
+      --ui-error: #a12b2b;
+      --ui-label-w: 76px;   /* one label column for every control row and the loss graph */
+      --ui-card-shadow: 0 0 0 1px rgba(10, 10, 10, .1), 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -4px rgba(0, 0, 0, .1);
+    }
+    html, body { height: 100%; overflow: hidden; }
+    .stage, .canvas-card, .controls { display: contents; }
+    body { --panel-left: calc(var(--ui-edge) + 48px); --panel-width: 300px;
+      --plan-top: 0px; --plan-bottom: 0px; --plan-left: 0px; }
+    .planbox { position: fixed; inset: var(--plan-top) 0 var(--plan-bottom) var(--plan-left); }
+    :is(#room-tags, #bubble-labels, .bubble-link-preview, #boundary-sketch, #wall-sketch) {
+      clip-path: inset(var(--plan-top) 0 var(--plan-bottom) var(--plan-left));
+    }
 
-    footer { margin-top: 3em; padding-top: 1.3em; border-top: 1px solid var(--divider); color: var(--text-dark); font-size: .85em; max-width: 72ch; }
-  </style>
+    .toolbar, .panel { position: fixed; background: var(--light); border-radius: 14px; box-shadow: var(--ui-card-shadow); }
+    .toolbar { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; z-index: 2; }
+    .toolbar.tl { top: var(--ui-edge); left: var(--ui-edge); }
+    .toolbar .sep { width: 20px; height: 1px; margin: 3px 0; background: var(--ui-border); }
+    .tool { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px;
+      background: transparent; color: var(--ui-fg); cursor: pointer; transition: background .12s; }
+    .tool:hover:not(:disabled), .tool[aria-pressed=true] { background: var(--ui-muted); }
+    .tool:focus-visible { outline: 2px solid var(--ui-muted-fg); outline-offset: 1px; }
+    .tool:disabled { opacity:.4; cursor:default; }
+    /* hover names: each icon's or gizmo end's aria-label, shown beside it after a short pause
+       (aria-label is the one source, so Run's name follows Pause and Resume) */
+    .tool { position: relative; }
+    .tool::after, .axis::after, .tip {
+      padding: 4px 8px; border-radius: 6px; background: var(--ui-fg); color: var(--light); font: 500 12px/1.2 var(--font);
+      white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; }
+    .tool::after, .axis::after { content: attr(aria-label); position: absolute; top: 50%; transform: translateY(-50%); }
+    .tool::after { left: calc(100% + 10px); }
+    .axis::after { right: calc(100% + 8px); }  /* the gizmo is at the right edge */
+    .tool:hover::after, .tool:focus-visible::after,
+    .axis:hover::after, .axis:focus-visible::after, .tip.shown { opacity: 1; transition-delay: .12s; }
+    /* icon cells inside a panel: the panel cuts off what overflows it, so their name is one
+       floating .tip over the page, centered under the icon (see showTip) */
+    .tip { position: fixed; z-index: 10; }
+
+    /* top-right: the view gizmo, the plan's axes as the camera sees them, floating with no card;
+       a drag in it rotates the view and a click on an end turns the view to that side */
+    .gizmo { position: fixed; top: var(--ui-edge); right: var(--ui-edge); width: 84px; height: 84px; z-index: 2;
+      cursor: grab; touch-action: none; user-select: none; }
+    .gizmo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .gizmo line { stroke-width: 2; stroke-linecap: round; }
+    .axis { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; padding: 0; border: 0;
+      border-radius: 50%; background: var(--axis); color: #fff; font: 600 10px/18px var(--font); text-align: center;
+      cursor: pointer; z-index: var(--z); transform: var(--axis-shift, none); }
+    .axis[data-axis^="-"] { width: 12px; height: 12px; margin: -6px 0 0 -6px; background: color-mix(in srgb, var(--axis) 40%, #fff); }
+    .axis:hover, .axis:focus-visible { z-index: 9; outline: 2px solid var(--ui-fg); outline-offset: 1px; }
+    .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    .panel { display: none; top: var(--ui-edge); left: var(--panel-left); width: var(--panel-width); max-height: calc(100dvh - 2 * var(--ui-edge));
+      overflow-y: auto; padding: 14px 16px; z-index: 1; }
+    .panel.open { display: block; }
+    /* panels are see-through, so the plan stays visible behind an open panel */
+    .panel { background: rgba(255, 255, 255, .75); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+    @media (max-width: 700px) {
+      body { --panel-height: min(46dvh, 400px); }
+      body:has(.panel.open) { --plan-top: 144px;
+        --plan-bottom: calc(var(--ui-edge) + var(--panel-height) + 12px); --plan-left: calc(var(--ui-edge) + 60px); }
+      .panel { top: auto; bottom: var(--ui-edge); left: var(--ui-edge); right: var(--ui-edge);
+        width: auto; height: var(--panel-height); }
+    }
+    .lossrow { margin: 2px 0; }
+    .panel .seg { margin-bottom: 4px; }
+  #boundary-sketch, #wall-sketch { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; color:var(--ui-fg); }
+  :is(#boundary-sketch, #wall-sketch) [hidden], :is(#boundary-sketch, #wall-sketch)[hidden] { display:none; }
+  #boundary-sketch polyline, :is(#boundary-sketch, #wall-sketch) line { fill:none; stroke:currentColor; stroke-width:2; }
+  :is(#boundary-sketch, #wall-sketch) line { stroke-dasharray:5 4; }
+  #wall-sketch path { fill:none; stroke:currentColor; stroke-width:4; stroke-linecap:round; }   /* the wall that moves */
+  #boundary-sketch [data-tracking-guide] { stroke-width:1; }
+  :is(#boundary-sketch, #wall-sketch) circle { fill:var(--light); stroke:currentColor; stroke-width:2; }
+  #wall-sketch [data-selected] { fill:currentColor; }   /* the selected corner */
+  #wall-sketch [data-handle] { fill:white; stroke:var(--ui-fg); stroke-width:1; }   /* the rotate handle, as .bubble-handle */
+  /* walls and corners that can move, marked before any hover: dark dashes and dots that read apart from the Voronoi cells, lighter than the snap guide */
+  #wall-sketch [data-movable] line { stroke-opacity:.85; stroke-width:1.5; stroke-dasharray:6 4; }
+  #wall-sketch [data-movable] circle { fill:currentColor; stroke:var(--light); stroke-width:1.5; }
+  #boundary-sketch [data-first] { fill:currentColor; }
+  #boundary-sketch[data-snap=free] [data-cursor] { stroke-width:1; }
+  #plan[data-boundary-drawing] { cursor:crosshair !important; }
+  #plan[data-wall-hover], #plan[data-corner-hover] { cursor:move !important; }
+  #plan[data-handle-hover] { cursor:grab !important; }
+  #plan[data-wall-locked] { cursor:not-allowed !important; }   /* a wall that ends where the boundary bends */
+  #discard-walls { border:0; border-radius:14px; padding:18px 20px; width:min(320px, calc(100vw - 32px)); background:var(--light); color:var(--ui-fg); box-shadow:var(--ui-card-shadow); font:13.44px/1.45 var(--font); }
+  #discard-walls::backdrop { background:rgba(10, 10, 10, .2); }
+  #discard-walls .dialog-title { margin:0 0 6px; font-size:15px; font-weight:600; }
+  #discard-walls .bubble-help { margin:0 0 16px; }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:.5em; }
+  .dialog-actions button { padding:.42em .9em; border:1px solid var(--ui-border); border-radius:8px; background:transparent; color:var(--ui-fg); font:inherit; cursor:pointer; }
+  .dialog-actions button:hover { background:var(--ui-muted); }
+  .dialog-actions .primary { background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }   /* as Run */
+  .dialog-actions .primary:hover { background:#262626; }
+  .area-head .val { color:var(--ui-muted-fg); font-family:var(--font); }
+  #adjust-areas .raswatch, .area-head span:first-child { flex:1; }
+  #adjust-areas .row .val + .val { color:var(--ui-muted-fg); }   /* the target share */
+  :is(#boundary-sketch, #wall-sketch) text { font:600 12px var(--font); fill:currentColor; stroke:var(--light); stroke-width:4px; paint-order:stroke; }
+  #custom-boundaries { margin-top:10px; }
+  #custom-boundaries[hidden] { display:none; }
+  #bubble-labels { position:fixed; inset:0; pointer-events:none; z-index:1; }
+  #room-tags { position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:1; }
+  .room-tag { position:absolute; transform:translate(-50%,-50%); display:grid; justify-items:center; max-width:11em;
+    gap:1px; color:var(--ui-fg); text-align:center; overflow-wrap:anywhere; font:11px/1.2 var(--font); }
+  .room-tag-number, .room-tag-share { font-size:10px; }
+  .room-tag-number { min-width:3.4em; padding:0 5px; border:1px solid currentColor; background:var(--light); }
+  #plan[data-bubble-editing] { cursor:crosshair !important; } /* OrbitControls sets an inline cursor */
+  .edit-bar { position:fixed; top:var(--ui-edge); left:50%; transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:2px;
+    padding:4px 4px 4px 14px; border-radius:14px; background:var(--light); box-shadow:var(--ui-card-shadow); font-size:13px; color:var(--ui-fg); }
+  .edit-bar[hidden] { display:none; }
+  @media (max-width: 1040px) { .edit-bar { left:calc(var(--ui-edge) + 48px + 300px + 12px); transform:none; } }
+  .edit-sep { width:1px; height:20px; margin:0 6px 0 10px; background:var(--ui-border); }
+  .edit-bar .tool::after { top:calc(100% + 8px); left:50%; transform:translateX(-50%); } /* below, so Undo's name does not cover Redo */
+  .bubble-label { position:absolute; transform:translate(-50%,-50%); padding:3px 5px; border-radius:4px; color:var(--ui-fg); background:rgba(255,255,255,.9); font:10px/1.2 var(--font); white-space:nowrap; }
+  .bubble-label.selected { background:var(--ui-fg); color:white; }
+  .bubble-label.draft { background:white; color:var(--ui-muted-fg); }
+  .bubble-label[data-covered] { visibility:hidden; }
+  .bubble-link-dot { position:absolute; width:10px; height:10px; border:2px solid white; border-radius:50%; background:var(--ui-fg); transform:translate(-50%,-50%); }
+  .bubble-link-preview { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
+  .bubble-link-preview line { stroke:var(--ui-fg); stroke-width:2; stroke-dasharray:5 4; }   /* as #boundary-sketch */
+  .bubble-link-preview line.reached { stroke-dasharray:none; }
+  .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
+  .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
+  .roomareas .row { justify-content:space-between; }
+  #room-area-head .val, #roomareas .val { min-width:var(--tap-size, 0px); text-align:center; }
+  .roomareas .raswatch { justify-content:flex-start; gap:4px; color:var(--ui-muted-fg); }   /* a room name is a row label */
+  #room-area-head { margin:14px 0 4px; }
+  #room-area-head .val { font-weight:400; }
+  #roomareas .room-entry { gap:0; }
+  .room-entry :is(.room-swatch, .room-row) { flex:0 0 var(--tap-size, 24px); margin-inline:-6px; } /* align the dot with Area without shrinking its hit area */
+  .room-entry .room-swatch { display:grid; place-items:center; }
+  .room-entry .room-row { justify-content:center; align-self:stretch; padding:0; }
+  .room-entry label.val { display:grid; place-items:center; align-self:stretch; cursor:pointer; }
+  .room-entry input { flex:1; min-width:0; padding:0 2px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--ui-muted-fg); font:inherit; }
+  .room-entry input::placeholder { color:inherit; opacity:1; }
+  .room-entry input:is(:hover, :focus) { border-color:var(--ui-border); background:var(--light); }
+  .room-entry input:focus-visible { outline:2px solid var(--ui-muted-fg); }
+  .bubble-help.error, #program-status[data-state=error] { color:var(--ui-error); }
+  #program-status { font:11px/1.5 var(--font); margin-top:8px; }
+  .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 6px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background .12s, box-shadow .12s; }
+  .room-row:hover, .connection-row:hover, .room-row.selected, .connection-row.selected { background:var(--ui-muted); }
+  .room-row.selected, .connection-row.selected { box-shadow:inset 0 0 0 1px var(--ui-fg); }
+  .room-row:focus-visible, .connection-row:focus-visible { outline:2px solid var(--ui-muted-fg); }
+  /* six equal cells: the five presets, then Draw boundary */
+  .panel .boundary-row { display:grid; grid-template-columns:repeat(6, 1fr); margin-bottom:12px; }   /* .panel: beats .panel .seg */
+  #presets { display:contents; }
+  .boundary-row button, .panel-head button, .view-row :is(button, .toggle) { display:grid; place-items:center; }
+  .boundary-row .ic, .panel-head .ic, .view-row .ic { width:20px; height:20px; stroke-width:1.6; }   /* icon cells alike */
+  /* Run, Pause and Resume: the last cell of the Optimization title row, filled as the main action */
+  .panel-head #run { grid-column:6; background:var(--ui-fg); border-color:var(--ui-fg); color:var(--light); }
+  .panel-head #run:hover:not(:disabled) { background:#262626; }
+  @media (max-width: 700px) {
+    .edit-bar { top:calc(var(--ui-edge) + 54px); left:calc(var(--ui-edge) + 60px); transform:none;
+      max-width:calc(100vw - 2 * var(--ui-edge) - 60px); }
+    .edit-bar [role="status"] { line-height:1.2; }
+  }
+  @media (max-width: 500px) {
+    body { --tap-size:44px; --panel-height:min(42dvh, 380px); }
+    .toolbar .tool, .edit-bar .tool { width:var(--tap-size); height:var(--tap-size); flex:none; }
+    .gizmo { display:grid; grid-template-columns:repeat(5, var(--tap-size)); gap:4px; width:auto; height:auto; }
+    .gizmo svg { display:none; }
+    .gizmo .axis { position:relative; top:auto; left:auto; transform:none; margin:0;
+      width:var(--tap-size); height:var(--tap-size); border:1px solid var(--ui-border); border-radius:8px;
+      background:var(--light); color:var(--ui-fg); font-size:12px; }
+    .gizmo .axis:hover { background:var(--ui-muted); }
+    .gizmo [data-axis="-x"]::before { content:"−X"; }
+    .gizmo [data-axis="-y"]::before { content:"−Y"; }
+    .panel :is(button, .toggle, input[type=text], input[type=range]) {
+      min-width:var(--tap-size); min-height:var(--tap-size);
+    }
+    .room-entry :is(.room-swatch, .room-row) { margin-inline:0; }
+    .panel input[type=range] { background:transparent; }
+    .panel input[type=range]::-webkit-slider-runnable-track { height:4px; border-radius:3px; background:var(--ui-border); }
+    .panel input[type=range]::-webkit-slider-thumb { margin-top:-5px; }
+    .panel input[type=range]::-moz-range-track { height:4px; border-radius:3px; background:var(--ui-border); }
+    .panel-head { grid-template-columns:1fr var(--tap-size); }
+    .panel-head > .label { grid-column:1; }
+    .panel-head #run { grid-column:2; }
+  }
+  @media (max-width: 382px) {
+    .panel :is(.boundary-row, .view-row) { grid-template-columns:repeat(3, 1fr); }
+  }
+  @media (max-width: 359px) {
+    .gizmo { grid-template-columns:repeat(3, var(--tap-size)); }
+    .edit-bar { top:calc(var(--ui-edge) + 100px); }
+    body:has(.panel.open) { --plan-top:190px; }
+  }
+</style>
+  <!-- three.js r187 (MIT), vendored in ./vendor/three -->
+  <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>Floor Plan Generation with Voronoi Diagram</h1>
-    <p class="sub">The Rust optimizer with central finite-difference gradients, ported by Claude and compiled to WASM, running live in browser</p>
-  </header>
-
-  <div class="lede">
-    <p>
-      Four weighted terms shape each plan: <strong>wall</strong> snaps every room edge to the
-      nearest boundary segment's angle (diagonal-friendly), <strong>area</strong> drives rooms
-      toward their target sizes, <strong>Lloyd</strong> keeps cells compact, and
-      <strong>topology</strong> keeps each room a single piece.
-    </p>
-  </div>
-
   <div class="stage">
     <div class="canvas-card">
-      <canvas id="plan" width="520" height="520"></canvas>
-      <div class="label canvas-sub">Loss</div>
+      <div class="planbox"><canvas id="plan" width="520" height="520" tabindex="0" aria-label="Floor plan editor"></canvas><div id="bubble-labels"></div><div id="room-tags"></div>
+        <dialog id="discard-walls" aria-labelledby="discard-walls-title">
+          <form method="dialog">
+            <p id="discard-walls-title" class="dialog-title">Discard wall edits?</p>
+            <p class="bubble-help">This change rebuilds the walls from the plan, so the walls you moved go back.</p>
+            <div class="dialog-actions"><button value="cancel">Cancel</button><button value="discard" class="primary">Discard</button></div>
+          </form>
+        </dialog>
+        <svg id="wall-sketch" aria-hidden="true" hidden><g data-movable hidden></g><path data-wall></path><circle data-corner r="6" hidden></circle><circle data-selected r="6" hidden></circle><path data-chosen hidden></path><circle data-handle r="4.5" hidden></circle><line data-guide hidden></line><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
+        <svg id="boundary-sketch" aria-hidden="true" hidden><polyline></polyline><line data-edge-guide hidden></line><line data-tracking-guide hidden></line><circle data-first r="4" hidden></circle><circle data-cursor r="5" hidden></circle><text hidden></text></svg>
+      </div>
       <!-- status text is no longer shown (the playhead + buttons convey run state);
            kept hidden so the existing state/error setters never hit a null node -->
       <span id="status" hidden></span>
-      <div class="losspanel" id="losspanel">
-        <div class="lossrow"><span class="lk">total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
-        <div class="lossrow"><span class="lk">wall</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
-        <div class="lossrow"><span class="lk">area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
-        <div class="lossrow"><span class="lk">lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
-        <div class="lossrow"><span class="lk">topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
-        <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
-      </div>
+      <div id="bubble-editing" class="edit-bar" hidden><span role="status">Editing Bubble Diagram</span><span class="edit-sep"></span><button type="button" id="undo" class="tool" aria-label="Undo" aria-keyshortcuts="Meta+Z Control+Z" disabled><svg class="ic"><use href="#i-undo"/></svg></button><button type="button" id="redo" class="tool" aria-label="Redo" aria-keyshortcuts="Meta+Shift+Z Control+Shift+Z Control+Y" disabled><svg class="ic"><use href="#i-redo"/></svg></button></div>
     </div>
 
+    <!-- Icons: Lucide (lucide.dev), ISC License, Copyright (c) for portions of Lucide are held by
+         Cole Bemis 2013-2022 as part of Feather (MIT); all other copyright (c) for Lucide are held
+         by Lucide Contributors 2022. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+        <symbol id="i-rooms" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+        <symbol id="i-optimize" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+        <symbol id="b-shape_a" viewBox="0 0 24 24"><polygon points="3.00,19.70 21.00,19.70 21.00,13.09 17.77,13.09 17.77,7.92 16.66,7.92 16.66,4.30 11.34,4.30 11.34,5.38 5.81,5.38 5.81,14.65 3.00,14.65"/></symbol>
+        <symbol id="b-shape_b" viewBox="0 0 24 24"><polygon points="3.00,19.71 10.63,19.71 10.63,18.16 13.36,18.16 13.36,16.21 18.27,16.21 18.27,9.70 21.00,9.70 21.00,4.29 8.52,4.29 8.52,5.60 3.00,5.60 3.00,19.56"/></symbol>
+        <symbol id="b-shape_c" viewBox="0 0 24 24"><polygon points="3.00,18.82 7.83,18.82 7.83,15.37 12.42,15.37 12.42,18.82 18.67,18.82 18.67,12.31 21.00,12.31 21.00,5.18 3.00,5.18"/></symbol>
+        <symbol id="b-shape_d" viewBox="0 0 24 24"><polygon points="6.94,4.12 3.00,14.81 5.81,19.88 14.25,19.88 14.25,14.81 21.00,14.81 21.00,5.81 9.75,5.81 9.75,4.12"/></symbol>
+        <symbol id="b-shape_e" viewBox="0 0 24 24"><polygon points="20.69,11.69 16.97,3.00 3.31,3.00 3.31,13.55 7.03,21.00 13.24,21.00 13.24,14.79 20.69,14.79"/></symbol>
+        <symbol id="i-walls-aligned" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h9"/></symbol>
+        <symbol id="i-room-tag" viewBox="0 0 24 24"><path d="M5 5h14M8 19h8"/><rect x="6" y="9" width="12" height="6" rx="1"/></symbol>
+        <symbol id="i-door" viewBox="0 0 24 24"><path d="M2 20h5"/><path d="M19 20h3"/><path d="M7 20V8"/><path d="M7 8a12 12 0 0 1 12 12"/></symbol>
+        <symbol id="i-voronoi" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M11 3 11.5 11 21 10"/><path d="M3 12.5 12.5 13 13 21"/><path d="M11.5 11 12.5 13"/></symbol>
+        <symbol id="i-sites" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><circle cx="7" cy="7.5" r=".6"/><circle cx="16.5" cy="6.5" r=".6"/><circle cx="7.5" cy="17" r=".6"/><circle cx="17" cy="16.5" r=".6"/></symbol>
+        <symbol id="i-bubbles" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49"/><path d="M15.41 6.51 8.59 10.49"/></symbol>
+        <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 2v20"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="m5 9-3 3 3 3"/><path d="m9 5 3-3 3 3"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+        <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+        <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
+        <symbol id="i-vector-square" viewBox="0 0 24 24"><path d="M19.5 7a24 24 0 0 1 0 10"/><path d="M4.5 7a24 24 0 0 0 0 10"/><path d="M7 19.5a24 24 0 0 0 10 0"/><path d="M7 4.5a24 24 0 0 1 10 0"/><rect x="17" y="17" width="5" height="5" rx="1"/><rect x="17" y="2" width="5" height="5" rx="1"/><rect x="2" y="17" width="5" height="5" rx="1"/><rect x="2" y="2" width="5" height="5" rx="1"/></symbol>
+      </defs>
+    </svg>
+
+    <!-- top-left: one icon per settings panel -->
+    <nav class="toolbar tl" aria-label="Settings">
+      <button class="tool" data-open="rooms" aria-label="Rooms"><svg class="ic"><use href="#i-rooms"/></svg></button>
+      <button class="tool" data-open="optimize" aria-label="Optimization"><svg class="ic"><use href="#i-optimize"/></svg></button>
+      <button class="tool" data-open="adjust" aria-label="Adjustment"><svg class="ic"><use href="#i-move"/></svg></button>
+      <button class="tool" data-export aria-label="Export JSON"><svg class="ic"><use href="#i-download"/></svg></button>
+    </nav>
+
+    <!-- top-right: the view gizmo (web/plan/gizmo.js fills it) -->
+    <div class="gizmo" role="group" aria-label="View direction"></div>
+
     <div class="controls">
-      <div class="actions">
-        <button id="run" class="primary">Run</button>
-        <button id="reset">Reset</button>
-      </div>
-
-      <div class="group">
+      <section class="panel" data-panel="rooms">
+        <div class="label">Rooms</div>
         <div class="label">Boundary</div>
+        <div class="seg boundary-row">
         <div class="seg" id="presets">
-          <button data-mode="shape_a">A</button>
-          <button data-mode="shape_b">B</button>
-          <button data-mode="shape_c">C</button>
-          <button data-mode="shape_d">D</button>
-          <button data-mode="shape_e" class="active">E</button>
+          <button data-mode="shape_a" aria-label="Boundary A" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_a"/></svg></button>
+          <button data-mode="shape_b" aria-label="Boundary B" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_b"/></svg></button>
+          <button data-mode="shape_c" aria-label="Boundary C" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_c"/></svg></button>
+          <button data-mode="shape_d" aria-label="Boundary D" aria-pressed="false"><svg class="ic preset-ic"><use href="#b-shape_d"/></svg></button>
+          <button data-mode="shape_e" class="active" aria-label="Boundary E" aria-pressed="true"><svg class="ic preset-ic"><use href="#b-shape_e"/></svg></button>
         </div>
-      </div>
-
-      <div class="group">
-        <div class="label">Layout</div>
-        <div class="row"><label>sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
-        <div class="row"><label>rooms</label><input id="rooms" type="range" min="2" max="8" step="1" value="5"><span class="val" id="rooms_v">5</span></div>
+        <button id="boundary-draw" type="button" aria-label="Draw boundary" aria-pressed="false" disabled><svg class="ic"><use href="#i-vector-square"/></svg></button>
+        </div>
+        <div class="seg" id="custom-boundaries" hidden><button type="button" data-mode="custom" aria-pressed="false">Custom</button></div>
+        <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
+        <div class="label">Bubble Diagram</div>
+        <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
+        <div class="label row area-head" id="room-area-head"><span>Room name</span><span class="val">Target</span></div>
         <div class="roomareas" id="roomareas"></div>
-      </div>
+        <div class="label">Door links</div>
+        <div id="connections"></div>
+        <div id="program-status" role="status"></div>
+        <div class="label">View</div>
+        <div class="view-row">
+          <label class="toggle"><input type="checkbox" id="show-aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-cells" aria-label="Voronoi cells" checked><svg class="ic"><use href="#i-voronoi"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-sites" aria-label="Voronoi sites" checked><svg class="ic"><use href="#i-sites"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-doors" aria-label="Doors" checked><svg class="ic"><use href="#i-door"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-bubbles" aria-label="Bubble Diagram" checked><svg class="ic"><use href="#i-bubbles"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-room-tags" aria-label="Room tags" checked><svg class="ic"><use href="#i-room-tag"/></svg></label>
+        </div>
+        <div class="display-rows">
+          <div class="row"><label for="wall">Wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
+          <div class="row"><label for="merge_tol">Point merge</label><input id="merge_tol" type="range" min="0" max="50" step="1" value="13"><span class="val" id="merge_tol_v">13%</span></div>
+          <div class="row"><label for="align_tol">Wall snap</label><input id="align_tol" type="range" min="0" max="50" step="1" value="13"><span class="val" id="align_tol_v">13%</span></div>
+        </div>
+      </section>
 
-      <div class="group">
-        <div class="label">Wall</div>
-        <div class="row"><label>width</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
-      </div>
-
-      <div class="group">
+      <section class="panel" data-panel="optimize">
+        <div class="panel-head">
+          <div class="label">Optimization</div>
+          <div class="seg"><button id="run" aria-label="Run"><svg class="ic"><use href="#i-play"/></svg></button></div>
+        </div>
         <div class="label">Loss weight (0–1)</div>
-        <div class="row"><label>wall</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="0.70"><span class="val" id="w_wall_v">0.70</span></div>
-        <div class="row"><label>area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.10"><span class="val" id="w_area_v">0.10</span></div>
-        <div class="row"><label>lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
-        <div class="row"><label>topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
-      </div>
+        <div class="row"><label for="w_wall">L1</label><input id="w_wall" type="range" min="0" max="1" step="0.01" value="1.00"><span class="val" id="w_wall_v">1.00</span></div>
+        <div class="row"><label for="w_cosine">Cos</label><input id="w_cosine" type="range" min="0" max="1" step="0.01" value="1"><span class="val" id="w_cosine_v">1.00</span></div>
+        <div class="row"><label for="w_area">Area</label><input id="w_area" type="range" min="0" max="1" step="0.01" value="0.50"><span class="val" id="w_area_v">0.50</span></div>
+        <div class="row"><label for="w_lloyd">Lloyd</label><input id="w_lloyd" type="range" min="0" max="1" step="0.01" value="0.12"><span class="val" id="w_lloyd_v">0.12</span></div>
+        <div class="row"><label for="w_topo">Topo</label><input id="w_topo" type="range" min="0" max="1" step="0.01" value="0.06"><span class="val" id="w_topo_v">0.06</span></div>
+        <div class="label">Run settings</div>
+        <div class="row"><label for="sites">Sites</label><input id="sites" type="range" min="8" max="80" step="1" value="60"><span class="val" id="sites_v">60</span></div>
+        <div class="row"><label for="iters">Iterations</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
+        <div class="row"><label for="lr">LR</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
+        <div class="row"><label for="seed">Seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
+        <div class="label">Loss</div>
+        <div class="losspanel" id="losspanel">
+          <div class="lossrow"><span class="lk">Total</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_total" /></svg></div>
+          <div class="lossrow"><span class="lk">L1</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_wall" /></svg></div>
+          <div class="lossrow"><span class="lk">Cos</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_cosine" /></svg></div>
+          <div class="lossrow"><span class="lk">Area</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_area" /></svg></div>
+          <div class="lossrow"><span class="lk">Lloyd</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_lloyd" /></svg></div>
+          <div class="lossrow"><span class="lk">Topo</span><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline id="sp_topo" /></svg></div>
+          <div class="playhead" id="playhead"><span class="tick" id="tick"></span><span class="vtag" id="vt_total"></span><span class="vtag" id="vt_wall"></span><span class="vtag" id="vt_cosine"></span><span class="vtag" id="vt_area"></span><span class="vtag" id="vt_lloyd"></span><span class="vtag" id="vt_topo"></span></div>
+        </div>
+      </section>
 
-      <div class="group">
-        <div class="label">Optimization</div>
-        <div class="row"><label>iters</label><input id="iters" type="range" min="50" max="5000" step="10" value="800"><span class="val" id="iters_v">800</span></div>
-        <div class="row"><label>lr</label><input id="lr" type="range" min="0.001" max="0.05" step="0.001" value="0.005"><span class="val" id="lr_v">0.005</span></div>
-        <div class="row"><label>seed</label><input id="seed" type="range" min="0" max="5000" step="1" value="777"><span class="val" id="seed_v">777</span></div>
-      </div>
+      <section class="panel" data-panel="adjust">
+        <div class="label">Adjustment</div>
+        <p id="adjust-message" class="bubble-help" aria-live="polite">Drag a wall or a corner to move it. Click a wall to rotate it by its handle, double-click a wall to add a corner, and press Delete to remove a selected corner.</p>
+        <div class="label">Area</div>
+        <div class="row area-head"><span></span><span class="val">Now</span><span class="val">Target</span></div>
+        <div class="roomareas" id="adjust-areas"></div>
+      </section>
     </div>
   </div>
 
@@ -247,60 +449,312 @@
 const COLORS = ['#bfe4bf', '#ded7ea', '#fee0c2', '#ffffcc', '#9cb6d8', '#f881bf', '#dfad8b', '#b3b3b3'];
 const R = 1.18; // normalized boundaries fit within radius 1
 
-const plan = document.getElementById('plan');
-const pctx = plan.getContext('2d');
+// three.js draws the plan in 3D: it opens isometric with the plan flat on the floor, the wheel
+// zooms (0.5x to 8x), the mouse rotates and pans, and a double-click returns to isometric
+import { createPlanView } from './plan/view3d.js';
+import { BubbleProgram, roomLabel } from './plan/bubbles.js';
+import { History } from './plan/history.js';
+import { createBubbleEditor } from './plan/bubble-editor.js';
+import { createBoundaryEditor } from './plan/boundary-editor.js';
+import { createWallEditor } from './plan/wall-editor.js';
+import { roomShares } from './plan/wall-edit.js';
+import { exportName, exportPlan } from './plan/export.js';
+const view = createPlanView(document.getElementById('plan'), { gizmo: document.querySelector('.gizmo'), tags: document.getElementById('room-tags') });
 const $ = id => document.getElementById(id);
-// per-term loss graphs: 'total' + the 4 weighted terms, each its own y-scale
-const LOSS_TERMS = ['total', 'wall', 'area', 'lloyd', 'topo'];
 
-let CW = 520, CH = 520;                        // plan-canvas CSS-pixel dims (set by fitCanvases)
+// ---------- wall alignment (web/plan) ----------
+// Raw draws the optimizer's cells as they are; Aligned welds them into rooms that share
+// corners and snaps nearly parallel walls (after GSDiff's test-time post-process).
+import { fromCells, roomRings } from './plan/graph.js';
+import { alignPlan, alignedShare, cellWidth } from './plan/align.js';
+import { evaluatePlan } from './plan/openings.js';
+const SIMPLIFY_TOL = 0.004;  // the kink tolerance web/src/lib.rs uses for room outlines
+const pointMergeInput = $('merge_tol');
+const wallSnapInput = $('align_tol');
+const alignedWallsInput = $('show-aligned');
+const roomTagsInput = $('show-room-tags');
+// Wall edits from the Adjustment panel live on a copy of the aligned plan (alignFrame rebuilds the
+// plan from the optimizer frame on every draw). null while there are no edits.
+let adjusted = null;
+let lastAligned = null;                 // the live aligned plan of the last drawn frame
+let wallHistory = new History(null);    // committed wall edits; null = none
+const wallState = g => ({ corners: [...g.corners].map(([id, c]) => [id, { ...c }]), rooms: g.rooms });
+const wallGraph = s => s && { corners: new Map(s.corners.map(([id, c]) => [id, { ...c }])), rooms: structuredClone(s.rooms) };
+let boundaryRing = null;     // sent by the worker once the optimizer is built
+// Build both wall graphs for one frame and report the Aligned wall share.
+function alignFrame(f) {
+  const n = roomCount();
+  const g = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: SIMPLIFY_TOL });
+  const raw = fromCells(f.cells, boundaryRing, { roomCount: n, simplifyTol: 0 });
+  const before = alignedShare(g, boundaryRing);
+  // Point merge and Wall snap are percents of the typical cell width, so they mean the same at any site count
+  const cell = cellWidth(boundaryRing, f.sites.length);
+  const tolerances = {
+    mergeTol: pointMergeInput.valueAsNumber / 100 * cell,
+    snapTol: wallSnapInput.valueAsNumber / 100 * cell,
+  };
+  alignPlan(g, boundaryRing, tolerances);
+  if (!alignedWallsInput.checked) alignPlan(raw, boundaryRing, tolerances);
+  return { raw, aligned: g, before, after: alignedShare(g, boundaryRing) };
+}
+// Each weighted loss contribution has its own y-scale.
+const LOSS_TERMS = ['total', 'wall', 'cosine', 'area', 'lloyd', 'topo'];
+// Each row's value tag (vt_<term>) shows while the mouse is on that row (sp_<term>).
+// The name of the icon cell under the pointer or keyboard focus, centered 6px below it.
+const tip = document.createElement('div');
+tip.className = 'tip';
+tip.setAttribute('aria-hidden', 'true');   // the button's own aria-label is its accessible name
+document.body.append(tip);
+const TIP_CELLS = '.boundary-row button, .panel-head button, .view-row :is(button, .toggle)';
+function showTip(button) {
+  // a toggle cell is a label; its name is on the checkbox inside
+  tip.textContent = button.getAttribute('aria-label') ?? button.querySelector('[aria-label]').getAttribute('aria-label');
+  const r = button.getBoundingClientRect(), w = tip.offsetWidth;
+  tip.style.left = Math.min(Math.max(r.left + r.width / 2 - w / 2, 4), innerWidth - w - 4) + 'px';
+  tip.style.top = r.bottom + 6 + 'px';
+  tip.classList.add('shown');
+}
+const hideTip = () => tip.classList.remove('shown');
+document.addEventListener('pointerover', e => { const b = e.target.closest?.(TIP_CELLS); if (b) showTip(b); else hideTip(); });
+document.addEventListener('focusin', e => { const b = e.target.closest?.(TIP_CELLS); if (b && e.target.matches(':focus-visible')) showTip(b); });
+document.addEventListener('focusout', hideTip);
+// A press moves focus, and focusout hides the name; after the click (which can rename Run to
+// Pause) the name shows again with the new label.
+document.addEventListener('click', e => { const b = e.target.closest?.(TIP_CELLS); if (b) showTip(b); });
+
+document.querySelectorAll('.lossrow').forEach(row => {
+  const tag = $('vt_' + row.querySelector('polyline').id.slice(3));
+  row.addEventListener('pointerenter', () => tag.classList.add('shown'));
+  row.addEventListener('pointerleave', () => tag.classList.remove('shown'));
+});
+
 let lastFrame = null;                          // last rendered cell-frame, for resize redraw
 let wallWidth = 0.02;                          // wall thickness (normalized half-width); JS-only render param
-// per-frame fit transform: center the plan in the canvas and scale it to fill
-// ~70% of the square (computed in drawFrame from the cell bbox = the boundary).
-let fitS = 1, fitCx = 0, fitCy = 0;
-const nx = x => CW / 2 + (x - fitCx) * fitS;  // normalized -> canvas (centered fit)
-const ny = y => CH / 2 - (y - fitCy) * fitS;  // flip y
 
-// Size each canvas backing store to its displayed size x devicePixelRatio so the
-// render stays crisp on HiDPI screens and when the column is wider than 520px;
-// the 2D context is scaled so all drawing stays in CSS-pixel coordinates.
-function fitCanvases() {
-  const dpr = window.devicePixelRatio || 1;
-  CW = CH = Math.max(1, Math.round(plan.getBoundingClientRect().width));
-  plan.width = Math.round(CW * dpr);
-  plan.height = Math.round(CH * dpr);
-  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // the loss graphs are SVG (viewBox-scaled) — no DPR backing-store sizing needed
-}
 function redraw() {
-  fitCanvases();
+  view.resize();                               // the loss graphs are SVG (viewBox-scaled), no resize needed
   if (lastFrame) drawFrame(lastFrame);
-  else clearPlan();
+  else if (boundaryRing && currentProgram()) view.draw({outline:boundaryRing,rooms:[],walls:[boundaryRing],lines:[boundaryRing],wall:wallWidth});
+  else view.clear();
   drawSparks();
 }
 let resizeTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
 
-let mode = 'shape_e';     // active preset shape
+let mode = 'shape_e';     // active preset or custom boundary
+const CUSTOM_MODE = 'custom';
+let customBoundary = null;
+let pendingBoundary = null;
 let built = false;        // the worker holds an optimizer for the current params
 let running = false;
 let paused = false;
+let runFinished = false;
 let maxIters = 300;
-const hist = { total: [], wall: [], area: [], lloyd: [], topo: [] };
+const hist = Object.fromEntries(LOSS_TERMS.map(term => [term, []]));
 const clearHist = () => { for (const t in hist) hist[t].length = 0; };
 let gen = 0, curGen = 0;  // build generation; frames from a superseded build are dropped
 
 // The optimizer lives in a Web Worker, so every wasm step runs OFF the main
 // thread; the UI stays responsive and only renders the frames it streams back.
 const worker = new Worker('./worker.js', { type: 'module' });
+const programs = new Map(); // retain each boundary's circles when switching presets
+const presetRoomNames = new Map();
+// One undo history over the whole design: which boundary is active, the drawn boundary, and every
+// boundary's room circles. Room edits and new boundaries are steps; choosing a preset is not.
+const designState = () => ({
+  mode,
+  custom: customBoundary && structuredClone(customBoundary),
+  programs: [...programs].map(([m, p]) => [m, p.state()]),
+});
+const history = new History(designState());
+const DOOR_WIDTH = 0.1;
+let editingBubbles = false;
+const currentProgram = () => programs.get(mode) ?? null;
+const roomCount = () => currentProgram()?.snapshot().rooms.length ?? roomRatios.length;
+const colorForRoomId = id => COLORS[(id-1)%COLORS.length];
+const bubbleHelp = $('bubble-message').textContent;
+const editor = createBubbleEditor($('plan'),view,{
+  labels:$('bubble-labels'),tags:$('room-tags'),colorForRoomId,ensureProgram:()=>ensureProgram(),boundary:()=>boundaryRing,
+  onChange({commit,selectionOnly}) {
+    if(selectionOnly){refreshRoomReadout();return;}
+    if(!editingBubbles){editingBubbles=true;stop();}
+    refreshRoomReadout();
+    $('program-status').textContent=commit?'Updating plan…':'Editing rooms…';
+    $('program-status').dataset.state='editing';
+    if(commit){editingBubbles=false;history.commit(designState());rebuildPreviewSoon();}
+    setButtons();
+  },
+  onStatus(message,error=!!message) {
+    $('bubble-message').textContent=message||bubbleHelp;
+    $('bubble-message').classList.toggle('error',error);
+  }
+});
+const boundaryHint = 'Click to add a point. Click the first point to close. Hold Shift for X/Y. Backspace undoes a point. Esc cancels.';
+function boundaryMessage(error = '') {
+  const message = $('boundary-message');
+  message.textContent = error || boundaryHint;
+  message.classList.toggle('error', !!error);
+}
+const boundaryEditor = createBoundaryEditor($('plan'), view, {
+  overlay: $('boundary-sketch'),
+  isBuilding: () => !!pendingBoundary,
+  reference: () => boundaryRing ?? [],
+  onActive(active) {
+    $('boundary-draw').setAttribute('aria-pressed', String(active));
+    $('boundary-draw').classList.toggle('active', active);
+    $('boundary-message').hidden = !active;
+    if (active) boundaryMessage();
+    setButtons();
+  },
+  onClose: addBoundary,
+  onError: boundaryMessage,
+  onPoints: () => setButtons(),
+});
+$('boundary-draw').addEventListener('click', () => {
+  if (boundaryEditor.active) boundaryEditor.cancel();
+  else boundaryEditor.start();
+});
+// The first room drawn on a preset replaces its automatic rooms with a drawn program.
+function ensureProgram() {
+  if (pendingBoundary || !boundaryRing) return null;
+  boundaryEditor.cancel();
+  if(!currentProgram()){
+    programs.set(mode,new BubbleProgram(boundaryRing));stop();
+    clearHist();hidePlayhead();redraw();
+    $('program-status').textContent='Draw at least one room.';
+  }
+  editor.setProgram(currentProgram());
+  refreshRoomReadout();setButtons();
+  return currentProgram();
+}
+$('roomareas').addEventListener('click',e=>{const b=e.target.closest('[data-room-id]');if(b)editor.selectRoom(+b.dataset.roomId);});
+$('roomareas').addEventListener('change', ({ target: field }) => {
+  const index = Number(field.dataset.nameIndex);
+  const name = field.value.trim();
+  const program = currentProgram();
+  if (program) {
+    const room = program.snapshot().rooms[index];
+    program.rename(room.id, name);
+    history.replace(designState());
+  } else {
+    const names = [...roomNames(null)];
+    names[index] = name || undefined;
+    if (mode === CUSTOM_MODE) {
+      customBoundary.roomNames = names;
+      history.replace(designState());
+    } else presetRoomNames.set(mode, names);
+  }
+  field.value = name;
+  if (lastFrame) drawFrame(lastFrame);
+});
+$('roomareas').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing && e.target.matches('input')) e.target.blur();
+});
+$('connections').addEventListener('click',e=>{const b=e.target.closest('[data-from]');if(b)editor.selectLink(+b.dataset.from,+b.dataset.to);});
+window.addEventListener('pagehide',()=>{editor.dispose();boundaryEditor.dispose();wallEditor.dispose();});
+
+// Each room's share now (from the plan on screen) beside its target share, in the Adjustment panel.
+// One decimal, so a small wall move shows.
+const shareText = share => (share * 100).toFixed(1) + '%';
+function refreshAdjustAreas(shares, color, input) {
+  const weights = input?.ratios ?? roomRatios;
+  const sum = weights.reduce((a, b) => a + b, 0) || 1;
+  $('adjust-areas').innerHTML = shares.map((share, r) => {
+    const id = input ? input.rooms[r].id : r + 1;
+    return `<div class="row"><span class="raswatch"><i class="sw" style="background:${color(r)}"></i> ${roomLabel(id)}</span><span class="val" data-now>${shareText(share)}</span><span class="val" data-target>${shareText((weights[r] ?? 0) / sum)}</span></div>`;
+  }).join('');
+}
+
+// Dragging walls while the Adjustment panel is open. A drag shows its plan as it goes and
+// becomes one undo step when it ends.
+let committedWalls = null;  // the wall edits as of the last commit, undo or redo
+let wallMessage = '';       // why the last wall edit was refused, shown in the help line
+function restoreWalls(state) {
+  committedWalls = state;
+  adjusted = wallGraph(state);
+  $('plan').toggleAttribute('data-wall-edits', !!adjusted);
+  setButtons();
+  if (lastFrame) drawFrame(lastFrame);
+  wallEditor.sync();
+}
+const wallEditor = createWallEditor($('plan'), view, {
+  overlay: $('wall-sketch'),
+  plan: () => adjusted ?? lastAligned,
+  boundary: () => boundaryRing,
+  canEdit: () => alignedWallsInput.checked && !running,   // the plan changes under the pointer while it runs
+  onChange(graph, commit) {
+    adjusted = graph;
+    $('plan').toggleAttribute('data-wall-edits', true);
+    if (commit) {
+      committedWalls = wallState(graph);
+      wallHistory.commit(committedWalls);
+      setButtons();
+    }
+    if (lastFrame) drawFrame(lastFrame);
+  },
+  onCancel: () => restoreWalls(committedWalls),
+  onStatus(text) { wallMessage = text; setButtons(); },
+});
+
+// Wall edits last until the walls are rebuilt. With edits, anything that rebuilds them (a preview
+// or run, another boundary, room edits, the point merge and wall snap tolerances) asks first;
+// Discard drops the edits and, for a button, goes on with its click. The press or key that asked
+// does nothing, so Cancel changes nothing.
+const REBUILD_BUTTONS = '#run, #presets button, #custom-boundaries button, #boundary-draw';
+const REBUILD_SLIDERS = '.panel[data-panel=optimize] input[type=range], #merge_tol, #align_tol';
+const discardDialog = $('discard-walls');
+let asking = false;
+let afterDiscard = null;   // the click to go on with once the edits are dropped
+function askFirst(e, then) {
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (asking) return;
+  asking = true;
+  afterDiscard = then;
+  discardDialog.showModal();
+}
+// Act on the button itself (the form then closes the dialog); Escape or Cancel just close it.
+discardDialog.addEventListener('click', e => {
+  if (e.target.closest('button[value]')?.value !== 'discard') return;
+  const then = afterDiscard;
+  afterDiscard = null;
+  asking = false;
+  wallHistory = new History(null);
+  restoreWalls(null);
+  then?.();
+});
+discardDialog.addEventListener('close', () => { asking = false; afterDiscard = null; });
+document.addEventListener('click', e => {
+  if (!adjusted || discardDialog.contains(e.target)) return;
+  const button = e.target.closest?.(REBUILD_BUTTONS) ?? (openPanel === 'rooms' ? e.target.closest?.('#undo, #redo') : null);
+  if (button && !button.disabled) askFirst(e, () => button.click());
+}, true);
+document.addEventListener('pointerdown', e => {
+  if (!adjusted || e.button !== 0) return;
+  if (e.target.closest?.(REBUILD_SLIDERS) || (openPanel === 'rooms' && e.target === $('plan'))) askFirst(e);
+}, true);
+document.addEventListener('keydown', e => {
+  if (!adjusted || asking) return;
+  const sliderKey = e.target.closest?.(REBUILD_SLIDERS) && /^(Arrow|Page|Home|End)/.test(e.key);
+  const inField = e.target.closest?.('input, textarea, select, [contenteditable]');
+  const roomKey = openPanel === 'rooms' && !inField && (e.key === 'Delete' || e.key === 'Backspace' || ((e.metaKey || e.ctrlKey) && /^[zy]$/i.test(e.key)));
+  if (sliderKey || roomKey) askFirst(e);
+}, true);
+$('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubbles').checked));
+function redrawFrame() {
+  if (lastFrame) drawFrame(lastFrame);
+}
+for (const id of ['show-aligned', 'show-room-tags', 'show-doors', 'show-cells', 'show-sites']) {
+  $(id).addEventListener('change', redrawFrame);
+}
 
 // ---------- inputs ----------
-const SLIDERS = ['sites','rooms','wall','w_wall','w_area','w_lloyd','w_topo','iters','lr','seed'];
-const IMPORTANCE_IDS = new Set(['w_wall','w_area','w_lloyd','w_topo']);
+const SLIDERS = ['sites','wall','merge_tol','align_tol','w_wall','w_cosine','w_area','w_lloyd','w_topo','iters','lr','seed'];
+const IMPORTANCE_IDS = new Set(['w_wall','w_cosine','w_area','w_lloyd','w_topo']);
 // Shared slider -> readout formatter (used by the live listeners and applyPreset).
 function fmtVal(id, v) {
-  return (id === 'lr' || id === 'wall') ? (+v).toFixed(3)
+  return id.endsWith('_tol') ? `${+v}%`
+       : (id === 'lr' || id === 'wall') ? (+v).toFixed(3)
        : IMPORTANCE_IDS.has(id) ? (+v).toFixed(2)
        : (+v % 1 ? (+v).toFixed(1) : String(+v));
 }
@@ -315,83 +769,75 @@ $('wall').addEventListener('input', () => {
   wallWidth = +$('wall').value;
   if (lastFrame) drawFrame(lastFrame);
 });
+for (const input of [pointMergeInput, wallSnapInput]) {
+  input.addEventListener('input', () => {
+    if (lastFrame) drawFrame(lastFrame);
+  });
+}
 
 // sites / rooms change the optimizer geometry (site count, room count), so rebuild
-// and preview live — no need to press Reset. Debounced so a drag rebuilds once on
+// and preview live. Debounced so a drag rebuilds once on
 // settle (and stops any running optimization), not on every intermediate step.
 let rebuildTimer = 0;
 function rebuildPreviewSoon() {
+  if (pendingBoundary) return;
   clearTimeout(rebuildTimer);
+  $('status').textContent=mode+' · building…';
   rebuildTimer = setTimeout(() => {
+    rebuildTimer = 0;
     stop();
     $('status').textContent = mode + ' · building…';
     sendBuild('preview');
   }, 50);
 }
 $('sites').addEventListener('input', rebuildPreviewSoon);
-$('rooms').addEventListener('input', rebuildPreviewSoon);
 // seed reseeds the site initialization, so a committed seed change (Enter / blur /
-// spinner) rebuilds the preview too — no need to press Run or Reset.
+// spinner) rebuilds the preview too.
 $('seed').addEventListener('change', rebuildPreviewSoon);
+// Loss weights and run settings only reach the engine in a build, so a committed change
+// rebuilds the step 0 preview too (and stops a run); there is no Reset button.
+for (const id of ['w_wall', 'w_cosine', 'w_area', 'w_lloyd', 'w_topo', 'iters', 'lr']) $(id).addEventListener('change', rebuildPreviewSoon);
 
-// One 0..1 area-WEIGHT slider per room (regenerated when the room count changes).
-// roomRatios is the source of truth; params() normalizes weights -> shares, and
-// each row shows its live share %.
-let roomRatios = [];   // per-room area WEIGHT (0..1, independent); params() normalizes
-
-// One row per room: colour swatch (label slot) + a free 0..1 weight slider + a
-// readout of its live normalized share %. Sliders are independent — moving one
-// never moves another; only the share %s recompute.
-function renderRoomAreas() {
-  const k = +$('rooms').value;
-  roomRatios = Array.from({ length: k }, () => 1 / k);  // equal split to start
-  $('roomareas').innerHTML = Array.from({ length: k }, (_, i) =>
-    `<div class="row">` +
-    `<span class="raswatch"><i class="sw" style="background:${COLORS[i % COLORS.length]}"></i></span>` +
-    `<input id="area_${i}" type="range" min="0" max="1" step="0.01" value="${1 / k}">` +
-    `<span class="val" id="area_${i}_v">${Math.round(100 / k)}%</span></div>`
-  ).join('');
-  refreshRoomReadout();
+let roomRatios = []; // legacy preset shares; edited inputs come only from BubbleProgram
+function roomNames(program) {
+  if (program) return program.rooms.map(room => room.name);
+  return (mode === CUSTOM_MODE ? customBoundary.roomNames : presetRoomNames.get(mode)) ?? [];
 }
 
-// Refresh every room's normalized share %. Share is weight / sum(weights) — the
-// same value params() sends the optimizer — so editing any one slider updates
-// ALL the %s (display only; no slider moves).
 function refreshRoomReadout() {
-  const sum = roomRatios.reduce((a, b) => a + b, 0) || 1;
-  for (let i = 0; i < roomRatios.length; i++) {
-    const p = $('area_' + i + '_v');
-    if (p) p.textContent = Math.round(roomRatios[i] / sum * 100) + '%';
-  }
+  const input=currentProgram()?.snapshot();
+  const names=roomNames(input);
+  const weights=input?.ratios ?? roomRatios;
+  const sum=weights.reduce((a,b)=>a+b,0)||1;
+  $('roomareas').innerHTML=weights.map((v,i)=>{
+    const id=input?input.rooms[i].id:i+1;
+    const label=roomLabel(id);
+    const marker=`<i class="sw" style="background:${input?colorForRoomId(id):COLORS[i%COLORS.length]}"></i>`;
+    const selectId=`room-select-${id}`;
+    const selection=input
+      ? `<button type="button" class="room-row${editor.selected===id?' selected':''}" id="${selectId}" data-room-id="${id}" aria-label="Select ${label}">${marker}</button>`
+      : `<span class="room-swatch" aria-hidden="true">${marker}</span>`;
+    const percentage=`${Math.round(v/sum*100)}%`;
+    const area=input ? `<label class="val" for="${selectId}">${percentage}</label>` : `<span class="val">${percentage}</span>`;
+    return `<div class="row room-entry">${selection}<input type="text" data-name-index="${i}" aria-label="Name for ${label}" placeholder="${label}" autocomplete="off">${area}</div>`;
+  }).join('');
+  $('roomareas').querySelectorAll('input').forEach((field, i) => { field.value = names[i] ?? ''; });
+  const selected=editor.selectedLink;
+  $('connections').innerHTML=(input?.links??[]).map(([a,b])=>{
+    const x=input.rooms[a].id,y=input.rooms[b].id;
+    const from=roomLabel(x),to=roomLabel(y);
+    return `<button type="button" class="connection-row${selected&&selected[0]===x&&selected[1]===y?' selected':''}" data-from="${x}" data-to="${y}" aria-label="Select door link ${from} to ${to}">${from} / ${to}</button>`;
+  }).join('');
 }
 
-$('rooms').addEventListener('input', renderRoomAreas);
-renderRoomAreas();
-// delegated: each room slider sets only its own weight, then the %s refresh.
-$('roomareas').addEventListener('input', e => {
-  const el = e.target;
-  if (el.tagName !== 'INPUT' || !el.id.startsWith('area_')) return;
-  roomRatios[+el.id.slice(5)] = +el.value;
-  refreshRoomReadout();
-});
-
-// Per-term reference scales s_i = the iter-0 raw magnitude of each loss term
-// (measured with w=1, geomean over the 5 demo shapes x 8 seeds, 2026-06). They
-// turn the 0..1 sliders into relative IMPORTANCE knobs: the optimizer weight is
-// importance / s, so equal slider values give ~equal per-term contribution at the
-// start. wall is stable across shapes (x1.3), area is roughest (x2.7, because it
-// is a sum-then-square), and topo is never >0 in practice so its scale is a
-// judgment value (= one room split into two pieces).
+// Cos goes to the engine as set (its native dimensionless scale). L1/Area/Lloyd/topology
+// retain the previous reference scales measured for the demo (2026-06).
 const LOSS_SCALES = { w_wall: 13.0, w_area: 0.49, w_lloyd: 5.3, w_topo: 4.0 };
 
-function params() {
-  const k = +$('rooms').value;
-  const weights = roomRatios.slice(0, k).map(r => Math.max(0, r));
+function params(ratios) {
+  const weights = ratios.map(r => Math.max(0, r));
   const wsum = weights.reduce((a, b) => a + b, 0) || 1;
-  // Each loss slider is a 0..1 importance; divide by the per-term scale to get the
-  // raw weight the optimizer consumes. The default {0.70,0.10,0.12,0.06} ~back-maps
-  // to the old demo weights {5,20,2.1,1.5} (within slider rounding; the global
-  // factor is irrelevant under AdamW). bb, cell stay 0.
+  // Importance is divided by the corresponding native scale; bb/cell stay off.
   const imp = id => +$(id).value;
   return {
     sites: +$('sites').value,
@@ -409,14 +855,21 @@ function params() {
   };
 }
 
-// Build (or rebuild) the optimizer for the selected preset in the worker.
+// Build (or rebuild) the optimizer for the selected boundary in the worker.
 // `then` is what the worker does once built: 'preview' or 'start' (run).
-function sendBuild(then) {
-  const p = params();
+function sendBuild(then, candidate = null) {
+  clearTimeout(rebuildTimer);rebuildTimer=0;
+  if (!candidate) runFinished=false;
+  const input = candidate ? null : currentProgram()?.snapshot();
+  const custom = candidate ?? (mode === CUSTOM_MODE ? customBoundary : null);
+  if(input&&!input.rooms.length){$('status').textContent='Draw at least one room.';$('program-status').textContent='Draw at least one room.';clearHist();hidePlayhead();redraw();return false;}
+  const p = params(input?.ratios ?? custom?.ratios ?? roomRatios);
   maxIters = p.iters;
   curGen = ++gen;
-  worker.postMessage({ cmd: 'build', gen: curGen, kind: 'shape', mode,
-    sites: p.sites, ratios: p.ratios, w: p.w, seed: p.seed, lr: p.lr, iters: p.iters, then });
+  worker.postMessage({ cmd: 'build', gen: curGen, mode: candidate ? CUSTOM_MODE : mode,
+    ...(custom ? { kind: 'custom', boundary: custom.ring } : { kind: 'shape' }),
+    sites: p.sites, ratios: p.ratios, w: p.w, cosineWeight: $('w_cosine').valueAsNumber, seed: p.seed, lr: p.lr, iters: p.iters, then,
+    ...(input?{program:{...input,doorWidth:DOOR_WIDTH}}:{}) });
   return true;
 }
 
@@ -424,21 +877,52 @@ function sendBuild(then) {
 worker.onmessage = (e) => {
   const m = e.data;
   // drop frames/results from a build that has since been superseded
-  if ((m.type === 'frame' || m.type === 'built' || m.type === 'done') && m.gen !== curGen) return;
+  if (['frame','built','done','error'].includes(m.type) && m.gen !== undefined && m.gen !== curGen) return;
   switch (m.type) {
     case 'ready':
       break;
     case 'error':
+      if (pendingBoundary) {
+        pendingBoundary = null;
+        boundaryMessage(m.msg);
+        setButtons();
+        break;
+      }
       $('status').textContent = m.msg;
+      if(currentProgram())$('program-status').textContent=m.msg;
+      $('program-status').dataset.state='error';
       running = false; paused = false; setButtons();
       break;
     case 'built':
+      if (pendingBoundary) {
+        pendingBoundary.normalized = m.boundary;
+        break;
+      }
       built = true;
+      boundaryRing = m.boundary;
+      editor.setProgram(currentProgram());
+      setButtons();
       break;
     case 'frame':
+      if (pendingBoundary) {
+        // The constructor can succeed before the first preview fails.
+        const { ring, ratios, normalized } = pendingBoundary;
+        pendingBoundary = null;
+        customBoundary = { ring, ratios };
+        programs.delete(CUSTOM_MODE);
+        boundaryRing = normalized;
+        built = true;
+        runFinished = false;
+        $('custom-boundaries').hidden = false;
+        $('boundary-message').hidden = true;
+        activateBoundary(CUSTOM_MODE);
+        history.commit(designState());
+        setButtons();
+      }
       lastFrame = m.frame;
       if (m.mode === 'preview') {
         $('status').textContent = mode + ' · ready to Run';
+        if(currentProgram())$('program-status').textContent='Ready to run.';
         clearHist(); pushLoss(m.frame);   // seed the panel with iter-0 values (graphs fill on Run)
       } else {
         pushLoss(m.frame);
@@ -447,10 +931,40 @@ worker.onmessage = (e) => {
       break;
     case 'done':
       running = false; paused = false; setButtons();
-      $('status').textContent = 'done';
+      runFinished=true;
+      if(lastFrame)drawFrame(lastFrame);
+      $('status').textContent = currentProgram()?$('program-status').textContent:'done';
       break;
   }
 };
+
+// ---------- export ----------
+// The last toolbar icon downloads the state on screen as JSON at once; it never asks and never
+// changes the plan. Weights are the slider values, as the user set them (params() rescales them).
+document.querySelector('.toolbar [data-export]').addEventListener('click', () => {
+  const plan = adjusted ?? lastAligned;
+  if (!plan || !lastFrame || !boundaryRing) return;
+  const now = new Date();
+  const program = currentProgram()?.snapshot() ?? null;
+  const data = exportPlan({
+    mode, boundary: boundaryRing, program, roomNames: roomNames(program),
+    settings: {
+      sites: +$('sites').value,
+      weights: { l1: +$('w_wall').value, cos: +$('w_cosine').value, area: +$('w_area').value, lloyd: +$('w_lloyd').value, topo: +$('w_topo').value },
+      iterations: +$('iters').value, lr: +$('lr').value, seed: +$('seed').value | 0,
+      wallWidth, pointMerge: +pointMergeInput.value, wallSnap: +wallSnapInput.value,
+      walls: alignedWallsInput.checked ? 'aligned' : 'raw',
+      voronoi: { cells: $('show-cells').checked, sites: $('show-sites').checked },
+      doors: $('show-doors').checked, bubbles: $('show-bubbles').checked, roomTags: roomTagsInput.checked,
+    },
+    frame: lastFrame, finished: runFinished, plan, edited: !!adjusted, now,
+  });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  link.download = exportName(mode, now);
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 0);
+});
 
 // ---------- presets ----------
 // Per-boundary starting configuration. A boundary listed here loads that full
@@ -463,7 +977,7 @@ const PRESETS = {
     sites: 80, rooms: 5,
     roomRatios: [0.13, 0.30, 0.23, 0.13, 0.21],  // normalized shares 13/30/23/13/21%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 1000, lr: 0.005, seed: 777,
   },
   // B — orthogonal boundary, 7 rooms (user preset, 2026-06).
@@ -471,7 +985,7 @@ const PRESETS = {
     sites: 80, rooms: 7,
     roomRatios: [0.12, 0.12, 0.25, 0.16, 0.07, 0.12, 0.15],  // displayed shares 12/12/25/16/7/12/15%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 4217,
   },
   // C — orthogonal boundary, 5 rooms (user preset, 2026-06).
@@ -481,7 +995,7 @@ const PRESETS = {
     // so the weights are normalized to sum 1.0 here to reproduce that exact readout.
     roomRatios: [0.116, 0.266, 0.316, 0.116, 0.186],
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 3764,
   },
   // D — diagonal boundary tuned for local wall-alignment (user preset, 2026-06).
@@ -489,7 +1003,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.34, 0.13, 0.05, 0.22, 0.13, 0.13],  // normalized shares 34/13/5/22/13/13%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 2153,
   },
   // E — orthogonal runs with two diagonal walls, 6 rooms (user preset, 2026-06).
@@ -497,7 +1011,7 @@ const PRESETS = {
     sites: 80, rooms: 6,
     roomRatios: [0.13, 0.11, 0.21, 0.20, 0.11, 0.24],  // normalized shares 13/11/21/20/11/24%
     wall: 0.02,
-    w_wall: 1.00, w_area: 0.15, w_lloyd: 0.01, w_topo: 0.20,
+    w_wall: 1.00, w_cosine: 1.00, w_area: 0.50, w_lloyd: 0.01, w_topo: 0.20,
     iters: 500, lr: 0.005, seed: 4971,
   },
 };
@@ -512,90 +1026,135 @@ function applyPreset(mode) {
   const set = (id, val) => { $(id).value = val; const o = $(id + '_v'); if (o) o.textContent = fmtVal(id, val); };
   set('sites', p.sites);
   set('wall', p.wall);
-  set('w_wall', p.w_wall); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
+  set('w_wall', p.w_wall); set('w_cosine', p.w_cosine); set('w_area', p.w_area); set('w_lloyd', p.w_lloyd); set('w_topo', p.w_topo);
   set('iters', p.iters); set('lr', p.lr);
   set('seed', p.seed);
-  $('rooms').value = p.rooms; $('rooms_v').textContent = fmtVal('rooms', p.rooms);
-  renderRoomAreas();                  // regenerates area_i sliders + resets roomRatios to equal split
-  roomRatios = p.roomRatios.slice();  // override with the preset's per-room weights
-  p.roomRatios.forEach((r, i) => { const el = $('area_' + i); if (el) el.value = r; });
-  refreshRoomReadout();               // recompute share %s from the new roomRatios
+  roomRatios = p.roomRatios.slice();
+  refreshRoomReadout();
   return true;
 }
 
-$('presets').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  [...$('presets').children].forEach(x => x.classList.toggle('active', x === b));
-  mode = b.dataset.mode;
-  applyPreset(mode);  // load this boundary's preset, if it has one
+function activateBoundary(nextMode) {
+  mode = nextMode;
+  document.querySelectorAll('#presets button, #custom-boundaries button').forEach(button => {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  editor.setProgram(null);
+  editingBubbles = false;
+  if (mode === CUSTOM_MODE) roomRatios = customBoundary.ratios;
+  else applyPreset(mode);
+  if(!pendingBoundary){boundaryEditor.cancel();refreshRoomReadout();setButtons();}
+}
+
+function addBoundary(ring) {
+  pendingBoundary = { ring, ratios: roomRatios.slice() };
+  const message = $('boundary-message');
+  message.hidden = false;
+  message.textContent = 'Building boundary…';
+  setButtons();
+  sendBuild('preview', pendingBoundary);
+}
+
+function switchBoundary(nextMode) {
+  activateBoundary(nextMode);
+  boundaryRing = currentProgram()?.boundary ?? null;
+  $('boundary-message').hidden = true;
   stop();
   $('status').textContent = mode + ' · building…';
   sendBuild('preview');
+}
+
+function selectBoundary(e) {
+  const button = e.target.closest('button[data-mode]');
+  if (!button || pendingBoundary) return;
+  switchBoundary(button.dataset.mode);
+  history.replace(designState());
+}
+
+function restoreDesign(state) {
+  if (!state) return;
+  customBoundary = state.custom && structuredClone(state.custom);
+  $('custom-boundaries').hidden = !customBoundary;
+  programs.clear();
+  for (const [m, saved] of state.programs) programs.set(m, BubbleProgram.fromState(saved));
+  switchBoundary(state.mode);
+  editor.setProgram(currentProgram());
+}
+// While a boundary is being sketched, undo and redo step through its points instead.
+const undoDesign = () => {
+  if (openPanel === 'adjust') { if (wallHistory.canUndo) restoreWalls(wallHistory.undo()); }
+  else if (boundaryEditor.active) boundaryEditor.undo();
+  else if (!pendingBoundary) restoreDesign(history.undo());
+};
+const redoDesign = () => {
+  if (openPanel === 'adjust') { if (wallHistory.canRedo) restoreWalls(wallHistory.redo()); }
+  else if (boundaryEditor.active) boundaryEditor.redo();
+  else if (!pendingBoundary) restoreDesign(history.redo());
+};
+$('undo').addEventListener('click', undoDesign);
+$('redo').addEventListener('click', redoDesign);
+// Shortcuts follow the editing rule: they work while the Rooms or Adjustment panel is open, outside text fields.
+window.addEventListener('keydown', e => {
+  if ((openPanel !== 'rooms' && openPanel !== 'adjust') || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  const key = e.key.toLowerCase();
+  if (key !== 'z' && key !== 'y') return;
+  e.preventDefault();
+  if (key === 'y' || e.shiftKey) redoDesign(); else undoDesign();
 });
+$('presets').addEventListener('click', selectBoundary);
+$('custom-boundaries').addEventListener('click', selectBoundary);
 
 // ---------- drawing ----------
-function clearPlan() { pctx.fillStyle = '#fff'; pctx.fillRect(0, 0, CW, CH); }
-
+// Hand one frame to the view. Both wall views apply Point merge and Wall snap to their room outlines.
+// The Voronoi cells and sites still come directly from the optimizer frame.
+// The camera fits the boundary, so switching Raw and Aligned keeps the zoom and pan.
 function drawFrame(f) {
-  clearPlan();
-  // Center the plan in the canvas: the cells tile the whole boundary, so their
-  // bbox is the (stable) plan extent. Center it and scale to ~70% of the square.
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const cell of f.cells) for (const [x, y] of cell.ring) {
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-  }
-  if (minX <= maxX) {
-    fitCx = (minX + maxX) / 2; fitCy = (minY + maxY) / 2;
-    fitS = 0.70 * CW / (Math.max(maxX - minX, maxY - minY) || 1);
-  }
-  // 0) pastel room fills — each cell painted with its room colour (matplotlib
-  //    Accent over white); under the walls + gray cells.
-  for (const cell of f.cells) {
-    pctx.beginPath();
-    cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
-    pctx.closePath();
-    pctx.fillStyle = COLORS[cell.room % COLORS.length];
-    pctx.fill();
-  }
-  // 1) DOUBLE-LINE walls — stroke each room-boundary centerline black at the full
-  //    wall width (2·wallWidth), then white slightly narrower -> two black lines
-  //    with a white interior. The centerlines are CLOSED rings (only joins, no
-  //    caps), and the miter join renders the junctions cleanly.
-  // Wall stroke widths use a FIXED reference scale, not the per-preset fitS, so the
-  // same slider value renders at the same on-screen thickness for every boundary.
-  // (Each preset's plan fills ~70% of the canvas but has a different normalized
-  // bbox, so fitS varies and would make identical settings look thicker/thinner.)
-  // 1.45 ≈ the typical normalized plan extent across the demo presets.
-  const refS = 0.70 * CW / 1.45;
-  const fullPx = Math.max(1, 2 * wallWidth * refS);   // full wall width (2d) in CSS px
-  const lineP = 0.005 * refS;                          // black line thickness (0.005 normalized)
-  const strokeWalls = (style, w) => {
-    if (w <= 0) return;
-    pctx.strokeStyle = style; pctx.lineWidth = w;
-    for (const ring of (f.walls || [])) {
-      pctx.beginPath();
-      ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
-      pctx.closePath();
-      pctx.stroke();
-    }
-  };
-  pctx.lineJoin = 'miter'; pctx.miterLimit = 2; pctx.lineCap = 'butt';
-  strokeWalls('#111', fullPx);                  // outer = full wall width -> two black edges
-  strokeWalls('#fff', fullPx - 2 * lineP);      // inner white -> leaves the two black lines
-  // 2) faint gray Voronoi cells ON TOP — the centerline shows gray (same as the
-  //    cells) between the two black wall lines, plus the room subdivisions.
-  pctx.lineJoin = 'round'; pctx.lineCap = 'round';
-  pctx.strokeStyle = 'rgba(150,150,150,0.55)'; pctx.lineWidth = 0.7;
-  for (const cell of f.cells) {
-    pctx.beginPath();
-    cell.ring.forEach(([x, y], i) => i ? pctx.lineTo(nx(x), ny(y)) : pctx.moveTo(nx(x), ny(y)));
-    pctx.closePath();
-    pctx.stroke();
-  }
-  // 3) sites — tiny faint dots (the Voronoi generators)
-  pctx.fillStyle = 'rgba(0,0,0,0.4)';
-  for (const [x, y] of f.sites) { pctx.beginPath(); pctx.arc(nx(x), ny(y), 1.4, 0, 7); pctx.fill(); }
+  const input=currentProgram()?.snapshot();
+  const color=r=>input?colorForRoomId(input.rooms[r].id):COLORS[r%COLORS.length];
+  const al = boundaryRing ? alignFrame(f) : null;
+  lastAligned = al?.aligned ?? null;
+  const aligned = adjusted ?? lastAligned;
+  const shown = alignedWallsInput.checked ? aligned : al?.raw;
+  const alignedShares = aligned ? roomShares(aligned) : [];
+  if (aligned) refreshAdjustAreas(alignedShares, color, input);
+  let doors=[];
+  if(input&&shown){
+    const result=evaluatePlan(shown,input,DOOR_WIDTH,{finished:runFinished,running});
+    $('program-status').dataset.state=result.state;
+    $('program-status').textContent=result.state==='complete'?'Complete: all room centers and door links satisfied.':
+      result.state==='unmet'?'Unmet: '+result.issues.map(i=>i.message).join(' '):
+      (running?'Optimizing. ':'Ready to run. ')+result.issues.map(i=>i.message).join(' ');
+    if($('show-doors').checked)doors=result.doors;
+  }else{$('program-status').textContent='';delete $('program-status').dataset.state;}
+  // Aligned wall share before and after alignment, kept on the canvas for checks (the panel no longer shows it).
+  if (al) $('plan').dataset.alignedShare = `${Math.round(al.before * 100)}% → ${Math.round(al.after * 100)}%`;
+  // the Voronoi cell lines and sites, over either wall view, each while its View toggle is on
+  const voronoi = {};
+  if ($('show-cells').checked) voronoi.lines = f.cells.map(cell => cell.ring);
+  if ($('show-sites').checked) voronoi.points = f.sites;
+  const names = roomNames(input);
+  const shownShares = shown === aligned ? alignedShares : shown ? roomShares(shown) : [];
+  const rooms = shown
+    ? shown.rooms.map((_, r) => {
+      const id = input?.rooms[r]?.id ?? r + 1;
+      return {
+        rings: roomRings(shown, r),
+        color: color(r),
+        tag: roomTagsInput.checked ? { id, name: names[r] ?? roomLabel(id), share: shareText(shownShares[r]) } : undefined,
+      };
+    })
+    : f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) }));
+  view.draw({
+    ...voronoi,
+    outline: boundaryRing,
+    rooms,
+    walls: shown ? rooms.flatMap(room => room.rings) : f.walls || [],
+    wall: wallWidth,
+    doors,
+  });
   movePlayhead(f.iteration);   // the current-iteration playhead replaces the old iter/loss text
 }
 
@@ -615,10 +1174,11 @@ function drawSparks() {
     }).join(' '));
   }
 }
-// Record one frame's per-term losses (total + the 4 weighted terms) and redraw.
+// Record the weighted loss contributions and redraw.
 function pushLoss(f) {
   hist.total.push(f.loss);
   hist.wall.push(f.wall);
+  hist.cosine.push(f.cosine ?? 0);
   hist.area.push(f.area);
   hist.lloyd.push(f.lloyd);
   hist.topo.push(f.topo);
@@ -668,7 +1228,10 @@ function hidePlayhead() { $('playhead').style.display = 'none'; }
 
 // ---------- run loop ----------
 function stop() {
+  clearTimeout(rebuildTimer);rebuildTimer=0;
   running = false; paused = false;
+  runFinished=false;
+  $('program-status').dataset.state='ready';
   curGen = ++gen;                 // invalidate any in-flight frames from the prior build
   worker.postMessage({ cmd: 'dispose' });
   built = false;
@@ -678,8 +1241,43 @@ function stop() {
 
 // One Run / Pause / Resume toggle (the separate Pause button is merged in here).
 function setButtons() {
-  $('run').textContent = running ? 'Pause' : (paused ? 'Resume' : 'Run');
+  const label = running ? 'Pause' : (paused ? 'Resume' : 'Run');
+  $('run').setAttribute('aria-label', label);   // also its hover name
+  $('run').querySelector('use').setAttribute('href', running ? '#i-pause' : '#i-play');
+  const sketching = boundaryEditor.active || !!pendingBoundary;
+  $('run').disabled=sketching||editingBubbles||!!(currentProgram()&&!roomCount());
+  $('boundary-draw').disabled = !boundaryRing || running || paused || !!pendingBoundary;
+  // walls move only on a plan that holds still
+  $('adjust-message').textContent = running ? 'The plan is still changing. Pause the run to move walls.'
+    : wallMessage || 'Drag a wall or a corner to move it. Click a wall to rotate it by its handle, double-click a wall to add a corner, and press Delete to remove a selected corner.';
+  $('undo').disabled = openPanel === 'adjust' ? !wallHistory.canUndo : boundaryEditor.active ? !boundaryEditor.canUndo : !!pendingBoundary || !history.canUndo;
+  $('redo').disabled = openPanel === 'adjust' ? !wallHistory.canRedo : boundaryEditor.active ? !boundaryEditor.canRedo : !!pendingBoundary || !history.canRedo;
 }
+
+// ---------- toolbars ----------
+// One settings panel at a time: an icon opens its panel, another icon swaps it, the same
+// icon closes it.
+let openPanel = null;
+function showPanel(name) {
+  if (pendingBoundary) return;
+  openPanel = openPanel === name ? null : name;
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('open', p.dataset.panel === openPanel));
+  view.resize();
+  document.querySelectorAll('button[data-open]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.open === openPanel)));
+  // The playhead measures the graph, which has no size while its panel is closed.
+  if (openPanel === 'optimize' && lastFrame) movePlayhead(lastFrame.iteration);
+  editor.setEnabled(openPanel === 'rooms');
+  // Walls are edited on the Aligned plan.
+  if (openPanel === 'adjust' && !alignedWallsInput.checked) {
+    alignedWallsInput.checked = true;
+    redrawFrame();
+  }
+  wallEditor.setEnabled(openPanel === 'adjust');
+  $('bubble-editing').hidden = openPanel !== 'rooms' && openPanel !== 'adjust';
+  $('bubble-editing').querySelector('[role=status]').textContent = openPanel === 'adjust' ? 'Editing Walls' : 'Editing Bubble Diagram';
+  setButtons();
+}
+document.querySelectorAll('button[data-open]').forEach(b => b.addEventListener('click', () => showPanel(b.dataset.open)));
 
 $('run').onclick = () => {
   if (running) {                         // running → pause
@@ -700,15 +1298,7 @@ $('run').onclick = () => {
   $('status').textContent = mode + ' · optimizing…';
 };
 
-$('reset').onclick = () => {
-  stop();
-  clearHist(); drawSparks(); hidePlayhead();
-  $('status').textContent = mode + ' · building…';
-  sendBuild('preview');
-};
-
-fitCanvases();
-clearPlan();
+view.resize();
 applyPreset(mode);  // load the default boundary's preset on first load (same as clicking it)
 $('status').textContent = mode + ' · building…';
 sendBuild('preview');

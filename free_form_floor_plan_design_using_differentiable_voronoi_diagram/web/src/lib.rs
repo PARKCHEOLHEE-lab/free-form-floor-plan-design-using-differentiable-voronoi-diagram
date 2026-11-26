@@ -10,6 +10,7 @@
 use geo::{Area, LineString, MultiPolygon, Polygon, Simplify};
 use serde::Serialize;
 use voronoi_floorplan::loss::LossWeights;
+use voronoi_floorplan::program::RoomProgram;
 use voronoi_floorplan::{grad_local, init, loss, optim::AdamW, shapes, voronoi};
 use wasm_bindgen::prelude::*;
 
@@ -38,12 +39,15 @@ struct Frame {
     iteration: usize,
     /// loss at the sites *before* this step (matches the CLI/tensorboard log)
     loss: f32,
-    /// the four weighted per-term contributions that the demo graphs (they sum
-    /// to `loss`; the demo's bb/cell weights are 0 so those terms are omitted).
+    /// Weighted contributions of the selected wall model and the room program.
+    /// The demo's bb/cell weights remain zero.
     wall: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cosine: Option<f32>,
     area: f32,
     lloyd: f32,
     topo: f32,
+    connection: f32,
     sites: Vec<(f32, f32)>,
     cells: Vec<Cell>,
     /// wall centerlines — the simplified room-boundary rings. The canvas strokes
@@ -63,6 +67,9 @@ pub struct WasmOpt {
     iteration: usize,
     lr_modified: f64,
     iter_to_modify_lr: usize,
+    program: Option<RoomProgram>,
+    seed: u64,
+    initial_lr: f64,
 }
 
 #[wasm_bindgen]
@@ -87,6 +94,7 @@ impl WasmOpt {
         let pts: Vec<(f64, f64)> = boundary_xy.chunks_exact(2).map(|c| (c[0], c[1])).collect();
         let w = LossWeights {
             w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell,
+            ..Default::default()
         };
         WasmOpt::build(normalize(&pts), num_sites, area_ratios.to_vec(), w, seed as u64, lr)
     }
@@ -110,6 +118,7 @@ impl WasmOpt {
         let boundary = shapes::by_name(name)?.polygon();
         let w = LossWeights {
             w_wall, w_area, w_lloyd, w_topo, w_bb, w_cell,
+            ..Default::default()
         };
         Some(WasmOpt::build(boundary, num_sites, area_ratios.to_vec(), w, seed as u64, lr))
     }
@@ -120,6 +129,21 @@ impl WasmOpt {
         serde_wasm_bindgen::to_value(&frame).unwrap()
     }
 
+    /// Install circles as x/y/r triples and dense room-index connection pairs.
+    pub fn set_program(&mut self, circles: &[f64], links: &[u32], door_width: f64) -> Result<(), JsValue> {
+        self.configure_program(circles, links, door_width).map_err(|e| JsValue::from_str(&e))
+    }
+
+    /// Fit the built-in area targets without pinning any sites.
+    pub fn fit_preset_areas(&mut self) -> Result<(), JsValue> {
+        self.configure_preset_areas().map_err(|message| JsValue::from_str(&message))
+    }
+
+    /// Set the raw Cos contribution independently of the L1 wall term.
+    pub fn set_cosine_weight(&mut self, weight: f64) -> Result<(), JsValue> {
+        self.configure_cosine_weight(weight).map_err(|message| JsValue::from_str(&message))
+    }
+
     /// The normalized boundary ring (`[[x,y],...]`) for drawing + canvas fit.
     pub fn boundary(&self) -> JsValue {
         let ring: Vec<(f64, f64)> = self.boundary.exterior().0.iter().map(|p| (p.x, p.y)).collect();
@@ -128,19 +152,58 @@ impl WasmOpt {
 
     /// Current geometry without advancing — for previewing the initial layout.
     pub fn current(&self) -> JsValue {
-        let b = loss::floor_plan_loss(
+        let b = loss::floor_plan_loss_with_program(
             &self.sites,
             &self.boundary,
             &self.target_areas,
             &self.room_indices,
             &self.weights,
             None,
+            self.program.as_ref(),
         );
         serde_wasm_bindgen::to_value(&self.geometry_frame(&b)).unwrap()
     }
 }
 
 impl WasmOpt {
+    fn configure_preset_areas(&mut self) -> Result<(), String> {
+        if self.iteration != 0 || self.program.is_some() {
+            return Err("Fit preset areas before running without drawn rooms.".into());
+        }
+        let initial = init::kmeans_labels(&self.sites, self.target_areas.len().max(1), self.seed);
+        // A preset has no drawn rooms to adjust. When no start has every room in one piece
+        // (a concave boundary can cut a cell in two), keep the KMeans start; the topology
+        // term joins split rooms during the run, as before area fitting.
+        self.room_indices = RoomProgram::fit_automatic_labels(&self.sites, &self.boundary, &initial, &self.target_areas)
+            .unwrap_or(initial);
+        Ok(())
+    }
+
+    fn configure_cosine_weight(&mut self, weight: f64) -> Result<(), String> {
+        if !weight.is_finite() || weight < 0. {
+            return Err("Cos weight must be finite and nonnegative.".into());
+        }
+        self.weights.w_cosine = weight;
+        Ok(())
+    }
+
+    fn configure_program(&mut self, circles: &[f64], links: &[u32], door_width: f64) -> Result<(), String> {
+        if circles.len()%3!=0 || links.len()%2!=0 { return Err("Use complete x/y/r circles and room-index pairs.".into()); }
+        let circles: Vec<[f64;3]> = circles.chunks_exact(3).map(|c|[c[0],c[1],c[2]]).collect();
+        let links: Vec<[usize;2]> = links.chunks_exact(2).map(|c|[c[0] as usize,c[1] as usize]).collect();
+        let mut program = RoomProgram::new(&self.boundary, &circles)?;
+        program.set_connections(&links, door_width)?;
+        let (sites, labels) = program.initialize(&self.boundary, self.sites.len(), self.seed)?;
+        let area = self.boundary.unsigned_area();
+        self.target_areas = program.ratios().iter().map(|r| area*r).collect();
+        self.opt = AdamW::new(sites.len()-program.fixed_count(), self.initial_lr);
+        self.sites = sites;
+        self.room_indices = labels;
+        self.program = Some(program);
+        self.iteration = 0;
+        Ok(())
+    }
+
     fn build(
         boundary: Polygon<f64>,
         num_sites: usize,
@@ -165,6 +228,9 @@ impl WasmOpt {
             // the bundled configs drop the LR to 0.8x at iteration 300
             lr_modified: lr * 0.8,
             iter_to_modify_lr: 300,
+            program: None,
+            seed,
+            initial_lr: lr,
         }
     }
 
@@ -177,16 +243,18 @@ impl WasmOpt {
         // it; its base total is the pre-step loss (what the CLI logs), and its
         // gradients reuse that geometry — ~2.4x faster than the global path and
         // bit-identical to it. (See ../rust grad_local.rs.)
-        let ctx = grad_local::LocalGradContext::new(
+        let ctx = grad_local::LocalGradContext::new_with_program(
             &self.sites,
             &self.boundary,
             &self.target_areas,
             &self.room_indices,
             &self.weights,
+            self.program.as_ref(),
         );
         let pre_step_breakdown = ctx.base_breakdown();
         let grads = ctx.gradients(&self.sites);
-        self.opt.step(&mut self.sites, &grads);
+        let fixed = self.program.as_ref().map_or(0, RoomProgram::fixed_count);
+        self.opt.step(&mut self.sites[fixed..], &grads[fixed..]);
         // geometry AFTER the step (matches the GIF frame-order fix in run.rs),
         // tagged with the pre-step loss breakdown (its .total is what the CLI logs)
         self.geometry_frame(&pre_step_breakdown)
@@ -241,15 +309,22 @@ impl WasmOpt {
             iteration: self.iteration,
             loss: bd.total,
             wall: bd.wall,
+            cosine: (self.weights.w_cosine > 0.).then_some(bd.cosine),
             area: bd.area,
             lloyd: bd.lloyd,
             topo: bd.topo,
+            connection: bd.connection,
             sites: self.sites.iter().map(|s| (s[0], s[1])).collect(),
             cells,
             walls,
         }
     }
 }
+
+#[cfg(test)]
+mod program_tests;
+#[cfg(test)]
+mod wall_shape_tests;
 
 #[cfg(test)]
 mod tests {

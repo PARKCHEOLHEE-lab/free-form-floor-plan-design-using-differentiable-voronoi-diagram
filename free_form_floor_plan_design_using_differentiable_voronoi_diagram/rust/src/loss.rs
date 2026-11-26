@@ -7,6 +7,12 @@
 
 use geo::{Area, LineString, MultiPolygon, Polygon};
 use geo_booleanop::boolean::BooleanOp;
+use crate::walls::nearest_boundary_direction;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static WALL_RINGS_SCORED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Groups the paired cells by room index, mirroring
 /// `rooms_group[room_index].append(cell)` over `zip(cells_sorted, room_indices)`
@@ -57,45 +63,38 @@ pub fn compute_wall_local_loss(
     boundary: &Polygon<f64>,
     w_wall_local: f64,
 ) -> f32 {
+    compute_wall_local_loss_reusing(room_unions, boundary, w_wall_local, |_| None)
+}
+
+pub(crate) fn compute_wall_local_loss_reusing<'a>(
+    room_unions: &[MultiPolygon<f64>],
+    boundary: &Polygon<f64>,
+    w_wall_local: f64,
+    cached_rings: impl Fn(usize) -> Option<&'a [f32]>,
+) -> f32 {
     let mut loss: f64 = 0.0;
-    for room_union in room_unions {
-        for room in room_union {
-            loss += ring_wall_local_sum(room.exterior(), boundary) as f64;
-            for interior in room.interiors() {
-                loss += ring_wall_local_sum(interior, boundary) as f64;
+    for (room, union) in room_unions.iter().enumerate() {
+        // Accumulate rings in the original order even when a room is cached.
+        if let Some(scores) = cached_rings(room) {
+            for &score in scores {
+                loss += score as f64;
+            }
+        } else {
+            for score in local_wall_ring_scores(union, boundary) {
+                loss += score as f64;
             }
         }
     }
     (loss as f32) * (w_wall_local as f32)
 }
 
-/// Unit direction `(cx, cy)` (= cos φ, sin φ) of the boundary segment nearest to
-/// `(mx, my)`, as f32. Computing the unit vector by division — not atan2/cos/sin —
-/// keeps the rotated-L1 below portable f32-exact across platforms (libm trig is
-/// not IEEE-mandated; +,−,×,÷,√ are). At an axis-aligned segment (cx,cy) is exactly
-/// (±1,0)/(0,±1), so the local sum reduces bit-identically to the global wall sum.
-fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32, f32) {
-    let mut best_d2 = f64::INFINITY;
-    let (mut cx, mut cy) = (1.0f32, 0.0f32); // φ = 0 default (no usable segment)
-    for line in boundary.exterior().lines() {
-        let (ax, ay) = (line.start.x, line.start.y);
-        let (ex, ey) = (line.end.x - ax, line.end.y - ay);
-        let len2 = ex * ex + ey * ey;
-        if len2 == 0.0 {
-            continue; // #7: a zero-length segment carries no orientation — skip it
-        }
-        // projection parameter of (mx,my) onto the segment, clamped to [0,1]
-        let t = (((mx - ax) * ex + (my - ay) * ey) / len2).clamp(0.0, 1.0);
-        let (px, py) = (ax + t * ex, ay + t * ey);
-        let d2 = (mx - px) * (mx - px) + (my - py) * (my - py);
-        if d2 < best_d2 {
-            best_d2 = d2;
-            let l = len2.sqrt();
-            cx = (ex / l) as f32;
-            cy = (ey / l) as f32;
-        }
-    }
-    (cx, cy)
+pub(crate) fn local_wall_ring_scores<'a>(
+    union: &'a MultiPolygon<f64>,
+    boundary: &'a Polygon<f64>,
+) -> impl Iterator<Item = f32> + 'a {
+    union.iter()
+        .flat_map(|room| std::iter::once(room.exterior()).chain(room.interiors()))
+        .map(move |ring| ring_wall_local_sum(ring, boundary))
 }
 
 /// `ring_wall_sum` measured in the local boundary frame: each edge vector is
@@ -103,6 +102,8 @@ fn nearest_boundary_direction(mx: f64, my: f64, boundary: &Polygon<f64>) -> (f32
 /// the |Δu| + |Δv| taxicab sum. Mirrors `ring_wall_sum`'s f32-first casting, so
 /// at φ = 0 it is bit-identical to `ring_wall_sum`.
 fn ring_wall_local_sum(ring: &LineString<f64>, boundary: &Polygon<f64>) -> f32 {
+    #[cfg(test)]
+    WALL_RINGS_SCORED.set(WALL_RINGS_SCORED.get() + 1);
     let pts = &ring.0;
     let n = pts.len().saturating_sub(1);
     if n == 0 {
@@ -130,10 +131,25 @@ pub fn compute_area_loss(
     room_indices: &[usize],
     w_area: f64,
 ) -> f32 {
+    area_loss_from_areas(cells_sorted.iter().map(cell_area_for_loss), target_areas, room_indices, w_area)
+}
+
+pub(crate) fn cell_area_for_loss(cell: &Polygon<f64>) -> f64 {
+    #[cfg(test)]
+    count_cell_loss_work(0);
+    cell.unsigned_area()
+}
+
+pub(crate) fn area_loss_from_areas(
+    areas: impl Iterator<Item = f64>,
+    target_areas: &[f64],
+    room_indices: &[usize],
+    w_area: f64,
+) -> f32 {
     // f64 accumulation of shapely-style cell areas per room
     let mut current_areas: Vec<f64> = vec![0.0; target_areas.len()];
-    for (cell, &ri) in cells_sorted.iter().zip(room_indices) {
-        current_areas[ri] += cell.unsigned_area();
+    for (area, &ri) in areas.zip(room_indices) {
+        current_areas[ri] += area;
     }
     // torch.tensor(...) casts both vectors to f32
     let mut sum: f32 = 0.0;
@@ -144,6 +160,18 @@ pub fn compute_area_loss(
     sum * sum * (w_area as f32)
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CELL_LOSS_WORK: std::cell::Cell<[usize; 2]> = const { std::cell::Cell::new([0; 2]) };
+}
+
+#[cfg(test)]
+fn count_cell_loss_work(term: usize) {
+    let mut counts = CELL_LOSS_WORK.get();
+    counts[term] += 1;
+    CELL_LOSS_WORK.set(counts);
+}
+
 /// `compute_lloyd_loss`: zip(sites, cells) truncates to the shorter list;
 /// empty cells are filtered; centroids and sites materialize as f32 tensors;
 /// per-row L2 norm and the sum run in f32.
@@ -152,17 +180,27 @@ pub fn compute_lloyd_loss(
     sites: &[[f32; 2]],
     w_lloyd: f64,
 ) -> f32 {
+    let distances = sites.iter().zip(cells_sorted).filter_map(|(site, cell)| {
+        lloyd_cell_distance(cell, site)
+    });
+    lloyd_loss_from_distances(distances, w_lloyd)
+}
+
+pub(crate) fn lloyd_cell_distance(cell: &Polygon<f64>, site: &[f32; 2]) -> Option<f32> {
     use geo::Centroid;
-    let mut sum: f32 = 0.0;
-    for (site, cell) in sites.iter().zip(cells_sorted) {
-        if crate::voronoi::is_empty_cell(cell) {
-            continue;
-        }
-        let c = cell.centroid().expect("nonempty cell has a centroid");
-        let dx = (c.x() as f32) - site[0];
-        let dy = (c.y() as f32) - site[1];
-        sum += (dx * dx + dy * dy).sqrt();
+    #[cfg(test)]
+    count_cell_loss_work(1);
+    if crate::voronoi::is_empty_cell(cell) {
+        return None;
     }
+    let c = cell.centroid().expect("nonempty cell has a centroid");
+    let dx = (c.x() as f32) - site[0];
+    let dy = (c.y() as f32) - site[1];
+    Some((dx * dx + dy * dy).sqrt())
+}
+
+pub(crate) fn lloyd_loss_from_distances(distances: impl Iterator<Item = f32>, w_lloyd: f64) -> f32 {
+    let sum = distances.fold(0.0_f32, |sum, distance| sum + distance);
     // loss_lloyd **= 2; loss_lloyd *= w_lloyd  (both f32)
     sum * sum * (w_lloyd as f32)
 }
@@ -244,6 +282,7 @@ pub fn compute_cell_area_loss(cells_sorted: &[Polygon<f64>], w_cell: f64) -> f32
 #[derive(Default)]
 pub struct LossWeights {
     pub w_wall: f64,
+    pub w_cosine: f64,
     pub w_area: f64,
     pub w_lloyd: f64,
     pub w_topo: f64,
@@ -255,23 +294,60 @@ pub struct LossWeights {
 pub struct LossBreakdown {
     pub total: f32,
     pub wall: f32,
+    pub cosine: f32,
     pub area: f32,
     pub lloyd: f32,
     pub topo: f32,
     pub bb: f32,
     pub cell: f32,
+    pub connection: f32,
+}
+
+/// The L1 wall term, the Cos term, and requested doors, with one shared-cell graph for Cos and doors.
+pub(crate) fn compute_wall_terms(
+    groups: &[Vec<&Polygon<f64>>],
+    boundary: &Polygon<f64>,
+    w: &LossWeights,
+    program: Option<&crate::program::RoomProgram>,
+    shared: Option<&crate::walls::SharedWalls>,
+    wall_shape: Option<&crate::wall_shape::WallShapeCache<'_>>,
+    legacy_wall: impl FnOnce() -> f32,
+) -> (f32, f32, f32) {
+    let score_direction = w.w_cosine > 0.;
+    let generated = if shared.is_none()
+        && (score_direction || program.is_some_and(|p| p.has_connections()))
+    {
+        Some(crate::walls::SharedWalls::from_cells(groups))
+    } else {
+        None
+    };
+    let shared = shared.or(generated.as_ref());
+    let cosine = if score_direction {
+        let edges = shared.unwrap();
+        let direction = match wall_shape {
+            Some(cache) => cache.evaluate(edges),
+            None => crate::wall_shape::evaluate_shared(edges, boundary),
+        };
+        (direction as f32) * (w.w_cosine as f32)
+    } else {
+        0.
+    };
+    let wall = if w.w_wall <= 0. { 0. } else { legacy_wall() };
+    let connection=if let (Some(p),Some(edges))=(program,shared){p.connection_loss_cells(groups,edges)}else{0.};
+    (wall, cosine, connection)
 }
 
 /// `FloorPlanLoss.forward`: builds the cell geometry, groups rooms, computes
 /// each component only when its weight is positive (Python's `if w > 0`
 /// guards), and sums the six f32 scalars left to right.
-pub fn floor_plan_loss(
+pub fn floor_plan_loss_with_program(
     sites: &[[f32; 2]],
     boundary: &Polygon<f64>,
     target_areas: &[f64],
     room_indices: &[usize],
     w: &LossWeights,
     hint: Option<&crate::voronoi::GeosOrderHint>,
+    program: Option<&crate::program::RoomProgram>,
 ) -> LossBreakdown {
     let geom = crate::voronoi::compute_cells(sites, boundary, hint);
     let groups = rooms_group(&geom.cells_sorted, room_indices);
@@ -287,13 +363,8 @@ pub fn floor_plan_loss(
         Vec::new()
     };
 
-    // The wall term is the nearest-boundary alignment loss (rotated-L1). On an
-    // axis-aligned boundary it reduces bit-exactly to the plain taxicab length.
-    let wall = if w.w_wall > 0.0 {
-        compute_wall_local_loss(&unions, boundary, w.w_wall)
-    } else {
-        0.0
-    };
+    let legacy_wall = || compute_wall_local_loss(&unions, boundary, w.w_wall);
+    let (wall,cosine,connection) = compute_wall_terms(&groups,boundary,w,program,None,None,legacy_wall);
     let area = if w.w_area > 0.0 {
         compute_area_loss(&geom.cells_sorted, target_areas, room_indices, w.w_area)
     } else {
@@ -320,17 +391,27 @@ pub fn floor_plan_loss(
         0.0
     };
     // loss = loss_wall + loss_area + loss_lloyd + loss_topo + loss_bb + loss_cell
-    let total = wall + area + lloyd + topo + bb + cell;
+    let walls = if w.w_cosine > 0. { wall + cosine } else { wall };
+    let total = walls + area + lloyd + topo + bb + cell + connection;
     LossBreakdown {
         total,
         wall,
+        cosine,
         area,
         lloyd,
         topo,
         bb,
         cell,
+        connection,
     }
 }
+
+/// The legacy loss API keeps exactly the same terms when no program is supplied.
+pub fn floor_plan_loss(
+    sites: &[[f32; 2]], boundary: &Polygon<f64>, target_areas: &[f64],
+    room_indices: &[usize], w: &LossWeights,
+    hint: Option<&crate::voronoi::GeosOrderHint>,
+) -> LossBreakdown { floor_plan_loss_with_program(sites, boundary, target_areas, room_indices, w, hint, None) }
 
 #[cfg(test)]
 mod wall_local_tests {

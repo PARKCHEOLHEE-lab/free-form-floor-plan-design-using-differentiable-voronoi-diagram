@@ -17,11 +17,19 @@
 //! Python.
 
 use crate::loss::{
-    compute_area_loss, compute_bb_loss, compute_cell_area_loss, compute_lloyd_loss,
-    compute_topology_loss, compute_wall_local_loss, rooms_group, LossBreakdown, LossWeights,
+    area_loss_from_areas, cell_area_for_loss, compute_bb_loss, compute_cell_area_loss,
+    compute_topology_loss, compute_wall_terms, rooms_group, LossBreakdown, LossWeights,
+    compute_wall_local_loss_reusing, lloyd_cell_distance, lloyd_loss_from_distances, local_wall_ring_scores,
 };
-use crate::voronoi::{compute_cells, site_neighbors};
+use crate::voronoi::compute_cells;
+use crate::wall_shape::WallShapeCache;
 use geo::{MultiPolygon, Polygon};
+use crate::program::RoomProgram;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CELL_WORKSPACES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// The six per-term loss components from already-built geometry, mirroring
 /// `floor_plan_loss`'s guards and summation order so the result is identical.
@@ -29,36 +37,22 @@ fn breakdown_from(
     cells: &[Polygon<f64>],
     groups: &[Vec<&Polygon<f64>>],
     unions: &[MultiPolygon<f64>],
-    sites: &[[f32; 2]],
-    target_areas: &[f64],
-    room_indices: &[usize],
+    area: f32,
+    lloyd: f32,
     w: &LossWeights,
     boundary: &Polygon<f64>,
+    program: Option<&RoomProgram>,
+    shared: Option<&crate::walls::SharedWalls>,
+    wall_shape: Option<&WallShapeCache<'_>>,
+    legacy_wall: impl FnOnce() -> f32,
 ) -> LossBreakdown {
-    let wall = if w.w_wall > 0.0 { compute_wall_local_loss(unions, boundary, w.w_wall) } else { 0.0 };
-    let area = if w.w_area > 0.0 { compute_area_loss(cells, target_areas, room_indices, w.w_area) } else { 0.0 };
-    let lloyd = if w.w_lloyd > 0.0 { compute_lloyd_loss(cells, sites, w.w_lloyd) } else { 0.0 };
+    let (wall,cosine,connection) = compute_wall_terms(groups,boundary,w,program,shared,wall_shape,legacy_wall);
     let topo = if w.w_topo > 0.0 { compute_topology_loss(groups, unions, w.w_topo) } else { 0.0 };
     let bb = if w.w_bb > 0.0 { compute_bb_loss(unions, w.w_bb) } else { 0.0 };
     let cell = if w.w_cell > 0.0 { compute_cell_area_loss(cells, w.w_cell) } else { 0.0 };
-    let total = wall + area + lloyd + topo + bb + cell;
-    LossBreakdown { total, wall, area, lloyd, topo, bb, cell }
-}
-
-/// Sum the six loss components from already-built geometry. Thin wrapper over
-/// `breakdown_from` — the hot finite-difference path only needs the scalar
-/// total, and `.total` uses the same left-to-right sum so it stays identical.
-fn total_from(
-    cells: &[Polygon<f64>],
-    groups: &[Vec<&Polygon<f64>>],
-    unions: &[MultiPolygon<f64>],
-    sites: &[[f32; 2]],
-    target_areas: &[f64],
-    room_indices: &[usize],
-    w: &LossWeights,
-    boundary: &Polygon<f64>,
-) -> f32 {
-    breakdown_from(cells, groups, unions, sites, target_areas, room_indices, w, boundary).total
+    let walls = if w.w_cosine > 0. { wall + cosine } else { wall };
+    let total = walls + area + lloyd + topo + bb + cell + connection;
+    LossBreakdown { total, wall, cosine, area, lloyd, topo, bb, cell, connection }
 }
 
 /// Per-room boolean union for the demo path, via geo's i_overlay `unary_union`.
@@ -91,12 +85,20 @@ pub struct LocalGradContext<'a> {
     target_areas: &'a [f64],
     room_indices: &'a [usize],
     w: &'a LossWeights,
-    /// Voronoi neighbor site indices per site (stable under a 1e-6 perturbation).
-    neighbors: Vec<Vec<usize>>,
+    program: Option<&'a RoomProgram>,
+    /// Raw geometry detects newly created neighbors at degenerate diagrams too.
+    base_raw: Vec<Polygon<f64>>,
+    base_raw_vertices: crate::voronoi::VertexWelder,
+    base_vertices: crate::voronoi::VertexWelder,
+    shared_cells: Option<crate::walls::SharedWallCells>,
+    wall_shape: Option<WallShapeCache<'a>>,
+    wall_rings: Option<Vec<Vec<f32>>>,
     /// Base clipped cells (site order) and per-room unions, reused for the
     /// cells/rooms a single-site perturbation does not touch.
     base_cells: Vec<Polygon<f64>>,
     base_unions: Vec<MultiPolygon<f64>>,
+    base_cell_areas: Option<Vec<f64>>,
+    base_lloyd_distances: Option<Vec<Option<f32>>>,
     n_rooms: usize,
     /// Per-term loss at the base (unperturbed) sites. `base_total()` reads its
     /// `.total`; the per-term fields feed the demo's per-term loss graphs.
@@ -110,11 +112,28 @@ impl<'a> LocalGradContext<'a> {
         target_areas: &'a [f64],
         room_indices: &'a [usize],
         w: &'a LossWeights,
+    ) -> Self { Self::new_with_program(sites,boundary,target_areas,room_indices,w,None) }
+
+    pub fn new_with_program(
+        sites: &[[f32; 2]], boundary: &'a Polygon<f64>, target_areas: &'a [f64],
+        room_indices: &'a [usize], w: &'a LossWeights, program: Option<&'a RoomProgram>,
     ) -> Self {
         let sites_f64: Vec<[f64; 2]> = sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
         let base_cells = compute_cells(sites, boundary, None).cells_sorted;
-        let need_unions = w.w_wall > 0.0 || w.w_topo > 0.0 || w.w_bb > 0.0;
-        let (n_rooms, base_unions, base_breakdown) = {
+        let base_cell_areas: Option<Vec<_>> = (w.w_area > 0.0)
+            .then(|| base_cells.iter().map(cell_area_for_loss).collect());
+        let base_lloyd_distances: Option<Vec<_>> = (w.w_lloyd > 0.0)
+            .then(|| base_cells.iter().zip(sites).map(|(cell, site)| lloyd_cell_distance(cell, site)).collect());
+        let area = base_cell_areas.as_ref().map_or(0.0, |areas| {
+            area_loss_from_areas(areas.iter().copied(), target_areas, room_indices, w.w_area)
+        });
+        let lloyd = base_lloyd_distances.as_ref().map_or(0.0, |distances| {
+            lloyd_loss_from_distances(distances.iter().copied().flatten(), w.w_lloyd)
+        });
+        let base_vertices=crate::voronoi::VertexWelder::for_cells(&base_cells);
+        let score_legacy_wall = w.w_wall > 0.;
+        let need_unions = score_legacy_wall || w.w_topo > 0.0 || w.w_bb > 0.0;
+        let (n_rooms, base_unions, base_breakdown, shared_cells, wall_shape, wall_rings) = {
             let groups = rooms_group(&base_cells, room_indices);
             let n_rooms = groups.len();
             // Edge-cancellation union (see module docs): the base per-room unions
@@ -124,11 +143,26 @@ impl<'a> LocalGradContext<'a> {
             } else {
                 Vec::new()
             };
-            let bd = breakdown_from(&base_cells, &groups, &unions, sites, target_areas, room_indices, w, boundary);
-            (n_rooms, unions, bd)
+            let score_direction = w.w_cosine > 0.;
+            let shared_cells = if score_direction || program.is_some_and(|p| p.has_connections()) {
+                Some(crate::walls::SharedWallCells::new(&base_cells, room_indices))
+            } else {
+                None
+            };
+            let shared = shared_cells.as_ref().map(|cells| cells.snapshot());
+            let wall_shape = score_direction.then(|| WallShapeCache::new(shared.as_ref().unwrap(), boundary));
+            let wall_rings: Option<Vec<Vec<f32>>> = score_legacy_wall.then(|| {
+                unions.iter().map(|union| local_wall_ring_scores(union, boundary).collect()).collect()
+            });
+            let legacy_wall = || compute_wall_local_loss_reusing(&unions, boundary, w.w_wall, |room| {
+                wall_rings.as_ref().map(|rings| rings[room].as_slice())
+            });
+            let bd = breakdown_from(&base_cells, &groups, &unions, area, lloyd, w, boundary, program, shared.as_ref(), wall_shape.as_ref(), legacy_wall);
+            (n_rooms, unions, bd, shared_cells, wall_shape, wall_rings)
         };
-        let neighbors = site_neighbors(&sites_f64, boundary);
-        LocalGradContext { boundary, target_areas, room_indices, w, neighbors, base_cells, base_unions, n_rooms, base_breakdown }
+        let base_raw = crate::voronoi::raw_cells_per_site(&sites_f64, boundary);
+        let base_raw_vertices=crate::voronoi::VertexWelder::for_cells(&base_raw);
+        LocalGradContext { boundary, target_areas, room_indices, w, program, base_raw, base_raw_vertices, base_vertices, shared_cells, wall_shape, wall_rings, base_cells, base_unions, base_cell_areas, base_lloyd_distances, n_rooms, base_breakdown }
     }
 
     /// Total loss at the base (unperturbed) sites — must equal the global
@@ -149,15 +183,16 @@ impl<'a> LocalGradContext<'a> {
     pub fn gradients(&self, sites: &[[f32; 2]]) -> Vec<[f32; 2]> {
         const EPS: f32 = 1e-6;
         let mut buf = sites.to_vec();
+        let mut cells = self.cell_workspace();
         (0..sites.len())
             .map(|i| {
                 let mut g = [0.0f32; 2];
                 for j in 0..2 {
                     let orig = sites[i][j];
                     buf[i][j] = orig + EPS;
-                    let loss_pos = self.local_total(&buf, i);
+                    let loss_pos = self.local_total_in(&buf, i, &mut cells);
                     buf[i][j] = orig - EPS;
-                    let loss_neg = self.local_total(&buf, i);
+                    let loss_neg = self.local_total_in(&buf, i, &mut cells);
                     buf[i][j] = orig;
                     g[j] = (loss_pos - loss_neg) / (2.0 * EPS);
                 }
@@ -172,34 +207,33 @@ impl<'a> LocalGradContext<'a> {
     /// them serially. Bitwise identical to `gradients` — each (site, axis)
     /// evaluation depends only on that single perturbed coordinate.
     pub fn gradients_par(&self, sites: &[[f32; 2]]) -> Vec<[f32; 2]> {
-        const EPS: f32 = 1e-6;
-        // Each (site, axis) evaluation is independent; give every task its own
-        // scratch copy so concurrent perturbations cannot race. The per-index
-        // arithmetic is identical to `gradients` (serial reuses one scratch and
-        // restores it after each axis, so its scratch always equals `sites` at
-        // the start of a site too), hence the result is bitwise identical.
-        let one = |i: usize| -> [f32; 2] {
-            let mut buf = sites.to_vec();
-            let mut g = [0.0f32; 2];
-            for j in 0..2 {
-                let orig = sites[i][j];
-                buf[i][j] = orig + EPS;
-                let loss_pos = self.local_total(&buf, i);
-                buf[i][j] = orig - EPS;
-                let loss_neg = self.local_total(&buf, i);
-                buf[i][j] = orig;
-                g[j] = (loss_pos - loss_neg) / (2.0 * EPS);
-            }
-            g
-        };
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.gradients(sites)
+        }
         #[cfg(feature = "parallel")]
         {
             use rayon::prelude::*;
-            (0..sites.len()).into_par_iter().map(one).collect()
-        }
-        #[cfg(not(feature = "parallel"))]
-        {
-            (0..sites.len()).map(one).collect()
+            const EPS: f32 = 1e-6;
+            // Each parallel task owns its scratch cells and restores them
+            // between evaluations, just as the serial path does.
+            (0..sites.len())
+                .into_par_iter()
+                .map_init(|| self.cell_workspace(), |cells, i| {
+                    let mut buf = sites.to_vec();
+                    let mut g = [0.0f32; 2];
+                    for j in 0..2 {
+                        let orig = sites[i][j];
+                        buf[i][j] = orig + EPS;
+                        let loss_pos = self.local_total_in(&buf, i, cells);
+                        buf[i][j] = orig - EPS;
+                        let loss_neg = self.local_total_in(&buf, i, cells);
+                        buf[i][j] = orig;
+                        g[j] = (loss_pos - loss_neg) / (2.0 * EPS);
+                    }
+                    g
+                })
+                .collect()
         }
     }
 
@@ -209,13 +243,11 @@ impl<'a> LocalGradContext<'a> {
     /// those sites at the same perturbed configuration.
     pub fn affected_cells(&self, perturbed_sites: &[[f32; 2]], i: usize) -> Vec<(usize, Polygon<f64>)> {
         let pert_f64: Vec<[f64; 2]> = perturbed_sites.iter().map(|&[x, y]| [x as f64, y as f64]).collect();
-        let raw = crate::voronoi::raw_cells_per_site(&pert_f64, self.boundary);
-        let mut affected = Vec::with_capacity(self.neighbors[i].len() + 1);
-        affected.push(i);
-        affected.extend(self.neighbors[i].iter().copied());
-        affected
+        // A perturbation can flip a Delaunay diagonal. Compare the raw cells
+        // before allocating polygons so new neighbors cannot retain stale geometry.
+        crate::voronoi::affected_raw_cells(&pert_f64, self.boundary, &self.base_raw, &self.base_raw_vertices, i)
             .into_iter()
-            .map(|j| {
+            .map(|(j, raw)| {
                 // Trivial accept: a cell fully inside the boundary is unchanged
                 // by clipping (cell ∩ boundary == cell), so skip the boolean
                 // intersection — ~half of all affected-cell clips qualify. The
@@ -225,11 +257,11 @@ impl<'a> LocalGradContext<'a> {
                 // so a mismatched cell would not dissolve shared edges. The predicate is
                 // sound (never a false accept), so this only drops identity work.
                 // (Demo path only; the exact CLI path keeps clip_cell.)
-                let cell = if crate::voronoi::cell_inside_boundary(&raw[j], self.boundary) {
+                let cell = if crate::voronoi::cell_inside_boundary(&raw, self.boundary) {
                     use geo::orient::{Direction, Orient};
-                    raw[j].orient(Direction::Default)
+                    raw.orient(Direction::Default)
                 } else {
-                    crate::voronoi::clip_cell(&raw[j], self.boundary, pert_f64[j]).0
+                    crate::voronoi::clip_cell(&raw, self.boundary, pert_f64[j]).0
                 };
                 (j, cell)
             })
@@ -242,19 +274,35 @@ impl<'a> LocalGradContext<'a> {
     /// no affected cell. Must match the global `floor_plan_loss` at the same
     /// configuration.
     pub fn local_total(&self, perturbed_sites: &[[f32; 2]], i: usize) -> f32 {
-        let affected = self.affected_cells(perturbed_sites, i);
-        let mut cells = self.base_cells.clone();
-        let mut affected_rooms = vec![false; self.n_rooms];
-        for (j, cell) in affected {
-            affected_rooms[self.room_indices[j]] = true;
-            cells[j] = cell;
-        }
-        // No snap: room_union (i_overlay) nodes shared/twin vertices internally,
-        // so the patched cells need not be pre-welded (the old edge-cancellation
-        // union required bitwise-shared edges and a snap pass; i_overlay does not).
-        let groups = rooms_group(&cells, self.room_indices);
+        self.local_total_in(perturbed_sites, i, &mut self.cell_workspace())
+    }
 
-        let need_unions = self.w.w_wall > 0.0 || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
+    fn cell_workspace(&self) -> Vec<Polygon<f64>> {
+        #[cfg(test)]
+        CELL_WORKSPACES_BUILT.set(CELL_WORKSPACES_BUILT.get() + 1);
+        self.base_cells.clone()
+    }
+
+    fn local_total_in(
+        &self,
+        perturbed_sites: &[[f32; 2]],
+        i: usize,
+        cells: &mut [Polygon<f64>],
+    ) -> f32 {
+        let mut affected = self.affected_cells(perturbed_sites, i);
+        let mut affected_rooms = vec![false; self.n_rooms];
+        let mut vertices=crate::voronoi::VertexWelder::default();
+        let mut changed=Vec::with_capacity(affected.len());
+        for &mut (j, ref mut cell) in &mut affected {
+            crate::voronoi::snap_cells_using(std::slice::from_mut(cell),&mut vertices,Some(&self.base_vertices));
+            affected_rooms[self.room_indices[j]] = true;
+            std::mem::swap(&mut cells[j], cell);
+            changed.push(j);
+        }
+        // Only changed cells were welded. Cached room geometry remains valid.
+        let groups = rooms_group(cells, self.room_indices);
+
+        let need_unions = self.wall_rings.is_some() || self.w.w_topo > 0.0 || self.w.w_bb > 0.0;
         let unions: Vec<MultiPolygon<f64>> = if need_unions {
             (0..self.n_rooms)
                 .map(|r| {
@@ -268,8 +316,37 @@ impl<'a> LocalGradContext<'a> {
         } else {
             Vec::new()
         };
-        total_from(&cells, &groups, &unions, perturbed_sites, self.target_areas, self.room_indices, self.w, self.boundary)
+        let shared=self.shared_cells.as_ref().map(|c|c.updated(cells,&changed));
+        let legacy_wall = || compute_wall_local_loss_reusing(&unions, self.boundary, self.w.w_wall, |room| {
+            self.wall_rings.as_ref().filter(|_| !affected_rooms[room]).map(|rings| rings[room].as_slice())
+        });
+        let area = self.base_cell_areas.as_ref().map_or(0.0, |saved| {
+            let mut changed_here = changed_sites_in_order(&changed);
+            let areas = cells.iter().zip(saved).enumerate().map(|(i, (cell, &previous))| {
+                if changed_here(i) { cell_area_for_loss(cell) } else { previous }
+            });
+            area_loss_from_areas(areas, self.target_areas, self.room_indices, self.w.w_area)
+        });
+        let lloyd = self.base_lloyd_distances.as_ref().map_or(0.0, |saved| {
+            let mut changed_here = changed_sites_in_order(&changed);
+            let distances = cells.iter().zip(perturbed_sites).zip(saved).enumerate()
+                .filter_map(|(i, ((cell, site), &previous))| {
+                    if changed_here(i) { lloyd_cell_distance(cell, site) } else { previous }
+                });
+            lloyd_loss_from_distances(distances, self.w.w_lloyd)
+        });
+        let total = breakdown_from(cells, &groups, &unions, area, lloyd, self.w, self.boundary, self.program, shared.as_ref(), self.wall_shape.as_ref(), legacy_wall).total;
+        for (site, original) in affected {
+            cells[site] = original;
+        }
+        total
     }
+}
+
+// Affected cells arrive in site order, matching the two loss folds.
+fn changed_sites_in_order(changed: &[usize]) -> impl FnMut(usize) -> bool + '_ {
+    let mut next = changed.iter().copied().peekable();
+    move |site| next.next_if(|index| *index == site).is_some()
 }
 
 #[cfg(test)]
@@ -277,6 +354,45 @@ mod tests {
     use super::*;
     use crate::loss::floor_plan_loss;
     use crate::{init, shapes};
+
+    #[test]
+    fn materializes_raw_polygons_only_for_affected_cells() {
+        use crate::voronoi::RAW_POLYGONS_BUILT;
+
+        let boundary = shapes::by_name("shape_e").unwrap().polygon();
+        let sites = init::initialize_sites(&boundary, 80, 4971);
+        let labels = init::kmeans_labels(&sites, 6, 4971);
+        let targets = [0.2; 6];
+        let weights = LossWeights::default();
+        let context = LocalGradContext::new(&sites, &boundary, &targets, &labels, &weights);
+        for offset in [0., 1e-6, -1e-6] {
+            let mut moved = sites.clone();
+            moved[11][0] += offset;
+            RAW_POLYGONS_BUILT.set(0);
+            let affected = context.affected_cells(&moved, 11);
+            assert!(affected.iter().any(|(site, _)| *site == 11));
+            assert!(affected.len() < sites.len(), "the fixture must leave raw cells unchanged");
+            assert_eq!(RAW_POLYGONS_BUILT.get(), affected.len(),
+                "unchanged raw rings do not need owned polygons for one perturbation");
+        }
+    }
+
+    #[test]
+    fn recomputes_area_and_lloyd_only_for_affected_cells() {
+        use crate::loss::CELL_LOSS_WORK;
+        let (sites, boundary, target_areas, room_indices, _) = shape_a_setup();
+        let weights = LossWeights { w_area: 1., w_lloyd: 1., ..Default::default() };
+        let context = LocalGradContext::new(&sites, &boundary, &target_areas, &room_indices, &weights);
+        let mut moved = sites.clone();
+        moved[11][0] += 1e-6;
+        let affected = context.affected_cells(&moved, 11);
+        assert!(affected.len() > 1 && affected.len() < sites.len());
+        CELL_LOSS_WORK.set([0; 2]);
+        let actual = context.local_total(&moved, 11);
+        assert!(actual.is_finite() && actual > 0.);
+        assert_eq!(CELL_LOSS_WORK.get(), [affected.len(); 2],
+            "reuse area and centroid distance for unchanged cells");
+    }
 
     fn shape_a_setup() -> (Vec<[f32; 2]>, Polygon<f64>, Vec<f64>, Vec<usize>, LossWeights) {
         use geo::Area;
@@ -507,4 +623,31 @@ mod tests {
             global
         );
     }
+    #[test]
+    fn cached_shared_terms_match_full_six_room_objective(){
+        use geo::Area;
+        let fixture:serde_json::Value=serde_json::from_str(include_str!("../../web-tests/fixtures/room-program-six.json")).unwrap();
+        let circles:Vec<[f64;3]>=fixture["rooms"].as_array().unwrap().iter().map(|r|[r["center"][0].as_f64().unwrap(),r["center"][1].as_f64().unwrap(),r["radius"].as_f64().unwrap()]).collect();
+        let b=shapes::by_name("shape_e").unwrap().polygon();let mut p=RoomProgram::new(&b,&circles).unwrap();p.set_connections(&[[0,1],[2,4]],0.1).unwrap();
+        let (sites,labels)=p.initialize(&b,80,4971).unwrap();let targets:Vec<_>=p.ratios().iter().map(|r|r*b.unsigned_area()).collect();
+        let w=LossWeights{w_wall:1./13.,w_cosine:1.,w_area:0.15/0.49,w_lloyd:0.01/5.3,w_topo:0.2/4.,..Default::default()};
+        let ctx=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p));
+        let mut uncached=LocalGradContext::new_with_program(&sites,&b,&targets,&labels,&w,Some(&p));
+        uncached.shared_cells=None;
+        uncached.wall_shape=None;
+        let full=crate::loss::floor_plan_loss_with_program(&sites,&b,&targets,&labels,&w,None,Some(&p));
+        assert!((ctx.base_total()-full.total).abs()<1e-4);
+        for i in 0..sites.len(){for axis in 0..2{for sign in [-1.,1.]{
+            let mut moved=sites.clone();moved[i][axis]+=sign*1e-6;
+            let full=crate::loss::floor_plan_loss_with_program(&moved,&b,&targets,&labels,&w,None,Some(&p));
+            let local=ctx.local_total(&moved,i);
+            assert_eq!(local.to_bits(),uncached.local_total(&moved,i).to_bits(),"site{i} axis{axis} sign{sign}: cached ownership must preserve each finite-difference sample exactly");
+            assert!((local-full.total).abs()<1e-4,"site{i} axis{axis} sign{sign} must preserve the full wall/door objective");
+        }}}
+        let mut moved=sites.clone();moved[11][0]+=1e-3;
+        let full=crate::loss::floor_plan_loss_with_program(&moved,&b,&targets,&labels,&w,None,Some(&p));
+        assert!((ctx.local_total(&moved,11)-full.total).abs()<1e-4,"incremental evaluation must follow a real geometric change too");
+        assert!((full.total-ctx.base_total()).abs()>1e-4,"the probe must exercise an actual objective change");
+    }
+
 }
