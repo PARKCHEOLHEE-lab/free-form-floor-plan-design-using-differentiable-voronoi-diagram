@@ -112,13 +112,14 @@ test("adjustment: with wall edits, a control that rebuilds the walls asks first;
         assert.equal(await hasEdits(page), true);
 
         // a room edit on the plan asks; Cancel draws nothing
-        const rooms = await page.locator("#rooms_v").textContent();
+        const entries = page.locator("#roomareas .room-entry");
+        const rooms = await entries.count();
         await page.mouse.move(560, 300);
         await page.mouse.down();
         assert.equal(await dialogOpen(page), true, "pressing on the plan in Rooms asks first");
         await page.mouse.up();
         await page.click("#discard-walls button[value=cancel]");
-        assert.equal(await page.locator("#rooms_v").textContent(), rooms, "Cancel draws no room");
+        assert.equal(await entries.count(), rooms, "Cancel draws no room");
 
         // a slider that rebuilds asks, by keyboard and by mouse; Cancel keeps its value and the edits
         await page.click("button[data-open=optimize]");

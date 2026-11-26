@@ -24,6 +24,8 @@ test('room circles draw move and resize on the plan while camera actions preserv
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
         await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ready'));
+        const countLabel = page.locator('.panel[data-panel=rooms] > .row > label').filter({hasText: /^Rooms$/});
+        assert.equal(await countLabel.count(), 0, 'the panel omits the separate room count');
         await page.click('.gizmo [data-axis="+z"]');
         await page.setViewportSize({width:1146,height:820});await page.waitForTimeout(200);
         await page.setViewportSize({width:1145,height:820});await page.waitForTimeout(200);
@@ -46,7 +48,7 @@ test('room circles draw move and resize on the plan while camera actions preserv
         let p=await middle(first);
         assert.ok(Math.hypot(p[0]-600,p[1]-450)<3,'the drawn center stays under the original pointer');
         assert.equal((await labels(page))[0].ratio,1);
-        assert.equal(await page.locator('#rooms_v').textContent(),'1');
+        assert.equal(await page.locator('#roomareas .room-entry').count(),1);
         assert.equal(await page.locator('input#rooms,input[id^=area_]').count(),0,'circle editing replaces the old count and area sliders');
         const original=(await labels(page))[0];
         await drag(page,p,[p[0]+20,p[1]-20]);
@@ -206,7 +208,7 @@ test('linking and deleting circles updates visible door links and keeps the rema
         assert.equal(await page.locator(`.room-row[data-room-id="${rooms[1].id}"] .sw`).evaluate(e=>getComputedStyle(e).backgroundColor),remainingColor);
         await page.mouse.click(...await middle(page.locator('.bubble-label:not(.draft)')));await page.keyboard.press('Delete');
         assert.equal((await labels(page)).length,0);assert.equal(await page.locator('#run').isDisabled(),true);
-        assert.equal(await page.locator('#rooms_v').textContent(),'0');
+        assert.equal(await page.locator('#roomareas .room-entry').count(),0);
         if(process.env.VORONOI_COVERAGE_DIR){
             const data=(await page.coverage.stopJSCoverage()).filter(e=>e.url===url||e.url.includes('/plan/'));
             await mkdir(process.env.VORONOI_COVERAGE_DIR,{recursive:true});
@@ -298,7 +300,7 @@ test('bubble diagram: the undo shortcut and the Undo button step back through ad
         await page.click('button[data-open=rooms]');await page.click('button[data-mode=shape_a]');
         await page.waitForFunction(()=>{const s=document.querySelector('#status').textContent;return s.startsWith('shape_a')&&s.includes('ready');});
         await page.click('.gizmo [data-axis="+z"]');
-        const presetRooms=await page.locator('#rooms_v').textContent();
+        const presetRooms=await page.locator('#roomareas .room-entry').count();
         const count=n=>page.waitForFunction(n=>document.querySelectorAll('.bubble-label:not(.draft)').length===n,n);
         const doors=n=>page.waitForFunction(n=>document.querySelectorAll('.connection-row').length===n,n);
         assert.equal(await page.locator('#undo').isDisabled(),true,'nothing to undo at first');
@@ -316,7 +318,7 @@ test('bubble diagram: the undo shortcut and the Undo button step back through ad
         await page.waitForFunction(c=>{const e=document.querySelector('.bubble-label[data-id="2"]');return e&&+e.dataset.x===c[0]&&+e.dataset.y===c[1];},second.center);
         await page.keyboard.press('ControlOrMeta+z');await count(1);
         await page.keyboard.press('ControlOrMeta+z');await count(0);
-        await page.waitForFunction(n=>document.querySelector('#rooms_v').textContent===n,presetRooms);
+        await page.waitForFunction(n=>document.querySelectorAll('#roomareas .room-entry').length===n,presetRooms);
         assert.equal(await page.locator('#undo').isDisabled(),true,'back at the preset rooms with nothing left to undo');
         await page.keyboard.press('ControlOrMeta+Shift+z');await count(1);
         await page.click('#redo');await count(2);
@@ -360,9 +362,10 @@ test('bubble diagram: a click or drag outside the boundary changes nothing, show
         await page.waitForFunction(()=>{const s=document.querySelector('#status').textContent;return s.startsWith('shape_a')&&s.includes('ready');});
         await page.click('.gizmo [data-axis="+z"]');
         const outside=[1100,800],message=page.locator('#bubble-message');
-        const help=await message.textContent(),presetRooms=await page.locator('#rooms_v').textContent();
+        const entries=page.locator('#roomareas .room-entry');
+        const help=await message.textContent(),presetRooms=await entries.count();
         await page.mouse.click(...outside);
-        assert.equal(await page.locator('#rooms_v').textContent(),presetRooms,'an outside click keeps the preset rooms');
+        assert.equal(await entries.count(),presetRooms,'an outside click keeps the preset rooms');
         assert.equal(await message.textContent(),help,'an outside click shows no message');
         assert.equal(await message.evaluate(m=>m.classList.contains('error')),false);
         await drag(page,[600,450],[620,450]);

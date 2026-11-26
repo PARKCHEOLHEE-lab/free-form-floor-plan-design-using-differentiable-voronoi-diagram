@@ -250,7 +250,6 @@
   .room-entry input::placeholder { color:inherit; opacity:1; }
   .room-entry input:is(:hover, :focus) { border-color:var(--ui-border); background:var(--light); }
   .room-entry input:focus-visible { outline:2px solid var(--ui-muted-fg); }
-  #rooms_v { margin-left:auto; }
   .bubble-help.error, #program-status[data-state=error] { color:var(--ui-error); }
   #program-status { font:11px/1.5 var(--font); margin-top:8px; }
   .room-row, .connection-row { width:100%; display:flex; align-items:center; justify-content:space-between; padding:4px 6px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:background .12s, box-shadow .12s; }
@@ -383,7 +382,6 @@
         <p id="boundary-message" class="bubble-help" aria-live="polite" hidden></p>
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
-        <div class="row"><label>Rooms</label><span class="val" id="rooms_v">6</span></div>
         <div class="label row area-head" id="room-area-head"><span>Room name</span><span class="val">Target</span></div>
         <div class="roomareas" id="roomareas"></div>
         <div class="label">Door links</div>
@@ -811,7 +809,6 @@ function refreshRoomReadout() {
   const names=roomNames(input);
   const weights=input?.ratios ?? roomRatios;
   const sum=weights.reduce((a,b)=>a+b,0)||1;
-  $('rooms_v').textContent=String(weights.length);
   $('roomareas').innerHTML=weights.map((v,i)=>{
     const id=input?input.rooms[i].id:i+1;
     const label=roomLabel(id);
