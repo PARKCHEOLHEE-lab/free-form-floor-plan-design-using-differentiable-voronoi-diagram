@@ -68,7 +68,7 @@
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); }
     .label:has(+ #connections:empty) { display: none; }   /* no door links yet: no empty heading */
-    .row .val, .room-entry .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
+    .row .val { width: 3em; flex: none; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ui-fg); font-variant-numeric: tabular-nums; }
 
     /* thin track + outlined thumb */
     input[type=range] {
@@ -237,16 +237,17 @@
   .bubble-handle { position:absolute; width:8px; height:8px; border:1px solid var(--ui-fg); border-radius:50%; background:white; transform:translate(-50%,-50%); }
   .bubble-help { margin:8px 0; color:var(--ui-muted-fg); font:11px/1.5 var(--font); }
   .roomareas .row { justify-content:space-between; }
-  #roomareas { display:grid; gap:4px; }
-  #roomareas .val { width:auto; text-align:center; }
+  #room-area-head .val, #roomareas .val { min-width:var(--tap-size, 0px); text-align:center; }
   .roomareas .raswatch { justify-content:flex-start; gap:4px; color:var(--ui-muted-fg); }   /* a room name is a row label */
-  .room-entry { display:grid; grid-template-columns:var(--tap-size, 28px) minmax(0, 1fr) var(--ui-label-w); align-items:center; gap:4px; }
-  .room-name-heading { grid-column:2; padding-inline:6px; }
-  .room-area-heading { text-align:center; }
+  #room-area-head { margin:14px 0 4px; }
+  #room-area-head .val { font-weight:400; }
+  #roomareas .room-entry { gap:0; }
+  .room-entry :is(.room-swatch, .room-row) { flex:0 0 var(--tap-size, 24px); margin-inline:-6px; } /* align the dot with Area without shrinking its hit area */
   .room-entry .room-swatch { display:grid; place-items:center; }
   .room-entry .room-row { justify-content:center; align-self:stretch; padding:0; }
   .room-entry label.val { display:grid; place-items:center; align-self:stretch; cursor:pointer; }
-  .room-entry input { min-width:0; padding:4px 6px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--ui-fg); font:inherit; }
+  .room-entry input { flex:1; min-width:0; padding:0 2px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--ui-muted-fg); font:inherit; }
+  .room-entry input::placeholder { color:inherit; opacity:1; }
   .room-entry input:is(:hover, :focus) { border-color:var(--ui-border); background:var(--light); }
   .room-entry input:focus-visible { outline:2px solid var(--ui-muted-fg); }
   #rooms_v { margin-left:auto; }
@@ -283,6 +284,7 @@
     .panel :is(button, .toggle, input[type=text], input[type=range]) {
       min-width:var(--tap-size); min-height:var(--tap-size);
     }
+    .room-entry :is(.room-swatch, .room-row) { margin-inline:0; }
     .panel input[type=range] { background:transparent; }
     .panel input[type=range]::-webkit-slider-runnable-track { height:4px; border-radius:3px; background:var(--ui-border); }
     .panel input[type=range]::-webkit-slider-thumb { margin-top:-5px; }
@@ -382,7 +384,7 @@
         <div class="label">Bubble Diagram</div>
         <p id="bubble-message" class="bubble-help" aria-live="polite">Drag on empty space to draw a room. Drag a room to move it, or its round handle to resize it. Hover a room and drag its dot to another room to add a door. Press Delete to remove the selected room or door.</p>
         <div class="row"><label>Rooms</label><span class="val" id="rooms_v">6</span></div>
-        <div class="label room-entry"><span class="room-name-heading">Room name</span><span class="room-area-heading">Target area</span></div>
+        <div class="label row area-head" id="room-area-head"><span>Room name</span><span class="val">Target</span></div>
         <div class="roomareas" id="roomareas"></div>
         <div class="label">Door links</div>
         <div id="connections"></div>
@@ -820,7 +822,7 @@ function refreshRoomReadout() {
       : `<span class="room-swatch" aria-hidden="true">${marker}</span>`;
     const percentage=`${Math.round(v/sum*100)}%`;
     const area=input ? `<label class="val" for="${selectId}">${percentage}</label>` : `<span class="val">${percentage}</span>`;
-    return `<div class="room-entry">${selection}<input type="text" data-name-index="${i}" aria-label="Name for ${label}" placeholder="${label}" autocomplete="off">${area}</div>`;
+    return `<div class="row room-entry">${selection}<input type="text" data-name-index="${i}" aria-label="Name for ${label}" placeholder="${label}" autocomplete="off">${area}</div>`;
   }).join('');
   $('roomareas').querySelectorAll('input').forEach((field, i) => { field.value = names[i] ?? ''; });
   const selected=editor.selectedLink;

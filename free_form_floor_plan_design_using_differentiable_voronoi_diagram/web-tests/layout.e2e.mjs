@@ -518,6 +518,44 @@ test("details: the Rooms list shows one name and a centered target percentage pe
     } finally { proc.kill(); }
 });
 
+test("details: the Rooms list matches the Area readout", { timeout: 60_000 }, async () => {
+    const { url, proc } = await serve();
+    try {
+        await atSize(url, [1145, 820], async (page) => {
+            const metrics = (list, name) => page.$eval(list, (area, nameSelector) => {
+                const row = area.firstElementChild;
+                const textStyle = (element, pseudo) => {
+                    const s = getComputedStyle(element, pseudo);
+                    return [s.fontFamily, s.fontSize, s.fontWeight, s.color];
+                };
+                const label = row.querySelector(nameSelector);
+                const value = row.querySelector(".val:last-child").getBoundingClientRect();
+                return {
+                    name: textStyle(label),
+                    placeholder: textStyle(label, "::placeholder"),
+                    heading: textStyle(area.previousElementSibling.lastElementChild),
+                    areaWidth: value.width,
+                    areaInset: area.getBoundingClientRect().right - value.right,
+                    swatchLeft: row.querySelector(".sw").getBoundingClientRect().left - area.getBoundingClientRect().left,
+                    rowSpacing: row.nextElementSibling.getBoundingClientRect().top - row.getBoundingClientRect().top,
+                };
+            }, name);
+            await page.click("button[data-open=adjust]");
+            await page.locator("#adjust-areas .raswatch").first().waitFor();
+            const reference = await metrics("#adjust-areas", ".raswatch");
+            await page.click("button[data-open=rooms]");
+            const rooms = await metrics("#roomareas", "input");
+            assert.deepEqual(rooms.heading, reference.heading, "Target uses the same style as Adjustment's column headings");
+            assert.deepEqual(rooms.name, reference.name, "custom names look like the existing room labels");
+            assert.deepEqual(rooms.placeholder, reference.name, "default names look like the existing room labels");
+            assert.equal(rooms.areaWidth, reference.areaWidth, "the percentage uses the shared value width");
+            assert.equal(rooms.areaInset, reference.areaInset, "the percentage column sits on the panel's value edge");
+            assert.ok(Math.abs(rooms.swatchLeft - reference.swatchLeft) < 1, "room colors start at the same left edge");
+            assert.ok(Math.abs(rooms.rowSpacing - reference.rowSpacing) <= 3, "room rows follow the compact Area list spacing");
+        });
+    } finally { proc.kill(); }
+});
+
 test("details: the preset row keeps its 12px bottom margin", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
