@@ -128,7 +128,7 @@ test('generated plans keep centers and show only requested doors in raw and alig
         await page.uncheck('#show-doors');
         assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),0);
         assert.notEqual(await page.$eval('#plan',c=>c.toDataURL()),withDoor,'the door is visible geometry, not only a result counter');
-        await page.check('#show-doors');await page.click('button[data-walls=aligned]');
+        await page.check('#show-doors');await page.locator('#show-aligned').check();
         assert.equal(await page.locator('#program-status').getAttribute('data-state'),'complete',await page.locator('#program-status').textContent());
         assert.equal(await page.$eval('#plan',c=>+c.dataset.doors),1,'aligned shared walls preserve the required door');
         await mkdir(new URL('../../.agents/cache/screens/',import.meta.url),{recursive:true});

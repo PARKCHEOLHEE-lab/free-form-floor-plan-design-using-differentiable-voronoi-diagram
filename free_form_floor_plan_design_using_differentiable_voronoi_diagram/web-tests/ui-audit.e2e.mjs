@@ -56,12 +56,12 @@ test('audit: sliders and choices expose their names and selected state', { timeo
     await withPlan('control-names', async page => {
         await panel(page, 'rooms').click();
         assert.equal(await page.getByRole('slider', { name: 'Wall', exact: true }).count(), 1);
-        const wallChoice = name => page.getByRole('button', { name: name + ' walls', exact: true });
-        assert.equal(await wallChoice('Raw').getAttribute('aria-pressed'), 'true');
-        assert.equal(await wallChoice('Aligned').getAttribute('aria-pressed'), 'false');
-        await wallChoice('Aligned').click();
-        assert.equal(await wallChoice('Raw').getAttribute('aria-pressed'), 'false');
-        assert.equal(await wallChoice('Aligned').getAttribute('aria-pressed'), 'true');
+        const wallChoice = page.getByRole('checkbox', { name: 'Aligned walls', exact: true });
+        assert.equal(await wallChoice.isChecked(), false);
+        await wallChoice.check();
+        assert.equal(await wallChoice.isChecked(), true);
+        await wallChoice.uncheck();
+        assert.equal(await wallChoice.isChecked(), false);
 
         const boundary = name => page.getByRole('button', { name: 'Boundary ' + name, exact: true });
         assert.equal(await boundary('E').getAttribute('aria-pressed'), 'true');
@@ -131,6 +131,11 @@ test('audit: a room tag stays readable when a bubble moves onto it', { timeout: 
         assert.ok(Math.hypot(...(await center(label)).map((value, i) => value - tagPoint[i])) < 3);
         assert.equal(await label.isVisible(), false, 'the bubble text cannot cover the room tag');
         assert.equal(await page.locator('.bubble-handle').isVisible(), true, 'the resize handle stays visible');
+        await page.getByRole('checkbox', { name: 'Room tags', exact: true }).uncheck();
+        assert.equal(await tag.count(), 0);
+        assert.equal(await label.isVisible(), true, 'hiding the tag brings back the bubble text');
+        await page.getByRole('checkbox', { name: 'Room tags', exact: true }).check();
+        assert.equal(await label.isVisible(), false, 'showing the tag again keeps the label area clear');
         await drag(page, await center(label), start);
         await ready(page);
         assert.equal(await label.isVisible(), true, 'the bubble text returns when it moves clear');

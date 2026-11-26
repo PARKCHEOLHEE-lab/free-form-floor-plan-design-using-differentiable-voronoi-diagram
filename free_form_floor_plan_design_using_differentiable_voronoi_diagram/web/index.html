@@ -63,7 +63,7 @@
     .panel-head { margin-bottom: 12px; }
     .panel-head > .label { grid-column: 1 / 5; margin: 0; }
     .view-row { margin-bottom: 12px; }   /* as .boundary-row */
-    .panel :is(.panel-head, .view-row) .seg { display: contents; }
+    .panel .panel-head .seg { display: contents; }
 
     .row { display: flex; align-items: center; gap: .7em; margin: .5em 0; }
     .row > label { width: var(--ui-label-w); flex: none; color: var(--ui-muted-fg); }
@@ -331,8 +331,8 @@
         <symbol id="b-shape_c" viewBox="0 0 24 24"><polygon points="3.00,18.82 7.83,18.82 7.83,15.37 12.42,15.37 12.42,18.82 18.67,18.82 18.67,12.31 21.00,12.31 21.00,5.18 3.00,5.18"/></symbol>
         <symbol id="b-shape_d" viewBox="0 0 24 24"><polygon points="6.94,4.12 3.00,14.81 5.81,19.88 14.25,19.88 14.25,14.81 21.00,14.81 21.00,5.81 9.75,5.81 9.75,4.12"/></symbol>
         <symbol id="b-shape_e" viewBox="0 0 24 24"><polygon points="20.69,11.69 16.97,3.00 3.31,3.00 3.31,13.55 7.03,21.00 13.24,21.00 13.24,14.79 20.69,14.79"/></symbol>
-        <symbol id="i-walls-raw" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3 10.5 7.5 13 12 11 16.5 12 21"/><path d="M3 12.5 7.5 11 13 12"/></symbol>
         <symbol id="i-walls-aligned" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h9"/></symbol>
+        <symbol id="i-room-tag" viewBox="0 0 24 24"><path d="M5 5h14M8 19h8"/><rect x="6" y="9" width="12" height="6" rx="1"/></symbol>
         <symbol id="i-door" viewBox="0 0 24 24"><path d="M2 20h5"/><path d="M19 20h3"/><path d="M7 20V8"/><path d="M7 8a12 12 0 0 1 12 12"/></symbol>
         <symbol id="i-voronoi" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M11 3 11.5 11 21 10"/><path d="M3 12.5 12.5 13 13 21"/><path d="M11.5 11 12.5 13"/></symbol>
         <symbol id="i-sites" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><circle cx="7" cy="7.5" r=".6"/><circle cx="16.5" cy="6.5" r=".6"/><circle cx="7.5" cy="17" r=".6"/><circle cx="17" cy="16.5" r=".6"/></symbol>
@@ -382,14 +382,12 @@
         <div id="program-status" role="status"></div>
         <div class="label">View</div>
         <div class="view-row">
-          <div class="seg" id="walls">
-            <button data-walls="raw" class="active" aria-label="Raw walls" aria-pressed="true"><svg class="ic"><use href="#i-walls-raw"/></svg></button>
-            <button data-walls="aligned" aria-label="Aligned walls" aria-pressed="false"><svg class="ic"><use href="#i-walls-aligned"/></svg></button>
-          </div>
+          <label class="toggle"><input type="checkbox" id="show-aligned" aria-label="Aligned walls"><svg class="ic"><use href="#i-walls-aligned"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-cells" aria-label="Voronoi cells" checked><svg class="ic"><use href="#i-voronoi"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-sites" aria-label="Voronoi sites" checked><svg class="ic"><use href="#i-sites"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-doors" aria-label="Doors" checked><svg class="ic"><use href="#i-door"/></svg></label>
           <label class="toggle"><input type="checkbox" id="show-bubbles" aria-label="Bubble Diagram" checked><svg class="ic"><use href="#i-bubbles"/></svg></label>
+          <label class="toggle"><input type="checkbox" id="show-room-tags" aria-label="Room tags" checked><svg class="ic"><use href="#i-room-tag"/></svg></label>
         </div>
         <div class="display-rows">
           <div class="row"><label for="wall">Wall</label><input id="wall" type="range" min="0" max="0.025" step="0.001" value="0.02"><span class="val" id="wall_v">0.020</span></div>
@@ -466,7 +464,8 @@ import { evaluatePlan } from './plan/openings.js';
 const SIMPLIFY_TOL = 0.004;  // the kink tolerance web/src/lib.rs uses for room outlines
 const pointMergeInput = $('merge_tol');
 const wallSnapInput = $('align_tol');
-let wallsMode = 'raw';
+const alignedWallsInput = $('show-aligned');
+const roomTagsInput = $('show-room-tags');
 // Wall edits from the Adjustment panel live on a copy of the aligned plan (alignFrame rebuilds the
 // plan from the optimizer frame on every draw). null while there are no edits.
 let adjusted = null;
@@ -488,19 +487,9 @@ function alignFrame(f) {
     snapTol: wallSnapInput.valueAsNumber / 100 * cell,
   };
   alignPlan(g, boundaryRing, tolerances);
-  if (wallsMode === 'raw') alignPlan(raw, boundaryRing, tolerances);
+  if (!alignedWallsInput.checked) alignPlan(raw, boundaryRing, tolerances);
   return { raw, aligned: g, before, after: alignedShare(g, boundaryRing) };
 }
-$('walls').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  [...$('walls').children].forEach(button => {
-    const active = button === b;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-  wallsMode = b.dataset.walls;
-  if (lastFrame) drawFrame(lastFrame);
-});
 // Each weighted loss contribution has its own y-scale.
 const LOSS_TERMS = ['total', 'wall', 'cosine', 'area', 'lloyd', 'topo'];
 // Each row's value tag (vt_<term>) shows while the mouse is on that row (sp_<term>).
@@ -685,7 +674,7 @@ const wallEditor = createWallEditor($('plan'), view, {
   overlay: $('wall-sketch'),
   plan: () => adjusted ?? lastAligned,
   boundary: () => boundaryRing,
-  canEdit: () => wallsMode === 'aligned' && !running,   // the plan changes under the pointer while it runs
+  canEdit: () => alignedWallsInput.checked && !running,   // the plan changes under the pointer while it runs
   onChange(graph, commit) {
     adjusted = graph;
     $('plan').toggleAttribute('data-wall-edits', true);
@@ -745,9 +734,12 @@ document.addEventListener('keydown', e => {
   if (sliderKey || roomKey) askFirst(e);
 }, true);
 $('show-bubbles').addEventListener('change',()=>editor.setVisible($('show-bubbles').checked));
-$('show-doors').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
-$('show-cells').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
-$('show-sites').addEventListener('change',()=>{if(lastFrame)drawFrame(lastFrame);});
+function redrawFrame() {
+  if (lastFrame) drawFrame(lastFrame);
+}
+for (const id of ['show-aligned', 'show-room-tags', 'show-doors', 'show-cells', 'show-sites']) {
+  $(id).addEventListener('change', redrawFrame);
+}
 
 // ---------- inputs ----------
 const SLIDERS = ['sites','wall','merge_tol','align_tol','w_wall','w_cosine','w_area','w_lloyd','w_topo','iters','lr','seed'];
@@ -950,7 +942,9 @@ document.querySelector('.toolbar [data-export]').addEventListener('click', () =>
       weights: { l1: +$('w_wall').value, cos: +$('w_cosine').value, area: +$('w_area').value, lloyd: +$('w_lloyd').value, topo: +$('w_topo').value },
       iterations: +$('iters').value, lr: +$('lr').value, seed: +$('seed').value | 0,
       wallWidth, pointMerge: +pointMergeInput.value, wallSnap: +wallSnapInput.value,
-      walls: wallsMode, voronoi: { cells: $('show-cells').checked, sites: $('show-sites').checked }, doors: $('show-doors').checked, bubbles: $('show-bubbles').checked,
+      walls: alignedWallsInput.checked ? 'aligned' : 'raw',
+      voronoi: { cells: $('show-cells').checked, sites: $('show-sites').checked },
+      doors: $('show-doors').checked, bubbles: $('show-bubbles').checked, roomTags: roomTagsInput.checked,
     },
     frame: lastFrame, finished: runFinished, plan, edited: !!adjusted, now,
   });
@@ -1112,7 +1106,7 @@ function drawFrame(f) {
   const al = boundaryRing ? alignFrame(f) : null;
   lastAligned = al?.aligned ?? null;
   const aligned = adjusted ?? lastAligned;
-  const shown = wallsMode === 'aligned' ? aligned : al?.raw;
+  const shown = alignedWallsInput.checked ? aligned : al?.raw;
   const alignedShares = aligned ? roomShares(aligned) : [];
   if (aligned) refreshAdjustAreas(alignedShares, color, input);
   let doors=[];
@@ -1138,7 +1132,7 @@ function drawFrame(f) {
       return {
         rings: roomRings(shown, r),
         color: color(r),
-        tag: { id, name: names[r] ?? roomLabel(id), share: shareText(shownShares[r]) },
+        tag: roomTagsInput.checked ? { id, name: names[r] ?? roomLabel(id), share: shareText(shownShares[r]) } : undefined,
       };
     })
     : f.cells.map(cell => ({ rings: [cell.ring], color: color(cell.room) }));
@@ -1262,8 +1256,12 @@ function showPanel(name) {
   // The playhead measures the graph, which has no size while its panel is closed.
   if (openPanel === 'optimize' && lastFrame) movePlayhead(lastFrame.iteration);
   editor.setEnabled(openPanel === 'rooms');
+  // Walls are edited on the Aligned plan.
+  if (openPanel === 'adjust' && !alignedWallsInput.checked) {
+    alignedWallsInput.checked = true;
+    redrawFrame();
+  }
   wallEditor.setEnabled(openPanel === 'adjust');
-  if (openPanel === 'adjust' && wallsMode !== 'aligned') $('walls').querySelector('[data-walls=aligned]').click(); // walls are edited on the Aligned plan
   $('bubble-editing').hidden = openPanel !== 'rooms' && openPanel !== 'adjust';
   $('bubble-editing').querySelector('[role=status]').textContent = openPanel === 'adjust' ? 'Editing Walls' : 'Editing Bubble Diagram';
   setButtons();

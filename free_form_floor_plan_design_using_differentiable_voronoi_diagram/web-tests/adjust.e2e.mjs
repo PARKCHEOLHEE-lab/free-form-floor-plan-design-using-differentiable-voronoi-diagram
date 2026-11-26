@@ -39,7 +39,7 @@ test("adjustment: dragging a wall moves it, updates the room areas beside it, sh
         assert.deepEqual(await page.$$eval(".toolbar .tool", (ts) => ts.map((t) => t.getAttribute("aria-label"))), ["Rooms", "Optimization", "Adjustment", "Export JSON"]);
         await page.click("button[data-open=adjust]");
         assert.equal(await page.locator(".panel[data-panel=adjust] .label").first().textContent(), "Adjustment");
-        assert.equal(await page.locator("[data-walls=aligned].active").count(), 1, "opening Adjustment shows the Aligned walls");
+        assert.equal(await page.locator("#show-aligned").isChecked(), true, "opening Adjustment shows the Aligned walls");
         assert.equal(await page.locator("#bubble-editing").isVisible(), true, "the editing bar shows");
         assert.equal(await page.locator("#bubble-editing [role=status]").textContent(), "Editing Walls");
 
@@ -100,8 +100,11 @@ test("adjustment: with wall edits, a control that rebuilds the walls asks first;
 
         // display controls and the wall width never rebuild the walls, so they never ask
         await page.click("button[data-open=rooms]");
-        await page.click("[data-walls=raw]");
-        await page.click("[data-walls=aligned]");
+        await page.locator("#show-aligned").uncheck();
+        await page.locator("#show-aligned").check();
+        await page.locator("#show-room-tags").uncheck();
+        assert.equal(await page.locator(".room-tag").count(), 0);
+        await page.locator("#show-room-tags").check();
         await page.click(".toggle:has(#show-doors)");
         await page.locator("#wall").focus();
         await page.keyboard.press("ArrowLeft");

@@ -185,7 +185,7 @@ test('room tags show the current area and follow the displayed walls and camera'
         const fromIso = await screenPoints();
         await page.locator('.gizmo [data-axis="+z"]').click();
         assert.notDeepEqual(await screenPoints(), fromIso, 'the tags move with the camera');
-        await page.getByRole('button', { name: 'Aligned walls' }).click();
+        await page.getByRole('checkbox', { name: 'Aligned walls' }).check();
         const alignedShares = await shares();
         assert.deepEqual(alignedShares, await adjustmentShares());
         assert.notDeepEqual(alignedShares, rawShares, 'preset B shows different shares in the two wall modes at these settings');
@@ -204,5 +204,58 @@ test('room tags show the current area and follow the displayed walls and camera'
         assert.deepEqual(editedShares, await adjustmentShares());
         assert.notDeepEqual(editedShares, alignedShares, 'the wall edit updates current areas');
         assert.equal(await tags.first().locator('.room-tag-name').textContent(), name);
+    });
+});
+
+test('the Room tags switch hides and restores the tags without rebuilding', { timeout: 60_000 }, async () => {
+    await withPlan('room-tags-switch', async page => {
+        await page.getByRole('button', { name: 'Rooms', exact: true }).click();
+        const tags = page.getByRole('checkbox', { name: 'Room tags', exact: true });
+        const aligned = page.getByRole('checkbox', { name: 'Aligned walls', exact: true });
+        assert.equal(await tags.count(), 1);
+        assert.equal(await tags.isChecked(), true);
+        assert.equal(await aligned.count(), 1);
+        assert.equal(await aligned.isChecked(), false, 'off displays Raw walls');
+        assert.equal(await page.getByRole('button', { name: 'Raw walls', exact: true }).count(), 0);
+
+        // Preset B at these tolerances draws differently in the two views.
+        await page.getByRole('button', { name: 'Boundary B' }).click();
+        await ready(page);
+        await page.getByRole('slider', { name: 'Point merge' }).press('Home');
+        await page.locator('#align_tol').evaluate(el => {
+            el.value = '30';
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await roomName(page, 1).fill('Study');
+        await roomName(page, 1).press('Enter');
+        const labels = page.locator('#room-tags .room-tag');
+        assert.equal(await labels.count(), 7);
+        const raw = await downloadPlan(page);
+        assert.equal(raw.settings.walls, 'raw');
+        assert.equal(raw.settings.roomTags, true);
+        const builds = await page.evaluate(() => window.buildCount);
+        const rawDrawing = await pixels(page);
+        await tags.focus();
+        await page.keyboard.press('Space');
+        assert.equal(await labels.count(), 0);
+        assert.equal(await pixels(page), rawDrawing, 'hiding the tags affects only the overlay');
+
+        const hidden = await downloadPlan(page);
+        assert.equal(hidden.settings.roomTags, false);
+        assert.equal(hidden.plan.rooms[0].name, 'Study');
+        assert.deepEqual(hidden.plan, raw.plan);
+        await aligned.check();
+        assert.equal((await downloadPlan(page)).settings.walls, 'aligned');
+        assert.ok(await pixels(page) !== rawDrawing, 'checking the switch displays the Aligned walls');
+        assert.equal(await labels.count(), 0, 'the tag switch stays off when switching walls');
+        await tags.check();
+        assert.equal(await labels.count(), 7);
+        const first = labels.first();
+        assert.equal(await first.locator('.room-tag-name').textContent(), 'Study');
+        assert.equal(await first.locator('.room-tag-number').textContent(), '001');
+        assert.match(await first.locator('.room-tag-share').textContent(), /^\d+\.\d%$/);
+        await aligned.uncheck();
+        assert.equal(await pixels(page), rawDrawing);
+        assert.equal(await page.evaluate(() => window.buildCount), builds);
     });
 });

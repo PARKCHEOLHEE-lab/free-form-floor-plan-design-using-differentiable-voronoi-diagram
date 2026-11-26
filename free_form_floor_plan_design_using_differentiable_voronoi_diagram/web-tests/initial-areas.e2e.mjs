@@ -76,7 +76,7 @@ test('five drawn rooms keep one region each in raw and aligned initial views',{t
         const total=ringArea(capture.boundary);
         areas.forEach((a,r)=>assert.ok(Math.abs(a/total-input[r].ratio)<=0.05,`room ${r+1} keeps its target area`));
         assert.equal((await page.locator('#program-status').textContent()).trim(),'Ready to run.');
-        await page.click('button[data-open=rooms]');await page.click('button[data-walls=aligned]');await page.click('button[data-open=rooms]');
+        await page.click('button[data-open=rooms]');await page.locator('#show-aligned').check();await page.click('button[data-open=rooms]');
         assert.equal((await page.locator('#program-status').textContent()).trim(),'Ready to run.','alignment preserves one connected region per room');
         assert.deepEqual(await camera(page),pose);
         await page.screenshot({path:fileURLToPath(new URL('five-room-connectivity-aligned.png',dir))});

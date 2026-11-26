@@ -24,7 +24,7 @@ test("preset E run to the end: Aligned walls show a higher aligned-wall share th
 
         // the wall switch sits in the Rooms title row
         await page.locator("button[data-open=rooms]").click();
-        await page.locator("#walls button[data-walls=aligned]").click();
+        await page.locator("#show-aligned").check();
         const text = await page.$eval("#plan", (c) => c.dataset.alignedShare);
         if (SHOTS) await page.screenshot({ path: `${SHOTS}/aligned.png` });
 
@@ -64,7 +64,7 @@ test("point and wall sliders redraw independently without restarting the plan", 
         await page.goto(url);
         await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
         await page.locator("button[data-open=rooms]").click();
-        await page.locator("#walls button[data-walls=aligned]").click();
+        await page.locator("#show-aligned").check();
         const merge = page.getByRole("slider", { name: "Point merge" });
         const snap = page.getByRole("slider", { name: "Wall snap" });
         assert.equal(await merge.count(), 1, "Display has a point merge control");
@@ -132,8 +132,7 @@ test("Raw walls respond to both shared tolerances without rebuilding", { timeout
         await page.goto(url);
         await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
         await page.locator("button[data-open=rooms]").click();
-        const raw = page.getByRole("button", { name: "Raw walls" });
-        const aligned = page.getByRole("button", { name: "Aligned walls" });
+        const aligned = page.getByRole("checkbox", { name: "Aligned walls" });
         const merge = page.getByRole("slider", { name: "Point merge" });
         const snap = page.getByRole("slider", { name: "Wall snap" });
         const pixels = () => page.locator("#plan").evaluate(canvas => canvas.toDataURL());
@@ -143,7 +142,7 @@ test("Raw walls respond to both shared tolerances without rebuilding", { timeout
         }, value);
         const builds = await page.evaluate(() => window.buildCount);
         assert.ok(builds > 0, "the initial optimizer build was observed");
-        assert.equal(await raw.evaluate(button => button.classList.contains("active")), true);
+        assert.equal(await aligned.isChecked(), false);
         assert.deepEqual([await merge.inputValue(), await snap.inputValue()], ["13", "13"]);
 
         const original = await pixels();
@@ -155,9 +154,9 @@ test("Raw walls respond to both shared tolerances without rebuilding", { timeout
         const snapped = await pixels();
         assert.notEqual(snapped, original, "Wall snap changes the Raw walls");
 
-        await aligned.click();
+        await aligned.check();
         assert.deepEqual([await merge.inputValue(), await snap.inputValue()], ["13", "30"]);
-        await raw.click();
+        await aligned.uncheck();
         assert.deepEqual([await merge.inputValue(), await snap.inputValue()], ["13", "30"]);
         assert.equal(await pixels(), snapped, "returning to Raw shows the same snapped walls");
         assert.equal(await page.evaluate(() => window.buildCount), builds, "the optimizer was not rebuilt");
@@ -215,7 +214,7 @@ async function onAligned(fn) {
         await page.goto(url);
         await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"));
         await page.locator("button[data-open=rooms]").click();
-        await page.locator("#walls button[data-walls=aligned]").click();
+        await page.locator("#show-aligned").check();
         const slide = (id, value) => page.locator(`#${id}`).evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }, value);
         const exported = async () => {
             const [file] = await Promise.all([page.waitForEvent("download"), page.click(".toolbar [data-export]")]);

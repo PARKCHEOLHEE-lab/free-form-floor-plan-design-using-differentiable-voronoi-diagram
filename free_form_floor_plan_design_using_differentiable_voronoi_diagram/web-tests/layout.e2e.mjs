@@ -625,19 +625,20 @@ test("polish: disabled buttons get no hover fill, and rows fade their hover like
     } finally { proc.kill(); }
 });
 
-test("walls: Raw and Aligned are plan icons that switch the walls", { timeout: 60_000 }, async () => {
+test("walls: a single Aligned walls icon switches between Aligned and Raw", { timeout: 60_000 }, async () => {
     const { url, proc } = await serve();
     try {
         await atSize(url, [1145, 820], async (page) => {
             await page.click("button[data-open=rooms]");
-            for (const [mode, name] of [["raw", "Raw walls"], ["aligned", "Aligned walls"]]) {
-                const button = page.locator(`#walls [data-walls=${mode}]`);
-                assert.equal((await button.textContent()).trim(), "", `${name} shows an icon, not text`);
-                assert.equal(await button.getAttribute("aria-label"), name);
-                assert.equal(await button.locator("svg use").getAttribute("href"), `#i-walls-${mode}`);
-            }
-            await page.click("[data-walls=aligned]");
-            assert.equal(await page.locator("[data-walls=aligned].active").count(), 1, "Aligned still switches the walls");
+            const cell = page.locator(".toggle:has(#show-aligned)");
+            const aligned = page.getByRole("checkbox", { name: "Aligned walls", exact: true });
+            assert.equal((await cell.textContent()).trim(), "");
+            assert.equal(await cell.locator("svg use").getAttribute("href"), "#i-walls-aligned");
+            assert.equal(await aligned.isChecked(), false);
+            await cell.click();
+            assert.equal(await aligned.isChecked(), true);
+            await cell.click();
+            assert.equal(await aligned.isChecked(), false);
         });
     } finally { proc.kill(); }
 });
@@ -659,7 +660,8 @@ test("tooltips: icon names in panels show centered under the icon and are never 
                 assert.ok(t.x >= 0 && t.x + t.width <= 1145, `${name} is inside the window`);
             };
             await page.click("button[data-open=rooms]");
-            await check("[data-walls=aligned]", "Aligned walls");
+            await check(".toggle:has(#show-aligned)", "Aligned walls");
+            await check(".toggle:has(#show-room-tags)", "Room tags");
             await check("#boundary-draw", "Draw boundary");
             await check("[data-mode=shape_a]", "Boundary A");
             await page.mouse.move(700, 700);
@@ -734,13 +736,13 @@ test("rooms: View is the last section of Rooms and holds the display controls", 
             await page.click("button[data-open=rooms]");
             const order = await page.$eval(".panel[data-panel=rooms]", (p) => {
                 const display = [...p.querySelectorAll(".label")].at(-1);
-                return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-cells", "show-sites", "show-doors", "show-bubbles"].map((id) => {
+                return { last: display.textContent, after: ["wall", "merge_tol", "align_tol", "show-aligned", "show-cells", "show-sites", "show-doors", "show-bubbles", "show-room-tags"].map((id) => {
                     const el = document.getElementById(id);
                     return !!el && p.contains(el) && !!(display.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
                 }) };
             });
             assert.equal(order.last, "View", "View is the last section of Rooms");
-            assert.deepEqual(order.after, [true, true, true, true, true, true, true], "the display controls sit under it");
+            assert.deepEqual(order.after, Array(9).fill(true), "the display controls sit under it");
         });
     } finally { proc.kill(); }
 });
@@ -813,7 +815,7 @@ test("view: the View heading sits above six icon cells lined up with the Boundar
             const title = await panel.locator(".label", { hasText: /^View$/ }).boundingBox(), rowBox = await row.boundingBox();
             assert.ok(title && rowBox && title.y + title.height <= rowBox.y, "View is a heading on its own line, above its cells");
             const boundary = ["shape_a", "shape_b", "shape_c", "shape_d", "shape_e"].map((m) => `[data-mode=${m}]`).concat("#boundary-draw");
-            const cells = ["[data-walls=raw]", "[data-walls=aligned]", ".toggle:has(#show-cells)", ".toggle:has(#show-sites)", ".toggle:has(#show-doors)", ".toggle:has(#show-bubbles)"];
+            const cells = ["show-aligned", "show-cells", "show-sites", "show-doors", "show-bubbles", "show-room-tags"].map(id => `.toggle:has(#${id})`);
             for (const [i, sel] of cells.entries()) {
                 const box = await row.locator(sel).boundingBox(), under = await page.locator(boundary[i]).boundingBox();
                 assert.ok(box, `${sel} sits in the View row`);
@@ -822,7 +824,7 @@ test("view: the View heading sits above six icon cells lined up with the Boundar
                 assert.ok(Math.abs(box.y - rowBox.y) < 1, `${sel} is in the one row`);
             }
             assert.equal(await page.locator("input[type=checkbox]:visible").evaluateAll((cs) => cs.filter((c) => +getComputedStyle(c).opacity > 0).length), 0, "no checkbox box shows");
-            for (const [id, name] of [["show-cells", "Voronoi cells"], ["show-sites", "Voronoi sites"], ["show-doors", "Doors"], ["show-bubbles", "Bubble Diagram"]]) {
+            for (const [id, name] of [["show-cells", "Voronoi cells"], ["show-sites", "Voronoi sites"], ["show-doors", "Doors"], ["show-bubbles", "Bubble Diagram"], ["show-room-tags", "Room tags"]]) {
                 const toggle = row.locator(`.toggle:has(#${id})`);
                 const on = await toggle.evaluate((t) => getComputedStyle(t).borderColor);
                 await toggle.click();
@@ -835,7 +837,9 @@ test("view: the View heading sits above six icon cells lined up with the Boundar
                 await toggle.click();
                 assert.equal(await page.$eval(`#${id}`, (c) => c.checked), true, `clicking ${name} again turns it on`);
             }
-            assert.equal(await page.$eval(".toggle:has(#show-doors)", (t) => getComputedStyle(t).borderColor), await page.$eval("[data-walls=raw]", (b) => getComputedStyle(b).borderColor), "an on toggle looks like the selected wall view");
+            await page.locator("#show-aligned").check();
+            await page.waitForTimeout(200);
+            assert.equal(await page.$eval(".toggle:has(#show-doors)", (t) => getComputedStyle(t).borderColor), await page.$eval(".toggle:has(#show-aligned)", (b) => getComputedStyle(b).borderColor), "the wall switch uses the same selected style");
         });
     } finally { proc.kill(); }
 });
@@ -870,7 +874,7 @@ test("view: the cells toggle and the sites toggle each switch their own layer wi
             const shot = async () => { await page.waitForTimeout(150); return page.$eval("#plan", (c) => c.toDataURL()); };
             const set = async (id, on) => { if (await page.$eval(`#${id}`, (c) => c.checked) !== on) await page.click(`.toggle:has(#${id})`); };
             for (const mode of ["raw", "aligned"]) {
-                await page.click(`[data-walls=${mode}]`);
+                await page.locator("#show-aligned").setChecked(mode === "aligned");
                 const pics = new Map();
                 for (const [cells, sites] of [[true, true], [false, true], [true, false], [false, false]]) {
                     await set("show-cells", cells);
